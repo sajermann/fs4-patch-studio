@@ -1,0 +1,34 @@
+{
+  "versao": 1,
+  "ligas": [
+    {"id": 10, "nome": "Brasileirão", "nome_curto": "Brasileirão", "nome_interno": "Brazil Brasileirao (1)", "ordem": 6, "pais": 54}
+  ],
+  "times": [
+    {
+      "nome": "Palmeiras",
+      "nome_curto": "Palmeiras",
+      "nome_10": "Palmeiras",
+      "nome_7": "Palmeir",
+      "sigla": "PAL",
+      "slot": 1932,
+      "liga": 10,
+      "escudo": "escudo_palmeiras.png",
+      "cor_principal": [0, 100, 50],
+      "cor_secundaria": [245, 245, 245],
+      "molde": 112298,
+      "capitao": 0,
+      "jogadores": [
+        {"nome": "Rafael", "sobrenome": "Silva"},
+        {"nome": "Lucas", "sobrenome": "Souza"},
+        {"nome": "Gabriel", "sobrenome": "Oliveira"},
+        {"nome": "Mateus", "sobrenome": "Pereira"},
+        {"nome": "Thiago", "sobrenome": "Costa"},
+        {"nome": "Bruno", "sobrenome": "Rodrigues"},
+        {"nome": "Diego", "sobrenome": "Almeida"},
+        {"nome": "Felipe", "sobrenome": "Nascimento"},
+        {"nome": "Gustavo", "sobrenome": "Lima"},
+        {"nome": "Vinícius", "sobrenome": "Araújo"}
+      ]
+    }
+  ]
+}

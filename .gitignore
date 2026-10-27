@@ -1,0 +1,37 @@
+# Original game files and generated patch: each user provides / generates their own
+/backend/original_files/
+/backend/patch/
+
+# Local user configuration (paths on this PC) and caches
+/backend/config.json
+/backend/originals_fingerprints.json
+/backend/cache/
+
+# The user's project (app data: database.json, images, faces)
+/backend/project/
+
+# Anything extracted from the game
+*.big
+*.bh
+*.bin
+*.db
+*.db.bak
+*.dds
+*.rx3
+*.xex
+*.dll
+*.exe
+*.pdb
+*.zip
+
+# The LZX decoder the app runs (source in core/lzx/)
+!/core/fsmod/bin/lzxdec.exe
+
+# Tooling
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+dist/
+.vite/
