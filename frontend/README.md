@@ -13,12 +13,12 @@ React + Vite + TypeScript + Tailwind + shadcn/ui. Code is English; the UI is tra
   (sidebar footer and the setup screen).
 
 - `npm run dev` — dev server on http://localhost:5173 (proxies `/api` to the backend on port 8765, which must be running:
-  `python -m fsapi --no-browser` in `app/backend`).
-- `npm run build` — builds `dist/`, served by the backend at `/` (`app\start.bat` builds it on first run).
+  `python -m fsapi --no-browser` in `backend`).
+- `npm run build` — builds `dist/`, served by the backend at `/` (`start.bat` builds it on first run).
 
 Structure: `src/api` (types mirroring contract v2 + fetch client), `src/state` (project draft, live validation,
 React Query hooks), `src/components/layout` (shell, save / build patch / install), `src/components/common`
 (form helpers), `src/pages` (Ligas, Times, Jogadores, Configuração).
 
 The project is edited as a draft in memory: "Salvar" (Ctrl+S) writes `database.json`; "Gerar patch" saves and builds
-`app/backend/patch`; validation runs on the backend (`POST /api/project/validate`) while editing.
+`backend/patch`; validation runs on the backend (`POST /api/project/validate`) while editing.

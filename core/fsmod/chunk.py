@@ -3,7 +3,7 @@
 Layout: 'chunkXXX' | u32 2 | u32 total size | u32 chunk size | u32 chunk count | 4 x u32 | chunks, each one
 at an offset = 8 mod 16: u32 zsize, u32 flag (3 = LZX, 1 = raw deflate, 4 = stored), data.
 LZX = XMemCompress framing ('FF uuuu cccc' or 'cccc' blocks), window 2^17, decoded by bin/lzxdec.exe
-(libmspack lzxd.c, LGPL 2.1; source and build command in app/core/lzx/).
+(libmspack lzxd.c, LGPL 2.1; source and build command in core/lzx/).
 """
 import os
 import struct

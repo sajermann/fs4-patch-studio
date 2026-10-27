@@ -1,4 +1,4 @@
-"""FastAPI app of the modding tool. Run: python -m fsapi (from app/backend) or start.bat."""
+"""FastAPI app of the modding tool. Run: python -m fsapi (from backend) or start.bat."""
 import datetime
 import io
 import os
@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from . import settings  # noqa: F401  (puts app/core on sys.path)
+from . import settings  # noqa: F401  (puts core on sys.path)
 from .messages import issue_json
 from . import ea_players, game_setup
 from .dialogs import browse_folder, open_file, save_file

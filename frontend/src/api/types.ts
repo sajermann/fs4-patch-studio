@@ -1,4 +1,4 @@
-// Mirrors app/core/fsmod/model.py (contract v2) and the backend responses.
+// Mirrors core/fsmod/model.py (contract v2) and the backend responses.
 
 export type RGB = [number, number, number]
 export type KitKind = 'home' | 'away'

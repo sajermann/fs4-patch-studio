@@ -6,7 +6,7 @@ export const en: Record<MessageKey, string> = {
   'app.subtitle': 'FIFA Street mod editor',
   'app.credits': 'Made by',
   'app.sourceCode': 'Source code',
-  'app.serverDown': 'Could not reach the editor server. Is it running? (app\\start.bat)',
+  'app.serverDown': 'Could not reach the editor server. Is it running? (start.bat)',
   'common.loading': 'Loading…',
   'nav.leagues': 'Leagues',
   'nav.teams': 'Teams',

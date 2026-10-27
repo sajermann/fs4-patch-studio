@@ -1,4 +1,4 @@
-"""Paths and the local user configuration (app/backend/config.json, not in git)."""
+"""Paths and the local user configuration (backend/config.json, not in git)."""
 import json
 import os
 import sys

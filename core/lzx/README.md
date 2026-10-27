@@ -1,6 +1,6 @@
 # lzxdec
 
-Source of `app/core/fsmod/bin/lzxdec.exe`, the LZX decoder `fsmod.chunk` runs to read `chunklzx` entries of the
+Source of `core/fsmod/bin/lzxdec.exe`, the LZX decoder `fsmod.chunk` runs to read `chunklzx` entries of the
 game's `.big` archives.
 
 - `lzxd.c`, `lzx.h`, `mspack.h`, `system.c`, `system.h`, `readbits.h`, `readhuff.h`, `macros.h`: unchanged files of

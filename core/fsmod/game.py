@@ -1,7 +1,7 @@
 """Read-only access to the original game files the builder needs.
 
 The app never reads the game installation directly: the user copies these files from the game's
-Game folder (ReStreet 2.x layout) into app/backend/original_files/Game (same relative paths), see
+Game folder (ReStreet 2.x layout) into backend/original_files/Game (same relative paths), see
 REQUIRED_FILES. The database and its meta XML are extracted from data0.big.
 """
 import os
@@ -145,13 +145,13 @@ class GameSources:
 
 
 def default_original_files():
-    """app/backend/original_files (overridable with FSMOD_ORIGINAL_FILES)."""
+    """backend/original_files (overridable with FSMOD_ORIGINAL_FILES)."""
     app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     return os.environ.get('FSMOD_ORIGINAL_FILES', os.path.join(app_dir, 'backend', 'original_files'))
 
 
 def default_patch_dir():
-    """app/backend/patch (overridable with FSMOD_PATCH_DIR)."""
+    """backend/patch (overridable with FSMOD_PATCH_DIR)."""
     app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     return os.environ.get('FSMOD_PATCH_DIR', os.path.join(app_dir, 'backend', 'patch'))
 

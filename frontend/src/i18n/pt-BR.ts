@@ -4,7 +4,7 @@ export const ptBR = {
   'app.subtitle': 'Editor de mods do FIFA Street',
   'app.credits': 'Criado por',
   'app.sourceCode': 'Código-fonte',
-  'app.serverDown': 'Não foi possível falar com o servidor do editor. Ele está rodando? (app\\start.bat)',
+  'app.serverDown': 'Não foi possível falar com o servidor do editor. Ele está rodando? (start.bat)',
   'common.loading': 'Carregando…',
   'nav.leagues': 'Ligas',
   'nav.teams': 'Times',

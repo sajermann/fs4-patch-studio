@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI server (`fsapi/`) over the core library (`app/core/fsmod`). Start it with `app\start.bat`
+FastAPI server (`fsapi/`) over the core library (`core/fsmod`). Start it with `start.bat`
 (installs the requirements if needed and opens http://localhost:8765), or `python -m fsapi` from this
 folder. API docs: http://localhost:8765/docs. Tests: `python -m pytest -q`.
 
@@ -58,7 +58,7 @@ file comes from or goes to: `Game/` here = `Game/` in the game (ReStreet 1.x cal
 ## original_files/ (not in git — provide your own)
 
 The app never touches the game installation. Copy these files from your game's `Game` folder (ReStreet
-2.x) into `app/backend/original_files/Game/`, keeping the same relative paths:
+2.x) into `backend/original_files/Game/`, keeping the same relative paths:
 
 ```
 original_files/

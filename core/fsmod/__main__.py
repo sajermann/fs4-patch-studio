@@ -1,4 +1,4 @@
-"""Command line: python -m fsmod build <project.json> [out_dir]   (default out_dir: app/backend/patch)
+"""Command line: python -m fsmod build <project.json> [out_dir]   (default out_dir: backend/patch)
 
 Accepts contract v1 projects. Slots chosen during the build are written back
 into the JSON so they stay stable.

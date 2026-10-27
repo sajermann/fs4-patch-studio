@@ -3,7 +3,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-// Dev server proxies the API to the FastAPI backend (app/backend, port 8765; FSMOD_API_PORT for a second backend,
+// Dev server proxies the API to the FastAPI backend (backend, port 8765; FSMOD_API_PORT for a second backend,
 // e.g. a sandbox with temporary folders while the real one runs).
 const apiPort = process.env.FSMOD_API_PORT ?? '8765'
 
