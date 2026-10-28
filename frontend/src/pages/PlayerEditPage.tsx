@@ -1,8 +1,8 @@
 import { AlertTriangle, Copy, DatabaseZap, Dices, Eraser, LoaderCircle, Trash2, User } from 'lucide-react'
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { photoPreviewUrl, scannedFaceQuery, type FaceSource } from '@/api/client'
-import type { Player } from '@/api/types'
+import { HAIR_MODES, HAIR_THICKNESS, THICK_HAIR_MODES, type HairMode, type Player } from '@/api/types'
 import { BaseDataDialog } from '@/components/common/BaseDataDialog'
 import { FacePicker, type BrowsedFace } from '@/components/common/FacePicker'
 import { EntityIssues, Field, NumberInput, Stepper } from '@/components/common/form'
@@ -303,6 +303,45 @@ function SkillsTab({ player }: { player: Player }) {
   )
 }
 
+const HAIR_MODE_LABELS: Record<HairMode, MessageKey> = {
+  standard: 'playerEdit.hairModeStandard',
+  volume: 'playerEdit.hairModeVolume',
+  split: 'playerEdit.hairModeSplit',
+  split_sharp: 'playerEdit.hairModeSplitSharp',
+  split_sharp_thick: 'playerEdit.hairModeSplitSharpThick',
+}
+const HAIR_MODE_HINTS: Record<HairMode, MessageKey> = {
+  standard: 'playerEdit.hairModeStandardHint',
+  volume: 'playerEdit.hairModeVolumeHint',
+  split: 'playerEdit.hairModeSplitHint',
+  split_sharp: 'playerEdit.hairModeSplitSharpHint',
+  split_sharp_thick: 'playerEdit.hairModeSplitSharpThickHint',
+}
+
+/** Strand thickness of the thick hair converter; saved on release only (each value converts the face again). */
+function HairThickness({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
+  const { t } = useI18n()
+  const [shown, setShown] = useState(value)
+  useEffect(() => setShown(value), [value])
+  return (
+    <div className="mt-3 grid gap-1.5 text-sm">
+      <Label>{t('playerEdit.hairThickness')}</Label>
+      <div className="flex items-center gap-3">
+        <Slider
+          min={0}
+          max={HAIR_THICKNESS.max}
+          step={HAIR_THICKNESS.step}
+          value={[shown]}
+          onValueChange={([v]) => setShown(v)}
+          onValueCommit={([v]) => onCommit(Math.round(v * 10) / 10)}
+        />
+        <span className="w-8 shrink-0 text-right tabular-nums">{shown.toFixed(1)}</span>
+      </div>
+      <span className="text-xs text-muted-foreground">{t('playerEdit.hairThicknessHint')}</span>
+    </div>
+  )
+}
+
 function AppearanceTab({ player }: { player: Player }) {
   const { t } = useI18n()
   const { draft, updatePlayer } = useProject()
@@ -320,7 +359,12 @@ function AppearanceTab({ player }: { player: Player }) {
       ? { player: player.uid, face: player.face.source_id }
       : null
   const paintScalp = player.face?.paint_scalp ?? true
-  const scanned = faceSource ? { query: scannedFaceQuery(faceSource, hairColorCode, paintScalp) } : null
+  const hairMode = player.face?.hair_mode ?? 'standard'
+  const thickHair = THICK_HAIR_MODES.includes(hairMode)
+  const hairThickness = player.face?.hair_thickness ?? HAIR_THICKNESS.default
+  const scanned = faceSource
+    ? { query: scannedFaceQuery(faceSource, hairColorCode, paintScalp, hairMode, thickHair ? hairThickness : undefined) }
+    : null
   // Team Home kit of the player's team (the goalkeeper kit for a goalkeeper; neutral grey for free agents)
   const team = player.team ? draft.teams.find((tm) => tm.uid === player.team) : undefined
   const kit = teamPreviewKit(team, (player.position ?? defaults?.position) === GOALKEEPER_POSITION ? 'goalkeeper' : 'home')
@@ -388,6 +432,33 @@ function AppearanceTab({ player }: { player: Player }) {
                   <span className="block text-xs text-muted-foreground">{t('playerEdit.paintScalpHint')}</span>
                 </span>
               </label>
+            )}
+            {player.face && (
+              <div className="mt-3 grid gap-1.5 text-sm">
+                <Label>{t('playerEdit.hairMode')}</Label>
+                <Select
+                  value={hairMode}
+                  onValueChange={(v) => player.face && updatePlayer(player.uid, { face: { ...player.face, hair_mode: v as HairMode } })}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {HAIR_MODES.map((mode) => (
+                      <SelectItem key={mode} value={mode}>
+                        {t(HAIR_MODE_LABELS[mode])}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="text-xs text-muted-foreground">{t(HAIR_MODE_HINTS[hairMode])}</span>
+              </div>
+            )}
+            {player.face && thickHair && (
+              <HairThickness
+                value={hairThickness}
+                onCommit={(v) => player.face && updatePlayer(player.uid, { face: { ...player.face, hair_thickness: v } })}
+              />
             )}
           </CardContent>
         )}

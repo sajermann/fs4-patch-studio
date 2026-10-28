@@ -83,6 +83,8 @@ class ScannedFace(BaseModel):
     pack: Optional[str] = None  # pack folder it came from, for reference only
     paint_scalp: bool = True  # paint the hair color on the scalp (scanface.paint_scalp); off for faces whose texture
     # already brings the hair painted and whose cap hangs over the forehead (Yamal: dark streaks)
+    hair_mode: str = 'standard'  # hair converter, a key of scanface.HAIR_MODES (chosen by eye in the preview)
+    hair_thickness: float = 0.4  # strand thickness of the 'thick' hair modes (scanface.HAIR_THICKNESS)
 
 
 class Player(Entity):

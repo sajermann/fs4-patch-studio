@@ -469,14 +469,16 @@ def create_app(state=None):
 
     @app.get('/api/preview/scanned/{asset}')
     def scanned_preview(asset: str, face: int, haircolor: int = 0, paint: bool = True, folder: str | None = None,
-                        player: str | None = None):
-        """Converted real face (what the build writes), from a pack (folder) or from the project (player uid)."""
-        if asset not in SCANNED_ASSETS or not (folder or player):
+                        player: str | None = None, hair: str = 'standard',
+                        thick: float = Query(scanface.HAIR_THICKNESS, ge=0, le=scanface.HAIR_THICKNESS_MAX)):
+        """Converted real face (what the build writes), from a pack (folder) or from the project (player uid);
+        hair = hair converter (scanface.HAIR_MODES), thick = its strand thickness."""
+        if asset not in SCANNED_ASSETS or not (folder or player) or hair not in scanface.HAIR_MODES:
             raise HTTPException(404)
         state.catalog()  # 409 when original files are missing (the template lives there)
         key, files = faces_call(state.faces.source_files, folder, face, state.store.folder, player)
         try:
-            c = state.faces.converted(key, files, haircolor, paint)
+            c = state.faces.converted(key, files, haircolor, paint, hair, thick)
         except ValueError as e:
             raise HTTPException(422, {'code': 'face_conversion_failed', 'message': f'Não deu para converter esta face: {e}'})
         hair_parts = {'hair.glb': 'hair', 'hairlod.glb': 'hairlod'}

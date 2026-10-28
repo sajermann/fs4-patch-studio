@@ -190,9 +190,11 @@ export const faceThumbUrl = (source: FaceSource) => `/api/facepack/thumb.png?${f
 
 
 /** Query of the converted face's preview files (/api/preview/scanned/<file>). */
-export const scannedFaceQuery = (source: FaceSource, haircolorcode: number, paintScalp = true) => {
+export const scannedFaceQuery = (source: FaceSource, haircolorcode: number, paintScalp = true, hairMode = 'standard', hairThickness?: number) => {
   const qs = faceQuery(source)
   qs.set('haircolor', String(haircolorcode))
   if (!paintScalp) qs.set('paint', 'false')
+  if (hairMode !== 'standard') qs.set('hair', hairMode)
+  if (hairThickness !== undefined) qs.set('thick', String(hairThickness))
   return qs.toString()
 }

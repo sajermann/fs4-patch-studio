@@ -347,7 +347,8 @@ def _face_files(pl, pid, hair_color_code, game, assets_dir, templates):
         templates.update(scanface.template_files(game))
     try:
         converted = scanface.convert(templates, files, pid, preview.hair_color(hair_color_code),
-                                     paint=pl.face.paint_scalp)
+                                     paint=pl.face.paint_scalp, hair_mode=pl.face.hair_mode,
+                                     hair_thickness=pl.face.hair_thickness)
     except (ValueError, KeyError) as e:
         raise BuildError(f'{pl.shown_name}: face {pl.face.source_id}: {e}', pl.uid) from e
     return {scanface.ASSETS + name: chunk.chunkzip(data) for name, data in converted.items()}

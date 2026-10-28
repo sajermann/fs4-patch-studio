@@ -23,12 +23,12 @@ import os
 import shutil
 import struct
 
-from PIL import Image, ImageFilter
+from PIL import Image, ImageChops, ImageFilter
 
 from . import chunk, rx3mesh, rx3tex
 
 HEADER, DECL, NAMES, INDICES, VERTICES, BONES = 0x22B2BE36, 0xC28193F0, 0x4C9B9EB2, 0x005878F4, 0x00587AA1, 0xDF9AEC1E
-TEXTURE = 0x7A0B60DA
+TEXTURE, TEXTURE_HEADERS = 0x7A0B60DA, 0x6BD085DC
 ASSETS = 'data/sceneassets/'
 TEMPLATE = 158023  # Messi: skeleton, bone palette and materials of every converted face
 # Hair cap pulled towards the scalp (cap_to_scalp; validated in game):
@@ -36,6 +36,23 @@ TEMPLATE = 158023  # Messi: skeleton, bone palette and materials of every conver
 # (short/bald hair looked "lifted" near the ears and the nape). Always on. To go back: CAP_GAP = None.
 CAP_GAP = 0.2  # cm: highest distance of a cap vertex above the scalp
 CAP_SMOOTH = 3  # passes of neighbor averaging of the pull (keeps the cap smooth)
+# Hair converters (ScannedFace.hair_mode), picked per face in the editor while watching the preview: packs build hair
+# in different ways, e.g. a cap + strands pair, or the whole hair as one "cap" mesh of curl cards textured with a
+# 2048-wide curl atlas, and no single conversion suits all of them. Each mode is a list of steps (see convert);
+# 'standard' is the conversion validated in game and stays the default.
+HAIR_MODES = {
+    'standard': ('pull',),
+    'volume': (),  # the pack's hair shape as it is (no pull: curls and quiffs keep their height)
+    'split': ('split', 'dense', 'pull'),
+    'split_sharp': ('split', 'dense', 'sharp', 'pull'),  # bigger textures: loaded fine in game (Hugo Souza, 28/10)
+    'split_sharp_thick': ('split', 'dense', 'sharp', 'thick', 'pull'),
+}
+SPLIT_REACH = 1.0  # cm: cap triangles with a vertex farther than this above the scalp become strands ('split')
+SHARP_MAX = 2048  # px: largest side of the hair textures kept by 'sharp' (the template's are 256 and 512)
+THICK_GAMMA = 0.6  # exponent of the opacities in 'thick' (< 1: soft strand edges get more opaque)
+# 'thick' as the editor shows it (ScannedFace.hair_thickness): exponent = 1 - thickness, so 0 = as in the pack
+HAIR_THICKNESS = round(1 - THICK_GAMMA, 2)
+HAIR_THICKNESS_MAX = 0.9
 # kind -> file name (format with the id), relative to screenassets/ (pack) or data/sceneassets/ (game)
 FILES = {'head': 'heads/head_{}_0.rx3', 'face': 'faces/face_{}_0_0_0_0_0_0_0_0_textures.rx3',
          'eyes': 'heads/eyes_{}_0_textures.rx3', 'hair': 'hair/hair_{}_0_0.rx3',
@@ -674,12 +691,9 @@ def paint_scalp(face, head, hair, hair_tex, color, res=256, reach=3.0):
     return face
 
 
-def cap_to_scalp(hair, head, gap=CAP_GAP, smooth=CAP_SMOOTH):
-    """Moves the cap (alphaA) vertices of a converted hair (RX3b, changed in place) along the scalp normal so none is
-    more than `gap` cm above the head's skin; the strands (alphaB) are not touched. The pull of each vertex (to the
-    nearest head vertex) is averaged with its neighbors `smooth` times. Validated in game with face 71654 (24/10)."""
-    k = hair_parts(hair)['cap']
-    cap = rx3mesh.meshes(hair)[k]
+def scalp(head):
+    """Function q -> (height of q above the head's skin along the normal of the nearest head vertex, that normal), or
+    None when no head vertex lies within ~4 cm (head: converted RX3b)."""
     head_mesh = [m for m in rx3mesh.meshes(head) if 'eyes' not in m['name']][0]
     pos = [p[:3] for p in head_mesh['attrs']['p0']]
     nrm = [tuple(c / (math.sqrt(n[0] ** 2 + n[1] ** 2 + n[2] ** 2) or 1) for c in n[:3]) for n in head_mesh['attrs']['n0']]
@@ -687,7 +701,7 @@ def cap_to_scalp(hair, head, gap=CAP_GAP, smooth=CAP_SMOOTH):
     for i, p in enumerate(pos):
         grid.setdefault(tuple(int(c // 2) for c in p), []).append(i)
 
-    def nearest(q):
+    def height(q):
         cx, cy, cz = (int(c // 2) for c in q)
         best = None
         for dx in (-2, -1, 0, 1, 2):
@@ -697,17 +711,28 @@ def cap_to_scalp(hair, head, gap=CAP_GAP, smooth=CAP_SMOOTH):
                         d = (q[0] - pos[i][0]) ** 2 + (q[1] - pos[i][1]) ** 2 + (q[2] - pos[i][2]) ** 2
                         if best is None or d < best[0]:
                             best = (d, i)
-        return None if best is None else best[1]
+        if best is None:
+            return None
+        i = best[1]
+        return sum((q[j] - pos[i][j]) * nrm[i][j] for j in range(3)), nrm[i]
+    return height
 
+
+def cap_to_scalp(hair, head, gap=CAP_GAP, smooth=CAP_SMOOTH):
+    """Moves the cap (alphaA) vertices of a converted hair (RX3b, changed in place) along the scalp normal so none is
+    more than `gap` cm above the head's skin; the strands (alphaB) are not touched. The pull of each vertex (to the
+    nearest head vertex) is averaged with its neighbors `smooth` times. Validated in game with face 71654 (24/10)."""
+    k = hair_parts(hair)['cap']
+    cap = rx3mesh.meshes(hair)[k]
+    height = scalp(head)
     pts = [p[:3] for p in cap['attrs']['p0']]
     pull = []
     for q in pts:
-        i = nearest(q)
-        if i is None:
+        hit = height(q)
+        if hit is None:
             pull.append((0.0, 0.0, 0.0))
             continue
-        n = nrm[i]
-        d = sum((q[j] - pos[i][j]) * n[j] for j in range(3))
+        d, n = hit
         pull.append(tuple(-(d - gap) * n[j] for j in range(3)) if d > gap else (0.0, 0.0, 0.0))
     neighbors = [set() for _ in pts]
     idx = cap['indices']
@@ -728,6 +753,128 @@ def cap_to_scalp(hair, head, gap=CAP_GAP, smooth=CAP_SMOOTH):
         x, y, z = struct.unpack_from(fmt, hair, at)
         struct.pack_into(fmt, hair, at, x + pull[i][0], y + pull[i][1], z + pull[i][2])
     return hair
+
+
+def _buffers(d, k):
+    """(vertex records, indices) of mesh k of an RX3b."""
+    o, _ = of_type(d, '>', VERTICES)[k]
+    _, count, stride, _ = struct.unpack('>IIII', d[o:o + 16])
+    verts = [bytes(d[o + 16 + i * stride:o + 16 + (i + 1) * stride]) for i in range(count)]
+    o, _ = of_type(d, '>', INDICES)[k]
+    n = struct.unpack('>I', d[o + 4:o + 8])[0]
+    return verts, list(struct.unpack_from(f'>{n}H', d, o + 16))
+
+
+def _with_buffers(d, meshes):
+    """New RX3b from d with the vertex records and indices of some meshes replaced ({mesh: (verts, indices)})."""
+    secs = sections(d, '>')
+    idx_of = {t: [i for i, s in enumerate(secs) if s[0] == t] for t in (HEADER, VERTICES, INDICES)}
+    header = bytearray(d[secs[idx_of[HEADER][0]][1]:][:secs[idx_of[HEADER][0]][2]])
+    replace = {}
+    for k, (verts, indices) in meshes.items():
+        if len(verts) > 0xFFFF:
+            raise ValueError('hair mesh with more than 65535 vertices')
+        vb = b''.join(verts)
+        replace[idx_of[VERTICES][k]] = struct.pack('>IIII', 16 + len(vb), len(verts), len(verts[0]), 0) + vb
+        ib = struct.pack(f'>{len(indices)}H', *indices)
+        to = secs[idx_of[INDICES][k]][1]
+        replace[idx_of[INDICES][k]] = struct.pack('>II', 16 + len(ib), len(indices)) + d[to + 8:to + 16] + ib
+        struct.pack_into('>II', header, 16 + 16 * k, 16 + len(ib), len(indices))
+    replace[idx_of[HEADER][0]] = bytes(header)
+    return rebuild(d, replace)
+
+
+def split_cap(hair, head, keep_strands, reach=SPLIT_REACH):
+    """New hair RX3b whose cap (alphaA) keeps only the triangles lying on the scalp (every vertex at most `reach` cm
+    above the skin); the others go to the strands slot (alphaB), after the pack's own strands when keep_strands.
+
+    Some packs model the whole hair as a single "cap" mesh of curl cards (Hugo Souza 276570, ~5% of the faces). As a
+    cap it is drawn one-sided, its opacity comes from hair_coeff R (half grey on those atlases) and the pull flattens
+    its curls onto the skin; as strands the cards are seen from both sides, use hair_coeff B and keep their volume."""
+    parts = hair_parts(hair)
+    height = scalp(head)
+    cap_verts, cap_idx = _buffers(hair, parts['cap'])
+    up = []
+    for p in rx3mesh.meshes(hair)[parts['cap']]['attrs']['p0']:
+        hit = height(p[:3])
+        up.append(math.inf if hit is None else hit[0])
+    keep, move = [], []
+    for t in range(0, len(cap_idx) - 2, 3):
+        tri = cap_idx[t:t + 3]
+        (move if max(up[i] for i in tri) > reach else keep).append(tri)
+    if not keep or not move:
+        return hair
+
+    def gather(verts, indices, tris):
+        remap = {}
+        for tri in tris:
+            for i in tri:
+                if i not in remap:
+                    remap[i] = len(verts)
+                    verts.append(cap_verts[i])
+                indices.append(remap[i])
+        return verts, indices
+    strands = _buffers(hair, parts['strands']) if keep_strands else ([], [])
+    return _with_buffers(hair, {parts['cap']: gather([], [], keep), parts['strands']: gather(*strands, move)})
+
+
+def _texture_section(d, t):
+    return [i for i, s in enumerate(sections(d, '>')) if s[0] == TEXTURE and s[1] == t['off']][0]
+
+
+def resize_texture(d, t, w, h):
+    """New RX3b with texture t (rx3tex.textures entry, DXT) reallocated at w x h with a full mip chain (zeroed; fill
+    it with rx3tex.set_image). The texture header list (section 0x6BD085DC) gets the new header too."""
+    block = 8 if t['fmt'] == 0 else 16
+    mips = max(w, h).bit_length()
+    body = b''
+    for m in range(mips):
+        pitch, rows = max(1, ((w >> m) + 3) // 4) * block, max(1, ((h >> m) + 3) // 4)
+        body += struct.pack('>IIII', pitch, rows, pitch * rows, 0) + bytes(pitch * rows)
+    body += bytes(-len(body) % 16)  # section sizes are multiples of 16
+    head = struct.pack('>IBBBBHHHH', 16 + len(body), 1, t['fmt'], 3, 0, w, h, 1, mips)
+    replace = {_texture_section(d, t): head + body}
+    secs = sections(d, '>')
+    for i, (type_, o, s, _) in enumerate(secs):
+        if type_ == TEXTURE_HEADERS:
+            n = [x for x in rx3tex.textures(d)].index(t)
+            replace[i] = d[o:o + 16 + 16 * n] + head + d[o + 32 + 16 * n:o + s]
+    return rebuild(d, replace)
+
+
+def sharp_textures(tex, src_tex, limit=SHARP_MAX):
+    """New hair textures RX3b with hair_coeff and hair_cm at the pack's resolution (largest side at most `limit`)
+    instead of the template's 256/512: curl atlases 2048 px wide squeezed into 256 turn the curls into a blur."""
+    for name in ('hair_coeff', 'hair_cm'):
+        t, s = rx3tex.by_name(tex, name), rx3tex.by_name(src_tex, name)
+        scale = min(1.0, limit / max(s['w'], s['h']))
+        w, h = int(s['w'] * scale), int(s['h'] * scale)
+        if w * h <= t['w'] * t['h']:
+            continue
+        image = rx3tex.to_image(src_tex, s).convert('RGBA')
+        tex = resize_texture(tex, t, w, h)
+        rx3tex.set_image(tex, rx3tex.by_name(tex, name), image)
+    return tex
+
+
+def dense_coeff(tex):
+    """hair_coeff R (cap opacity) raised to B (strands opacity), texel by texel (tex changed in place). Single-mesh
+    hair keeps its full opacity in B and only a half grey in R."""
+    t = rx3tex.by_name(tex, 'hair_coeff')
+    r, g, b, a = rx3tex.to_image(tex, t).convert('RGBA').split()
+    rx3tex.set_image(tex, t, Image.merge('RGBA', (ImageChops.lighter(r, b), g, b, a)))
+    return tex
+
+
+def thick_coeff(tex, gamma=THICK_GAMMA):
+    """hair_coeff R and B (opacities) raised to the power `gamma` < 1 (tex changed in place): the soft edges of each
+    strand get more opaque, so the sharp curl atlas looks as full as the blurred one, zero stays zero. In game the
+    sharp texture kept the back of the hair but its curls looked thinner than with the template's 256 px (28/10)."""
+    t = rx3tex.by_name(tex, 'hair_coeff')
+    r, g, b, a = rx3tex.to_image(tex, t).convert('RGBA').split()
+    curve = [round(255 * (v / 255) ** gamma) for v in range(256)]
+    rx3tex.set_image(tex, t, Image.merge('RGBA', (r.point(curve), g, b.point(curve), a)))
+    return tex
 
 
 def align_offset(template_head, src_head):
@@ -751,16 +898,24 @@ def template_files(sources, template=TEMPLATE):
     return out
 
 
-def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True):
+def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_mode='standard',
+            hair_thickness=HAIR_THICKNESS):
     """FIFA Street files {asset name relative to data/sceneassets: RX3b bytes} of a FIFA 14 face.
 
     tpl: template_files(); src: {kind: RX3l bytes} of the pack (REQUIRED kinds, optional hair/hair_textures/
     hairlod); new_id: playerassetid of the result (same number of digits as the template's); hair_color: '#rrggbb'
     painted on the scalp (preview.hair_color(haircolorcode)); paint=False skips that (ScannedFace.paint_scalp). Eyes: the template's eyeball (FIFA Street slides it
-    to move the gaze; some packs bring a photo of the eye with lids, which turned into "eyes rolled back")."""
+    to move the gaze; some packs bring a photo of the eye with lids, which turned into "eyes rolled back").
+    hair_mode: key of HAIR_MODES (ScannedFace.hair_mode); hair_thickness: 0..HAIR_THICKNESS_MAX, used by the 'thick'
+    step (ScannedFace.hair_thickness)."""
     missing = [k for k in REQUIRED if not src.get(k)]
     if missing:
         raise ValueError(f'missing face files: {", ".join(missing)}')
+    if hair_mode not in HAIR_MODES:
+        raise ValueError(f'unknown hair mode: {hair_mode}')
+    steps = HAIR_MODES[hair_mode]
+    if not 0 <= hair_thickness <= HAIR_THICKNESS_MAX:
+        raise ValueError(f'hair thickness out of range: {hair_thickness}')
     old, new = str(template), str(new_id)
     name = {kind: f.format(new) for kind, f in FILES.items()}
     offset = align_offset(tpl['head'], src['head'])
@@ -785,6 +940,10 @@ def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True):
         files[name['hair']] = convert_mesh(tpl['hair'], hair, slot_of, old, new, offset=offset, empty=empty)
         files[name['hair_textures']] = convert_textures(tpl['hair_textures'], src['hair_textures'],
                                                         [(0, 0), (1, 1)], old, new)
+        if 'sharp' in steps:
+            files[name['hair_textures']] = sharp_textures(files[name['hair_textures']], src['hair_textures'])
+        if 'dense' in steps and 'strands' not in src_parts:
+            dense_coeff(files[name['hair_textures']])
     if src.get('hairlod'):  # low-detail cap used in normal play (far camera); lives in data7
         # some packs mark "no far hair" with a 1 cm placeholder quad inside the head (215421): never stretched
         lod = positions(src['hairlod'], '<', 0)
@@ -795,6 +954,11 @@ def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True):
     if hair and paint:
         paint_scalp(files[name['face']], files[name['head']], files[name['hair']], files[name['hair_textures']],
                     hair_color)
-    if hair and CAP_GAP is not None:  # after the paint, like the game test (the paint looks for the original cap)
+    if hair and 'thick' in steps:  # after the paint: thicker strands must not spread the scalp paint
+        thick_coeff(files[name['hair_textures']], 1 - hair_thickness)
+    if hair and 'split' in steps:
+        files[name['hair']] = split_cap(files[name['hair']], files[name['head']], 'strands' in src_parts)
+    if hair and 'pull' in steps and CAP_GAP is not None:
+        # after the paint, like the game test (the paint looks for the original cap)
         cap_to_scalp(files[name['hair']], files[name['head']])
     return {k: bytes(v) for k, v in files.items()}

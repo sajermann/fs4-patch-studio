@@ -97,18 +97,21 @@ class FaceService:
             raise FaceError('face_not_found', f'Face {face_id} não encontrada.', 404)
         return (base, face_id, _stamp(base, face_id)), files
 
-    def converted(self, key, files, haircolorcode, paint=True):
+    def converted(self, key, files, haircolorcode, paint=True, hair_mode='standard',
+                  hair_thickness=scanface.HAIR_THICKNESS):
         """{kind: RX3b bytes} of the face converted like the build will (hair color painted on the scalp unless
-        paint is False)."""
+        paint is False; hair_mode: scanface.HAIR_MODES; hair_thickness: its 'thick' step)."""
         def make():
             with self._lock:
                 if self._template is None:
                     self._template = scanface.template_files(self.game)
             out = scanface.convert(self._template, files, scanface.TEMPLATE, preview.hair_color(haircolorcode),
-                                  paint=paint)
+                                  paint=paint, hair_mode=hair_mode, hair_thickness=hair_thickness)
             return {kind: out[f.format(scanface.TEMPLATE)] for kind, f in scanface.FILES.items()
                     if f.format(scanface.TEMPLATE) in out}
-        return self._converted.get((key, haircolorcode, paint), make)
+        if 'thick' not in scanface.HAIR_MODES[hair_mode]:
+            hair_thickness = scanface.HAIR_THICKNESS  # no effect: one cache entry
+        return self._converted.get((key, haircolorcode, paint, hair_mode, hair_thickness), make)
 
 
 def _stamp(base, face_id):

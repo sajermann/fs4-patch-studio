@@ -110,7 +110,16 @@ export interface ScannedFace {
   source_id: number
   pack?: string
   paint_scalp?: boolean // hair color painted on the scalp by the converter (default true)
+  hair_mode?: HairMode // hair converter (default 'standard')
+  hair_thickness?: number // strand thickness of the 'split_sharp_thick' converter (0..0.9, default 0.4)
 }
+
+/** Hair converters of fsmod.scanface.HAIR_MODES, in the order shown in the editor. */
+export const HAIR_MODES = ['standard', 'volume', 'split', 'split_sharp', 'split_sharp_thick'] as const
+export type HairMode = (typeof HAIR_MODES)[number]
+/** Hair converters with a strand thickness (scanface 'thick' step) and its range. */
+export const THICK_HAIR_MODES: readonly HairMode[] = ['split_sharp_thick']
+export const HAIR_THICKNESS = { default: 0.4, max: 0.9, step: 0.1 }
 
 export interface FacePackFace {
   id: number
