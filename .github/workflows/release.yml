@@ -1,0 +1,71 @@
+# Desktop app build. A tag v* (e.g. v0.1.0) creates a draft GitHub release with the installer and the portable zip;
+# running it by hand (Actions > Release > Run workflow) only uploads them as a workflow artifact.
+# The tests run first; the ones that need the original game files skip themselves (they are never in the repository).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # tag v<version> = release; v<version>-<anything> (e.g. v0.2.0-dev) = test build, published as a pre-release
+      - name: Tag matches the app version
+        id: tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $version = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $tag = '${{ github.ref_name }}'
+          if ($tag -ne "v$version" -and -not $tag.StartsWith("v$version-")) {
+            throw "Tag $tag does not match the version in tauri.conf.json ($version): use v$version or v$version-<suffix>"
+          }
+          $prerelease = ($tag -ne "v$version").ToString().ToLower()
+          "prerelease=$prerelease" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Tests (core and backend)
+        run: |
+          python -m pip install -r backend/requirements.txt
+          cd core
+          python -m pytest -q
+          cd ../backend
+          python -m pytest -q
+
+      - name: Build (interface, backend, installer, portable zip)
+        run: |
+          python -m pip install -r backend/requirements-build.txt
+          ./desktop/build.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fs4-patch-studio
+          path: desktop/release/*
+
+      - name: Draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: ${{ steps.tag.outputs.prerelease == 'true' }}
+          files: desktop/release/*

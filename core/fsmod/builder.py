@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from . import big, chunk, crest, dbcrc, kit, leaguelogo, locale, model, photo, preview, scanface, t3db
+from . import big, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, photo, preview, scanface, t3db
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
 HIDDEN_LEAGUES = {382, 76, 2092, 2095, 2097}  # ids the league selector never shows
@@ -668,6 +668,10 @@ def build(project, game, assets_dir, log=None, progress=None):
                 raise BuildError(f'{os.path.basename(file)} {entry}: {e}') from e
             entries[os.path.basename(file), entry] = new_locale
     step('texts', len(entries), len(entries))
+    try:
+        entries.update(gamepatches.entries(game, project.game_patches))
+    except gamepatches.GamePatchError as e:
+        raise BuildError(str(e)) from e
     say(f'database {len(out)} bytes; {len(texts)} texts; {len(entries)} replaced entries')
     result.database = out
     result.entries = entries
@@ -683,7 +687,8 @@ def write_patch(result, game, out_dir, progress=None):
       Game/data8.big, Game/data8.bh            database (the game reads d:\\data8.big over data0)
       Game/<path of every PATCH_TARGETS file>   whole archive: the original with the new entries, or the plain
                                                 original when the project changes nothing in it
-                                                (data1.big, data3.big, data7.big, data/loc/locale*.big, .../2dheads.big)
+                                                (data0.big, data1.big, data3.big, data7.big, data/loc/locale*.big,
+                                                .../2dheads.big; data0 only changes with fsmod.gamepatches)
       Game/<its .bh>                            always, for the archives that have one (dataN.bh, 2dheads.bh)
       Game/<internal name>                      loose files (result.loose): the game opens d:/<name> from disk
                                                 when no archive has it (validated with a country flag, 20/10)

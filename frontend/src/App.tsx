@@ -8,6 +8,7 @@ import { I18nProvider, useI18n } from '@/i18n'
 import { ThemeProvider } from '@/lib/theme'
 import { LeagueEditPage } from '@/pages/LeagueEditPage'
 import { LeaguesPage } from '@/pages/LeaguesPage'
+import { PatchesPage } from '@/pages/PatchesPage'
 import { PlayerEditPage } from '@/pages/PlayerEditPage'
 import { PlayersPage } from '@/pages/PlayersPage'
 import { SettingsPage } from '@/pages/SettingsPage'
@@ -46,6 +47,7 @@ function Gate() {
           <Route path="players" element={<PlayersPage />} />
           <Route path="players/:uid" element={<PlayerEditPage />} />
           <Route path="stadiums" element={<StadiumsPage />} />
+          <Route path="patches" element={<PatchesPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/teams" replace />} />
         </Route>

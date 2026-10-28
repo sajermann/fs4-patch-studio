@@ -1,5 +1,5 @@
-import { AlertTriangle, Landmark, Loader2, Settings, Shield, Trophy, Users } from 'lucide-react'
-import { APP_NAME, AUTHOR_GITHUB, AUTHOR_NAME, REPO_URL } from '@/lib/about'
+import { AlertTriangle, Landmark, Loader2, Puzzle, Settings, Shield, Trophy, Users } from 'lucide-react'
+import { APP_NAME, APP_VERSION, AUTHOR_GITHUB, AUTHOR_NAME, REPO_URL } from '@/lib/about'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useI18n, type MessageKey } from '@/i18n'
 import { cn } from '@/lib/utils'
@@ -13,6 +13,7 @@ const NAV: { to: string; label: MessageKey; icon: typeof Trophy }[] = [
   { to: '/teams', label: 'nav.teams', icon: Shield },
   { to: '/players', label: 'nav.players', icon: Users },
   { to: '/stadiums', label: 'nav.stadiums', icon: Landmark },
+  { to: '/patches', label: 'nav.patches', icon: Puzzle },
 ]
 
 function NavItem({ to, label, icon: Icon }: { to: string; label: MessageKey; icon: typeof Trophy }) {
@@ -72,6 +73,7 @@ export function AppShell() {
     '/teams': draft.teams.length,
     '/players': draft.players.length,
     '/stadiums': stadiums?.length ?? 0,
+    '/patches': Object.values(draft.game_patches ?? {}).filter(Boolean).length,
   }
   return (
     // screen height: the menu stays put and only the page area scrolls (list pages scroll inside their table)
@@ -96,16 +98,22 @@ export function AppShell() {
           <div className="px-1">
             <PreferencesMenu />
           </div>
-          <p className="px-3 pt-2 text-xs text-muted-foreground">
-            {t('app.credits')}{' '}
-            <a href={AUTHOR_GITHUB} target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-foreground hover:underline">
-              {AUTHOR_NAME}
-            </a>
-            {' · '}
-            <a href={REPO_URL} target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-foreground hover:underline">
-              {t('app.sourceCode')}
-            </a>
-          </p>
+          <div className="space-y-0.5 px-3 pt-2 text-xs text-muted-foreground">
+            <p>
+              {t('app.credits')}{' '}
+              <a href={AUTHOR_GITHUB} target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-foreground hover:underline">
+                {AUTHOR_NAME}
+              </a>
+            </p>
+            <p>
+              {t('app.version')} {APP_VERSION}
+            </p>
+            <p>
+              <a href={REPO_URL} target="_blank" rel="noreferrer" className="underline-offset-2 hover:text-foreground hover:underline">
+                {t('app.sourceCode')}
+              </a>
+            </p>
+          </div>
         </div>
       </aside>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">

@@ -473,15 +473,19 @@ export default function PlayerPreview({
   outfit,
   face,
   initialView = 'face',
+  closeUpOnly = false,
 }: {
   appearance: PreviewAppearance
   outfit: PreviewOutfit
   face?: PreviewScannedFace | null
   initialView?: View
+  /** the game always draws the close-up head (game patch close_up_heads): no near/far choice */
+  closeUpOnly?: boolean
 }) {
   const { t } = useI18n()
   const [view, setView] = useState<View>(initialView)
-  const [distance, setDistance] = useState<Distance>('near')
+  const [chosenDistance, setDistance] = useState<Distance>('near')
+  const distance: Distance = closeUpOnly ? 'near' : chosenDistance
   const [goal, setGoal] = useState<CameraGoal | null>(null)
   const scale = appearance.height / MODEL_HEIGHT_CM
   const [initialScale] = useState(scale)
@@ -520,7 +524,7 @@ export default function PlayerPreview({
           <LoaderCircle className="size-3.5 animate-spin" /> {t('common.loading')}
         </div>
       )}
-      {face && (
+      {face && !closeUpOnly && (
         <div className="absolute top-2 left-2 flex rounded-md border bg-background/80 p-0.5 text-xs backdrop-blur">
           {(['near', 'far'] as const).map((d) => (
             <button

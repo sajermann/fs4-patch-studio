@@ -1,0 +1,8 @@
+# Packaged backend for the desktop app (desktop/build.ps1): runtime dependencies + PyInstaller, no test tools
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9
+pillow>=11
+numpy>=2.1
+pydantic>=2.7
+pyinstaller>=6.16

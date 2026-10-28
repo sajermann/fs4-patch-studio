@@ -23,7 +23,7 @@ META_ENTRY = 'data/db/fifa_street_db-meta.xml'
 # data0: database; data1: menu crests and kit thumbnails; data3: kits (verified for all 379 team slots) and 3D meshes;
 # data7: street clothes textures (3D preview, street kit options) and the far hair of scanned faces (hairlod)
 ARCHIVES = (0, 1, 3, 7)
-PATCHED_ARCHIVES = (1, 3, 7)
+PATCHED_ARCHIVES = (0, 1, 3, 7)  # data0: game scripts (fsmod.gamepatches); the database goes into data8
 GAME_DATA = 'Game'  # game data folder (mounted as d:\); ReStreet 1.x called it GameData
 # archives the builder may rewrite, by short name -> path inside GAME_DATA
 PATCH_TARGETS = {f'data{k}.big': f'data{k}.big' for k in PATCHED_ARCHIVES}
@@ -144,16 +144,20 @@ class GameSources:
         raise FileNotFoundError(f'{entry} not found in {file}')
 
 
-def default_original_files():
-    """backend/original_files (overridable with FSMOD_ORIGINAL_FILES)."""
+def _data_dir():
+    """The app's data folder: FSMOD_DATA_DIR (set by the desktop app), else backend/ in development."""
     app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    return os.environ.get('FSMOD_ORIGINAL_FILES', os.path.join(app_dir, 'backend', 'original_files'))
+    return os.environ.get('FSMOD_DATA_DIR') or os.path.join(app_dir, 'backend')
+
+
+def default_original_files():
+    """<data>/original_files (overridable with FSMOD_ORIGINAL_FILES)."""
+    return os.environ.get('FSMOD_ORIGINAL_FILES', os.path.join(_data_dir(), 'original_files'))
 
 
 def default_patch_dir():
-    """backend/patch (overridable with FSMOD_PATCH_DIR)."""
-    app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    return os.environ.get('FSMOD_PATCH_DIR', os.path.join(app_dir, 'backend', 'patch'))
+    """<data>/patch (overridable with FSMOD_PATCH_DIR)."""
+    return os.environ.get('FSMOD_PATCH_DIR', os.path.join(_data_dir(), 'patch'))
 
 
 def default_sources():

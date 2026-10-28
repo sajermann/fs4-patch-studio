@@ -1,0 +1,19 @@
+[package]
+name = "fs4-patch-studio"
+version = "0.0.0"  # not used: the app version lives only in tauri.conf.json
+description = "FS4 Patch Studio desktop app"
+authors = ["Bruno Sajermann"]
+license = "GPL-3.0-only"
+repository = "https://github.com/Sajermann/fs4-patch-studio"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"
+
+[profile.release]
+strip = true

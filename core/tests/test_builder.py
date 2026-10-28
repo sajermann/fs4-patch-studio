@@ -87,7 +87,8 @@ def test_palmeiras_build_matches_the_files_validated_in_game(game, palmeiras_res
 # every file the app can change always goes in the patch (original when unchanged)
 FULL_PATCH = [builder.BUILD_STATE, 'Game/data/loc/locale.big', 'Game/data/loc/locale_ptbr.big',
               'Game/data/ui/imgAssets/heads/2dheads.bh', 'Game/data/ui/imgAssets/heads/2dheads.big',
-              'Game/data1.bh', 'Game/data1.big', 'Game/data3.bh', 'Game/data3.big', 'Game/data7.bh', 'Game/data7.big',
+              'Game/data0.bh', 'Game/data0.big', 'Game/data1.bh', 'Game/data1.big', 'Game/data3.bh', 'Game/data3.big',
+              'Game/data7.bh', 'Game/data7.big',
               'Game/data8.bh', 'Game/data8.big']
 
 
@@ -100,7 +101,7 @@ def test_write_patch_writes_whole_archives_in_the_v2_layout(game, palmeiras_resu
     tid = palmeiras_team_id(palmeiras_result)
     loose = ['Game/' + n for n in palmeiras_result.loose]
     assert sorted(map(str.lower, patch_listing(palmeiras_patch))) == sorted(map(str.lower, FULL_PATCH + loose))
-    for short in ('data1.big', 'data3.big', 'data7.big', '2dheads.big'):  # only loose files: plain originals
+    for short in ('data0.big', 'data1.big', 'data3.big', 'data7.big', '2dheads.big'):  # only loose files: originals
         for path in (game.target_path(short), game.index_path(short)):
             rel = os.path.relpath(path, os.path.join(game.folder, 'Game'))
             assert filecmp.cmp(os.path.join(palmeiras_patch, 'Game', rel), path, shallow=False), rel

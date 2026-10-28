@@ -6,6 +6,8 @@
 /backend/config.json
 /backend/originals_fingerprints.json
 /backend/cache/
+/backend/backups/
+/backend/logs/
 
 # The user's project (app data: database.json, images, faces)
 /backend/project/
@@ -35,3 +37,7 @@ __pycache__/
 .venv/
 dist/
 .vite/
+/backend/build/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/
+/desktop/release/

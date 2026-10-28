@@ -165,12 +165,18 @@ class OriginalChanges(BaseModel):
     stadium_locks: dict[int, bool] = {}  # stadiumid -> locked; only lockable stadiums (catalog.stadiums)
 
 
+class GamePatches(BaseModel):
+    """Optional changes to the game's own scripts (fsmod.gamepatches); all off by default."""
+    close_up_heads: bool = False  # players keep the close-up head, hair and eyes at any camera distance
+
+
 class Project(Entity):
     version: Literal[2] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []
     originals: OriginalChanges = OriginalChanges()
+    game_patches: GamePatches = GamePatches()
 
     def roster(self, team_uid):
         return [p for p in self.players if p.team == team_uid]

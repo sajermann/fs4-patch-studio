@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { PreferencesMenu } from '@/components/layout/PreferencesMenu'
 import { useI18n } from '@/i18n'
 import { rich } from '@/i18n/rich'
+import { APP_VERSION } from '@/lib/about'
 
 /** Folder field with a "browse" button (Windows folder picker opened by the backend). */
 function FolderInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
@@ -214,6 +215,9 @@ export function SetupPage({ status }: { status: Status }) {
       </Card>
 
       <div className="flex items-center justify-end gap-3">
+        <span className="mr-auto text-xs text-muted-foreground">
+          {t('app.version')} {APP_VERSION}
+        </span>
         {applying && !originalsOk && <span className="text-sm text-muted-foreground">{t('setup.copying')}</span>}
         {!firstRun && (
           <Button variant="ghost" onClick={() => navigate('/settings')} disabled={applying}>

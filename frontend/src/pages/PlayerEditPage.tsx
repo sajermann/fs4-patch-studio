@@ -422,7 +422,14 @@ function AppearanceTab({ player }: { player: Player }) {
               </div>
             }
           >
-            {catalog && <PlayerPreview appearance={preview} outfit={{ kind: 'team', kit }} face={scanned} />}
+            {catalog && (
+              <PlayerPreview
+                appearance={preview}
+                outfit={{ kind: 'team', kit }}
+                face={scanned}
+                closeUpOnly={!!draft.game_patches?.close_up_heads}
+              />
+            )}
           </Suspense>
         </div>
         <p

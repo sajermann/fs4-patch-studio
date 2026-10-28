@@ -154,12 +154,18 @@ export interface OriginalChanges {
   stadium_locks?: Record<string, boolean>
 }
 
+/** Optional changes to the game's own scripts (fsmod.gamepatches); all off by default. */
+export interface GamePatches {
+  close_up_heads?: boolean // players keep the close-up head, hair and eyes at any camera distance
+}
+
 export interface Project {
   version: 2
   leagues: League[]
   teams: Team[]
   players: Player[]
   originals?: OriginalChanges
+  game_patches?: GamePatches
 }
 
 /** Values a new player inherits from its template player where the project leaves a field unset. */
