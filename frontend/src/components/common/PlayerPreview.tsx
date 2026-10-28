@@ -142,10 +142,12 @@ function loadMeshes(url: string) {
   })
 }
 
-/** color = false for data textures (masks, opacity); channel = UV set the texture is sampled with. */
-function loadTexture(url: string, color = true, channel = 0) {
+/** color = false for data textures (masks, opacity); channel = UV set the texture is sampled with; repeat = UVs
+ * outside 0..1 wrap around (scanned faces map the right eye at u -2..-1; clamped, it showed only the white). */
+function loadTexture(url: string, color = true, channel = 0, repeat = false) {
   return cached(url, async () => {
     const texture = await textureLoader.loadAsync(versioned(url))
+    if (repeat) texture.wrapS = texture.wrapT = THREE.RepeatWrapping
     // RX3 UVs follow the DirectX convention (origin at the top left), like glTF
     texture.flipY = false
     texture.channel = channel
@@ -179,7 +181,7 @@ function useLoaded<T>(key: string | null, load: () => Promise<T>): T | undefined
 // ------------------------------------------------------------------ parts
 
 function HeadMesh({ glb, face, eyes }: { glb: string; face: string; eyes: string }) {
-  const loaded = useLoaded([glb, face, eyes].join('|'), () => Promise.all([loadMeshes(glb), loadTexture(face), loadTexture(eyes)]))
+  const loaded = useLoaded([glb, face, eyes].join('|'), () => Promise.all([loadMeshes(glb), loadTexture(face), loadTexture(eyes, true, 0, true)]))
   if (!loaded) return null
   const [meshes, faceMap, eyesMap] = loaded
   return (
