@@ -136,7 +136,7 @@ def test_build_then_install_into_a_fake_game(env):
     save = env['state'].config.save_dir
     assert report['save_removed'] == 2 and os.listdir(save) == ['Headers']  # the save is deleted, no copy
     assert c.get('/api/status').json()['setup']['game'] == {
-        'version': '2.0.8', 'tested': True, 'tested_versions': ['2.0.4', '2.0.8'], 'installed': True, 'changed': []}
+        'version': '2.0.8', 'tested': True, 'tested_versions': ['2.0.4', '2.0.8', '2.1.3'], 'installed': True, 'changed': []}
     (game / 'data8.bh').write_bytes(b'changed outside the app')
     assert c.get('/api/status').json()['setup']['game']['changed'] == ['data8.bh']
 

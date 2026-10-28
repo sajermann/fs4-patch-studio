@@ -15,7 +15,7 @@ import shutil
 import threading
 import uuid
 
-# the files the app reads from the game (= fsmod.game sources), the same in ReStreet 2.0.4 and 2.0.8 (checked 23/10)
+# the files the app reads from the game (= fsmod.game sources), the same in ReStreet 2.0.4, 2.0.8 and 2.1.3
 OFFICIAL_FILES = {
     'Game/data0.bh': (5356, '2a2201b565673dee9feeb3a0b84c4abb65f24ca4'),
     'Game/data0.big': (7165026, 'e5a8e869ad4c55de392c214989036ef095001919'),
@@ -32,7 +32,7 @@ OFFICIAL_FILES = {
 }
 # files a clean ReStreet does not have: a mod's database (what every patch adds, ours too)
 MOD_FILES = ('Game/data8.big', 'Game/data8.bh')
-TESTED_VERSIONS = ('2.0.4', '2.0.8')  # ReStreet versions the app was validated with in game
+TESTED_VERSIONS = ('2.0.4', '2.0.8', '2.1.3')  # ReStreet versions the app was validated with in game
 TERMS_VERSION = 1  # bump when the text of the first-run screen changes: everyone accepts it again
 TITLE_ID = '4541097B'  # FIFA Street: the save is <Documents>/fifastreet/<profile>/4541097B
 SAVE_SUBDIRS = ('00000001', os.path.join('Headers', '00000001'))
