@@ -73,5 +73,6 @@ export function streetOutfit(team: Team, kind: KitKind, catalog: Catalog | undef
     socks: streetPiece(team, kind, 'socks', catalog),
     arms: catalog?.street_arms[top.style] ?? 0,
     fullLength: catalog?.street_full_length_bottoms.includes(bottom.style) ?? false,
+    crest: team.crest,
   }
 }

@@ -1,5 +1,9 @@
 # FS4 Patch Studio
 
+by: Bruno Sajermann
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/brunosajermann)
+
 Desktop-style web app to create leagues, teams and players for **FIFA Street (2012)** running on the
 [ReStreet](https://github.com/samuelit0davila/fifa-street-pc-port) PC port (2.x). It builds a patch from the game's own files: new leagues with their
 flag, teams with crest and kits (generated or real FIFA 14-16 kits), players with photo, attributes, skills,
@@ -26,46 +30,51 @@ The interface is available in Portuguese (Brazil) and English, with light and da
 
 - Windows
 - FIFA Street (2012) with ReStreet 2.x
-- Python 3 (developed with 3.14) and Node.js (developed with 26)
 
-## Running
+## What the studio can do
 
-```bat
-start.bat
-```
+### Leagues editor
 
-It installs the Python and npm dependencies on the first run, starts the backend on http://localhost:8765 and opens
-the interface on http://localhost:5173. On the first run the setup screen asks for the game folder, checks that its
-files are the official ones and imports them as the app's originals (see `backend/README.md` for the file list).
+- Create new leagues.
+- Set the league's wide image and its thumbnail.
+- Add teams you created to a league, or take them out.
+- Hide or show the game's original leagues.
 
-## Structure
+### Teams editor
 
-| Folder | What it is |
-|---|---|
-| `core/fsmod/` | Python library: game database (T3DB), `.big` archives, textures, meshes, locale, crests, kits, photos, faces, 3D preview and the patch builder |
-| `core/lzx/` | Source of `core/fsmod/bin/lzxdec.exe` (LZX decoder, libmspack) |
-| `backend/fsapi/` | FastAPI server over `fsmod` (routes in `backend/README.md`) |
-| `frontend/` | React + Vite + TypeScript + Tailwind + shadcn/ui (see `frontend/README.md`) |
+- Create new teams with their own crest.
+- Choose the team's league and its colors.
+- Kits: generic ones made in the studio's own kit editor, or real kits by uploading their PNG.
+- Street kits, made in the studio's own editor.
+- Choose the team captain.
+- Set the formation for each game mode.
+- Hide or show the game's original teams.
 
-Not in git (each user has their own): `backend/original_files/` (the game's originals), `backend/patch/` (build
-output), `backend/project/` (your mod: `database.json`, images, faces), `backend/config.json` and `backend/cache/`.
+### Players editor
 
-## Tests
+- Create new players with their own photo.
+- Fill in their details, team and nationality.
+- Set their skills.
+- Faces: generic ones made in the studio's own face editor, or real faces from a face pack.
+- See the player in 3D, the way the game will draw them.
+- Hide or show the players you created.
 
-```bat
-cd core && python -m pytest -q
-cd backend && python -m pytest -q
-```
+### Stadiums editor
 
-Tests that need the game's original files (or other local data) are skipped when they are not available. The
-backend tests use temporary folders and a fake game; they never touch a real installation.
+- Unlock or lock the game's stadiums.
+
+### Patches
+
+- Turn optional, ready-made changes to the game on or off, e.g. the camera one (close-up face at any distance).
+
+### Then just...
+
+Make your creations, build the patch, install it and have fun!
 
 ## Known issues
 
 Real faces (FIFA 14-16 face packs):
 
-- **Eyes in the 3D preview:** some faces in the FIFA 14 format show one white eye (no iris) or a missing eye in the
-  preview. This is a preview problem only: **in game the eyes look right**.
 - **Seen from far away the face changes a lot**, and on some faces the ear shows a bit of the teeth texture. The game
   draws distant players with a generic low-detail head whose texture layout differs from the FIFA 14-16 one. Close-up
   shots (replays, menus) look right. **Fix:** turn on "Close-up face at any distance" in the Patches screen.

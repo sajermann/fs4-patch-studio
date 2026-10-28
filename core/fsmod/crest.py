@@ -4,17 +4,19 @@ Each one is a 'chunkzip' with a DXT5 DDS (no mips). The originals are 256/128/64
 SCALE times that size (validated in game on ReStreet 2.x: the menus draw them at the same size, sharper).
 A new team (a teamid the game does not know) gets them as loose files under Game/; the files of a
 FIFA 12 team (TEMPLATE_TEAM) give the DDS header and the chunk wrapper.
+Also the 3D crest (data/sceneassets/crest/crest_<teamid>.rx3, data3) that some street clothes patterns draw.
 """
 import io
 import struct
 
 from PIL import Image
 
-from . import chunk, imageprep
+from . import chunk, imageprep, rx3tex
 
 UI_SIZES = (('large', 256), ('medium', 128), ('small', 64))  # original sizes
 SCALE = 2
 TEMPLATE_TEAM = 1932  # Barnsley (FIFA 12, not in Street): first team validated in game
+SCENE_TEMPLATE_TEAM = 974  # Korea Republic: its 3D crest file was the first validated in game
 CHUNK_SIZE = 184320  # chunk size of the game's own UI images (a 512x512 stadium image uses 2 chunks)
 
 
@@ -59,6 +61,20 @@ def ui_crest_files(game, teamid, img):
         _, _, template = game.read_entry(ui_crest_name(label, TEMPLATE_TEAM))
         out[ui_crest_name(label, teamid)] = dds_entry(template, im)
     return out
+
+
+def scene_crest_name(teamid):
+    return f'data/sceneassets/crest/crest_{teamid}.rx3'
+
+
+def scene_crest_files(game, teamid, img):
+    """{loose file name: bytes} of the 3D crest of teamid (crest_cm, 128x128 DXT1), drawn by the street clothes
+    patterns that carry the team badge; without it the game shows its missing-texture checkerboard there.
+    Made from an original team's file (SCENE_TEMPLATE_TEAM); transparent pixels become white, like the kits."""
+    _, _, orig = game.read_entry(scene_crest_name(SCENE_TEMPLATE_TEAM))
+    d = bytearray(chunk.decode(orig))
+    rx3tex.set_image(d, rx3tex.by_name(d, 'crest_cm'), square(img.convert('RGBA')), bg=(255, 255, 255))
+    return {scene_crest_name(teamid): chunk.chunkzip(bytes(d))}
 
 
 def original_crest(game, teamid, size_label='medium'):

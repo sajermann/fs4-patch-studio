@@ -181,7 +181,7 @@ def reserved_team_ids(original_ids, locale_keys):
 
 def team_id_is_free(game, teamid):
     """No team file of teamid in the game archives (an archive entry would win over the loose file)."""
-    names = [crest.ui_crest_name(label, teamid) for label, _ in crest.UI_SIZES]
+    names = [crest.ui_crest_name(label, teamid) for label, _ in crest.UI_SIZES] + [crest.scene_crest_name(teamid)]
     names += [n(teamid, kind) for kind in (0, 1, 2) for n in (kit.kit_name, kit.thumbnail_name)]
     return not any(game.locate(n) for n in names)
 
@@ -633,7 +633,8 @@ def build(project, game, assets_dir, log=None, progress=None):
         texts[f'CT_TeamName_{tid}'] = tm.name
 
         # visual files
-        jobs.append(pool.submit(lambda tid=tid, img=crest_img: (crest.ui_crest_files(game, tid, img), [])))
+        jobs.append(pool.submit(lambda tid=tid, img=crest_img: (
+            {**crest.ui_crest_files(game, tid, img), **crest.scene_crest_files(game, tid, img)}, [])))
         for kind_n, kind in ((0, 'home'), (1, 'away'), (2, 'goalkeeper')):
             real = tm.real_kit(kind)
             if real:

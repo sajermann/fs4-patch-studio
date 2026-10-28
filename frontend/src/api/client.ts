@@ -179,6 +179,10 @@ export const kitTextureUrl = (part: 'jersey' | 'shorts', kit: { jersey: RGB; sho
   return withRevision(`/api/preview/kit/${part}.png?${qs}`)
 }
 
+/** Crest decal over a street piece for the 3D preview (transparent when the pattern carries no crest). */
+export const streetCrestUrl = (part: 'top' | 'bottom' | 'socks', style: number, pattern: number, crest: string) =>
+  withRevision(`/api/preview/street/${part}/${style}/${pattern}/crest.png?${new URLSearchParams({ crest })}`)
+
 /** Where a real face is read from: a pack folder (not picked yet) or the project (player uid). */
 export type FaceSource = { folder: string; face: number } | { player: string; face: number }
 

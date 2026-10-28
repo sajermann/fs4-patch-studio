@@ -10,6 +10,42 @@ root of ReStreet 2.x, holds `Game`), `save_dir` (profile folder with `00000001`)
 in the old place, `<repo>/projeto/projeto.json`, is moved and renamed when the backend starts) and `backups_dir`.
 The data folder can be changed with `FSMOD_DATA_DIR`.
 
+## Development
+
+Needs Python 3 (developed with 3.14) and Node.js (developed with 26). From the repository root:
+
+```bat
+start.bat
+```
+
+It installs the Python and npm dependencies on the first run, starts the backend on http://localhost:8765 and opens
+the interface on http://localhost:5173. On the first run the setup screen asks for the game folder, checks that its
+files are the official ones and imports them as the app's originals (see [original_files/](#original_files-not-in-git--provide-your-own)).
+The installed/portable desktop app is packaged from the same code (see `desktop/README.md`).
+
+| Folder | What it is |
+|---|---|
+| `core/fsmod/` | Python library: game database (T3DB), `.big` archives, textures, meshes, locale, crests, kits, photos, faces, 3D preview and the patch builder |
+| `core/lzx/` | Source of `core/fsmod/bin/lzxdec.exe` (LZX decoder, libmspack) |
+| `backend/fsapi/` | FastAPI server over `fsmod` (routes below) |
+| `frontend/` | React + Vite + TypeScript + Tailwind + shadcn/ui (see `frontend/README.md`) |
+| `desktop/` | Tauri packaging: installer and portable zip (see `desktop/README.md`) |
+
+Not in git (each user has their own): `backend/original_files/` (the game's originals), `backend/patch/` (build
+output), `backend/project/` (your mod: `database.json`, images, faces), `backend/config.json` and `backend/cache/`.
+
+Tests:
+
+```bat
+cd core && python -m pytest -q
+cd backend && python -m pytest -q
+```
+
+Tests that need the game's original files (or other local data) are skipped when they are not available. The
+backend tests use temporary folders and a fake game; they never touch a real installation.
+
+## API
+
 | Route | What it does |
 |---|---|
 | `GET /api/status` | missing original files, config, `setup` (first-run state: `required`/`reasons`, the app's originals checked, ReStreet version, patch installed in the game and files changed outside the app — cheap, only changed files are hashed), project, patch state (`up_to_date` = built from the saved project) |
@@ -34,6 +70,7 @@ The data folder can be changed with `FSMOD_DATA_DIR`.
 | `GET /api/preview/eyes/{eyecolorcode}.png` | eye texture |
 | `GET /api/preview/body/{part}/{code}.glb` | one body part: jersey/arms (code = sleeve), socks/legs (sock length), shorts (0), shoes (shoe type), gloves (0); street pieces: top/bottom/streetsocks (code = style) |
 | `GET /api/preview/street/{top\|bottom\|socks}/{style}/{pattern}.png` | street clothes texture: RGB = color mask (primary/secondary/tertiary), alpha = shading |
+| `GET /api/preview/street/{top\|bottom\|socks}/{style}/{pattern}/crest.png?crest=` | crest decal over a street piece (same UV; transparent when the pattern carries no crest) |
 | `GET /api/preview/skin/{tone}.png` / `shoe/{shoetypecode}.png` / `glove/{gkglovetypecode}.png` | skin of arms/legs / boot / goalkeeper glove texture |
 | `GET /api/preview/kit/{jersey\|shorts}.png?color=r,g,b&crest=images/x.png` | team kit texture: solid color + crest decal + shading (shorts also cover the socks) |
 | `GET /api/preview/face.png?headtypecode=&eyebrowcode=&sideburnscode=&facialhaircolorcode=&facialhairtypecode=&skintypecode=&skintonecode=` | face texture the game picks (skin, eyebrows, beard baked in) |

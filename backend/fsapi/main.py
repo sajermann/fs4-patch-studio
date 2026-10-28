@@ -570,6 +570,14 @@ def create_app(state=None):
         return Response(preview_asset(preview.street_png, part, style, pattern), media_type='image/png',
                         headers=PREVIEW_CACHE)
 
+    @app.get('/api/preview/street/{part}/{style}/{pattern}/crest.png')
+    def street_crest_preview(style: int, pattern: int, part: str = Path(..., pattern='^(top|bottom|socks)$'),
+                             crest: str | None = None):
+        """Crest decal over a street piece (same UV as its texture; transparent when the pattern has no crest)."""
+        crest_img = Image.open(project_image(crest)) if crest else None
+        return Response(preview_asset(preview.street_crest_png, part, style, pattern, crest_img),
+                        media_type='image/png')
+
     @app.get('/api/preview/skin/{tone}.png')
     def skin_preview(tone: int):
         return Response(preview_asset(preview.skin_png, tone), media_type='image/png', headers=PREVIEW_CACHE)

@@ -255,8 +255,7 @@ def kit_png(sources, part, rgb, crest=None):
     size, rect, occlusion = _kit_base(sources, part)
     im = Image.new('RGBA', size, tuple(rgb) + (255,))
     if crest is not None and rect:
-        l, t, r, b = rect
-        box = (round(min(l, r) * size[0]), round(min(t, b) * size[1]), round(max(l, r) * size[0]), round(max(t, b) * size[1]))
+        box = _uv_box(rect, size)
         decal = square(crest.convert('RGBA')).resize((box[2] - box[0], box[3] - box[1]), Image.LANCZOS)
         im.alpha_composite(decal, box[:2])
     shade = occlusion.resize(size, Image.BILINEAR).convert('RGB')
@@ -295,3 +294,37 @@ def street_png(sources, part, style, pattern):
     occlusion = rx3tex.to_image(am, rx3tex.textures(am)[0]).convert('L').resize(mask.size, Image.BILINEAR)
     mask.putalpha(occlusion)
     return _png(mask)
+
+
+def _uv_box(rect, size):
+    """Pixel box (left, top, right, bottom) of a hotspot rect (UV, corners in any order) in a texture of size."""
+    l, t, r, b = rect
+    return (round(min(l, r) * size[0]), round(min(t, b) * size[1]), round(max(l, r) * size[0]), round(max(t, b) * size[1]))
+
+
+@lru_cache(maxsize=256)
+def _street_crest_box(sources, part, style, pattern):
+    """(texture size, pixel box of the 'team' hotspot) of a street piece; box None when the pattern has no crest."""
+    d = _rx3(sources, f'{ASSETS}clothes/{part}_{style}_{pattern}_cm.rx3')
+    t = rx3tex.textures(d)[0]
+    size = (t['w'], t['h'])
+    for spots in _hotspots(d).values():  # one group: 'jersey' (tops) or 'shorts' (bottoms)
+        box = _uv_box(spots['team'], size) if 'team' in spots else None
+        if box and box[2] > box[0] and box[3] > box[1]:
+            return size, box
+    return size, None
+
+
+def street_crest_png(sources, part, style, pattern, crest):
+    """Decal laid over a street piece in the viewer (same UV as street_png): the team crest in the piece's 'team'
+    hotspot, where the game draws data/sceneassets/crest/crest_<teamid>.rx3; transparent elsewhere. A pattern without
+    crest (or no crest image) gives a tiny transparent image."""
+    size, box = _street_crest_box(sources, part, style, pattern)
+    if box is None or crest is None:
+        return _png(Image.new('RGBA', (4, 4), (0, 0, 0, 0)))
+    # bottoms have tall boxes (about 1:2): fitted keeping the crest's proportions, not checked in game
+    side = min(box[2] - box[0], box[3] - box[1])
+    decal = square(crest.convert('RGBA')).resize((side, side), Image.LANCZOS)
+    im = Image.new('RGBA', size, (0, 0, 0, 0))
+    im.alpha_composite(decal, ((box[0] + box[2] - side) // 2, (box[1] + box[3] - side) // 2))
+    return _png(im)

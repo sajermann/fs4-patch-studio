@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import { kitTextureUrl } from '@/api/client'
+import { kitTextureUrl, streetCrestUrl } from '@/api/client'
 import type { RGB, StreetPiece } from '@/api/types'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
@@ -52,7 +52,8 @@ export interface PreviewKit {
 /** What the player wears: the team kit or a street kit (arms = arms mesh for the top's sleeves). */
 export type PreviewOutfit =
   | { kind: 'team'; kit: PreviewKit }
-  | { kind: 'street'; top: StreetPiece; bottom: StreetPiece; socks: StreetPiece; arms: number; fullLength: boolean }
+  // crest: project image drawn where a piece's pattern carries the team crest (like the game's crest_<teamid>.rx3)
+  | { kind: 'street'; top: StreetPiece; bottom: StreetPiece; socks: StreetPiece; arms: number; fullLength: boolean; crest?: string | null }
 
 export type View = 'face' | 'body'
 export type Distance = 'near' | 'far'
@@ -290,10 +291,17 @@ function BodyPart({ part, code, texture, roughness, collar = 0 }: { part: string
 
 const srgb = (c: RGB) => new THREE.Color().setRGB(c[0] / 255, c[1] / 255, c[2] / 255, THREE.SRGBColorSpace)
 
+const NO_CREST = new THREE.DataTexture(new Uint8Array(4), 1, 1)
+NO_CREST.needsUpdate = true
+
 /** Street piece material: the texture is a mask (red/green/blue = primary/secondary/tertiary, alpha = shading)
- * painted with the 3 colors in the shader, so a color change needs no reload. */
-function useMaskMaterial(map: THREE.Texture | undefined, colors: [RGB, RGB, RGB]) {
-  const uniforms = useMemo(() => ({ uPri: { value: new THREE.Color() }, uSec: { value: new THREE.Color() }, uTer: { value: new THREE.Color() } }), [])
+ * painted with the 3 colors in the shader, so a color change needs no reload; crest = decal over the colors (same
+ * UV, transparent outside the crest). */
+function useMaskMaterial(map: THREE.Texture | undefined, colors: [RGB, RGB, RGB], crest: THREE.Texture | undefined) {
+  const uniforms = useMemo(
+    () => ({ uPri: { value: new THREE.Color() }, uSec: { value: new THREE.Color() }, uTer: { value: new THREE.Color() }, uCrest: { value: NO_CREST as THREE.Texture } }),
+    [],
+  )
   const material = useMemo(() => {
     if (!map) return undefined
     // polygon offset: clothes win small overlaps with the reference-pose body underneath
@@ -301,11 +309,13 @@ function useMaskMaterial(map: THREE.Texture | undefined, colors: [RGB, RGB, RGB]
     m.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms)
       shader.fragmentShader = shader.fragmentShader
-        .replace('void main() {', 'uniform vec3 uPri;\nuniform vec3 uSec;\nuniform vec3 uTer;\nvoid main() {')
+        .replace('void main() {', 'uniform vec3 uPri;\nuniform vec3 uSec;\nuniform vec3 uTer;\nuniform sampler2D uCrest;\nvoid main() {')
         .replace(
           '#include <map_fragment>',
           'vec4 maskTexel = texture2D( map, vMapUv );\n' +
-            'diffuseColor.rgb *= ( uPri * maskTexel.r + uSec * maskTexel.g + uTer * maskTexel.b ) * maskTexel.a;',
+            'vec4 crestTexel = texture2D( uCrest, vMapUv );\n' +
+            'vec3 pieceColor = uPri * maskTexel.r + uSec * maskTexel.g + uTer * maskTexel.b;\n' +
+            'diffuseColor.rgb *= mix( pieceColor, crestTexel.rgb, crestTexel.a ) * maskTexel.a;',
         )
     }
     return m
@@ -315,15 +325,19 @@ function useMaskMaterial(map: THREE.Texture | undefined, colors: [RGB, RGB, RGB]
     uniforms.uPri.value.copy(srgb(colors[0]))
     uniforms.uSec.value.copy(srgb(colors[1]))
     uniforms.uTer.value.copy(srgb(colors[2]))
+    uniforms.uCrest.value = crest ?? NO_CREST
   })
   return material
 }
 
-function StreetPart({ part, mesh, piece }: { part: 'top' | 'bottom' | 'socks'; mesh: string; piece: StreetPiece }) {
+function StreetPart({ part, mesh, piece, crest }: { part: 'top' | 'bottom' | 'socks'; mesh: string; piece: StreetPiece; crest?: string | null }) {
   const glb = `/api/preview/body/${mesh}/${piece.style}.glb`
   const texture = `/api/preview/street/${part}/${piece.style}/${piece.pattern}.png`
-  const loaded = useLoaded(`${glb}|${texture}`, () => Promise.all([loadMeshes(glb), loadTexture(texture, false)]))
-  const material = useMaskMaterial(loaded?.[1], piece.colors)
+  const crestUrl = crest ? streetCrestUrl(part, piece.style, piece.pattern, crest) : null
+  const loaded = useLoaded(`${glb}|${texture}|${crestUrl}`, () =>
+    Promise.all([loadMeshes(glb), loadTexture(texture, false), crestUrl ? loadTexture(crestUrl) : Promise.resolve(undefined)]),
+  )
+  const material = useMaskMaterial(loaded?.[1], piece.colors, loaded?.[2])
   if (!loaded || !material) return null
   return (
     <group>
@@ -351,13 +365,13 @@ function Body({ a, outfit }: { a: PreviewAppearance; outfit: PreviewOutfit }) {
   } else {
     clothes = (
       <>
-        <StreetPart part="top" mesh="top" piece={outfit.top} />
+        <StreetPart part="top" mesh="top" piece={outfit.top} crest={outfit.crest} />
         <BodyPart part="arms" code={outfit.arms} texture={skin} roughness={0.7} />
-        <StreetPart part="bottom" mesh="bottom" piece={outfit.bottom} />
+        <StreetPart part="bottom" mesh="bottom" piece={outfit.bottom} crest={outfit.crest} />
         {/* trousers cover legs and socks (the reference-pose legs would poke through at the knees) */}
         {!outfit.fullLength && (
           <>
-            <StreetPart part="socks" mesh="streetsocks" piece={outfit.socks} />
+            <StreetPart part="socks" mesh="streetsocks" piece={outfit.socks} crest={outfit.crest} />
             {/* player.lua: leglength = socklength % 10 */}
             <BodyPart part="legs" code={outfit.socks.style % 10} texture={skin} roughness={0.7} />
           </>
