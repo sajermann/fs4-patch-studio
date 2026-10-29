@@ -4,6 +4,8 @@ export type RGB = [number, number, number]
 export type KitKind = 'home' | 'away'
 export type KitPart = 'jersey' | 'shorts' | 'socks'
 export type RealKitSlot = 'home' | 'away' | 'goalkeeper'
+export type TakerRole = 'penalty' | 'free_kick' | 'long_free_kick' | 'left_corner' | 'right_corner'
+export type PlayerRef = string | number // project player uid, or playerid of one of the game's own players
 export type RealKitFile = 'thumbnail' | 'jersey' | 'shorts'
 
 /** Real kit of a FIFA 14-16 pack for one slot (fsmod.model.RealKit); a slot without jersey or shorts is not used. */
@@ -16,6 +18,7 @@ export interface RealKit {
   shorts_number_color: number
   collar: number // 0-14
   front_number: boolean
+  shorts_number?: boolean // number on the shorts; unset = the row's (new team: off; original: the game's)
 }
 
 export interface League {
@@ -38,6 +41,8 @@ export interface Team {
   primary_color: RGB
   secondary_color: RGB
   team_id?: number | null // teamid in the game, given by the build
+  original_id?: number | null // the game's own team this entry edits (same teamid); null = new team
+  loaded?: { team: Record<string, unknown>; images: Record<string, string> } // what was loaded from the game
   short_name?: string
   name_10?: string
   name_7?: string
@@ -48,7 +53,8 @@ export interface Team {
   use_real_kits?: boolean // team kits from real_kits instead of solid color + crest
   real_kits?: Partial<Record<RealKitSlot, RealKit>>
   template: number
-  captain?: string
+  captain?: PlayerRef // new team: player uid (none = first player); original team: playerid (none = the game's)
+  takers?: Partial<Record<TakerRole, PlayerRef>> // set pieces; a role left out = the captain (original: the game's)
   lineups?: Lineup[] // starting lineup per game mode; a mode without one = the game's pick
   hidden?: boolean // left out of the patch (with its players)
 }
@@ -58,8 +64,9 @@ export interface Lineup {
   players: number // 1-6
   goalkeeper: boolean
   tactic: number // 0 static, 1 dynamic, 2 street (only 5 and 6 players have 0 and 2)
-  starters: (string | null)[] // player uid per slot; null = filled by the build
-  reserves: string[] // bench order; players left out follow in roster order
+  starters: (PlayerRef | null)[] // player per slot; null = filled by the build
+  reserves: PlayerRef[] // bench order; players left out follow in roster order
+  // players: new team = project player uids; original team = playerids of the game's players
 }
 
 /** A game mode a lineup can be set for: {tactic id: area per starter slot} (0 GK, 1 DEF, 2 ATT). */
@@ -275,6 +282,8 @@ export interface OriginalTeam {
   primary_color: RGB
   secondary_color: RGB
   generic: boolean
+  captain: number // playerid of the game's captain
+  takers: Record<TakerRole, number> // the game's set-piece takers
   lockable: boolean // the game can lock it (special teams)
   locked: boolean // locked in the game
   crest: boolean // has a menu crest (GET /api/originals/crests/<id>.webp); the game's internal teams have none

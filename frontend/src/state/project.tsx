@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, bumpProjectImagesRevision } from '@/api/client'
-import { lineupsWithout } from '@/lib/lineup'
+import { lineupsWithout, takersWithout } from '@/lib/lineup'
 import type { Issue, League, Player, PlayerDefaults, Project, Team } from '@/api/types'
 
 const EMPTY: Project = { version: 2, leagues: [], teams: [], players: [] }
@@ -132,6 +132,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           teams: p.teams.map((t) => ({
             ...t,
             captain: t.captain === uid ? undefined : t.captain,
+            takers: takersWithout(t, uid),
             lineups: lineupsWithout(t, uid),
           })),
         })),

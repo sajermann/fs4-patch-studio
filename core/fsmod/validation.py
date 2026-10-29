@@ -12,7 +12,7 @@ from typing import Optional
 
 from PIL import Image
 
-from . import builder, kit, scanface
+from . import builder, kit, original_team, scanface
 from .catalog import POSITIONS, SKILLS
 from .model import REAL_KIT_FILES
 
@@ -64,9 +64,9 @@ def validate(project, catalog, assets_dir):
     modes = {(m['players'], m['goalkeeper']): m['tactics'] for m in catalog.lineup_modes}
     defaults = {}
 
-    def check_lineups(tm, roster):
-        """Lineups per game mode Any player can take any slot (a field player in goal works); a player no longer in the team only warns, the build fills the slot."""
-        in_roster = {p.uid: p for p in roster}
+    def check_lineups(tm, in_roster, position_of, name_of):
+        """Lineups per game mode. Any player can take any slot (a field player in goal works); a player no longer in
+        the team only warns, the build fills the slot. in_roster: the team's player refs."""
         seen_modes = set()
         for i, lu in enumerate(tm.lineups):
             where = f'lineups.{i}'
@@ -89,16 +89,18 @@ def validate(project, catalog, assets_dir):
                 warning('lineup_player_not_in_roster', tm.uid, where, players=lu.players)
             keeper = lu.starters[0] if lu.goalkeeper and lu.starters else None
             if keeper in in_roster:
-                p = in_roster[keeper]
-                if p.position is None and not defaults:
-                    defaults.update(catalog.player_defaults(project))
-                position = p.position if p.position is not None else defaults.get(p.uid, {}).get('position')
+                position = position_of(keeper)
                 if position is not None and position != GOALKEEPER_POSITION:
                     warning('lineup_goalkeeper_not_gk', tm.uid, f'{where}.starters', players=lu.players,
-                            player=p.display_name or f'{p.first_name} {p.last_name}'.strip())
+                            player=name_of(keeper))
 
-    def check_real_kits(tm):
-        for slot in ('home', 'away', 'goalkeeper'):
+    def project_position(p):
+        if p.position is None and not defaults:
+            defaults.update(catalog.player_defaults(project))
+        return p.position if p.position is not None else defaults.get(p.uid, {}).get('position')
+
+    def check_real_kits(tm, slots=('home', 'away', 'goalkeeper')):
+        for slot in slots:
             real = tm.real_kits.get(slot)
             used = real and any(getattr(real, part) for part in REAL_KIT_FILES)
             if not used:
@@ -158,9 +160,14 @@ def validate(project, catalog, assets_dir):
     original_leagues = {lg['id']: lg for lg in catalog.leagues}
     team_uids = {t.uid for t in project.teams}
     team_ids = {}
+    edited_originals = {}
     for tm in project.teams:
         check_text(tm.uid, 'name', tm.name, catalog.locale_chars, required=True)
+        changes = original_team.changes(tm, assets_dir) if tm.is_original else None
         for kind, street in tm.street_kits.items():
+            if changes and kind not in changes.street_kits:
+                continue  # the game's own pieces, untouched
+
             for part in ('top', 'bottom', 'socks'):
                 piece = getattr(street, part)
                 if piece and piece.pattern not in catalog.street_options[part].get(piece.style, []):
@@ -175,6 +182,24 @@ def validate(project, catalog, assets_dir):
             error('league_not_found', tm.uid, 'league', league=tm.league)
         elif original_leagues[tm.league]['hidden']:
             warning('league_hidden', tm.uid, 'league', league=tm.league)
+        if tm.is_original:
+            if tm.original_id not in catalog.team_ids:
+                error('original_team_not_found', tm.uid, 'original_id', id=tm.original_id)
+            elif tm.original_id in edited_originals:
+                error('original_team_edited_twice', tm.uid, 'original_id', id=tm.original_id)
+            edited_originals.setdefault(tm.original_id, tm.uid)
+            squad = {p['id']: p for p in catalog.players if tm.original_id in p['teams']}
+            check_lineups(tm, squad, lambda pid: squad[pid]['position'], lambda pid: squad[pid]['display_name'])
+            for role, pid in (('captain', tm.captain), *((f'takers.{r}', p) for r, p in tm.takers.items())):
+                if pid is not None and pid not in squad:
+                    error('captain_not_in_roster' if role == 'captain' else 'taker_not_in_roster', tm.uid, role,
+                          player=pid)
+            if tm.crest and not os.path.isfile(os.path.join(assets_dir, tm.crest)):
+                error('crest_missing', tm.uid, 'crest', path=tm.crest)
+            if tm.use_real_kits:
+                check_real_kits(tm, [slot for slot, parts in changes.real_kits.items() if parts] +
+                                ([] if not changes.kits_mode else ['home', 'away']))
+            continue  # roster and ids stay the game's
         if tm.template not in catalog.team_ids:
             error('template_not_found', tm.uid, 'template', id=tm.template)
 
@@ -207,7 +232,11 @@ def validate(project, catalog, assets_dir):
             error('roster_too_large', tm.uid, 'players', max=builder.MAX_ROSTER, count=len(roster))
         if tm.captain and tm.captain not in {p.uid for p in roster}:
             error('captain_not_in_roster', tm.uid, 'captain', player=tm.captain)
-        check_lineups(tm, roster)
+        for role, uid in tm.takers.items():
+            if uid not in {p.uid for p in roster}:
+                error('taker_not_in_roster', tm.uid, f'takers.{role}', player=uid)
+        members = {p.uid: p for p in roster}
+        check_lineups(tm, members, lambda uid: project_position(members[uid]), lambda uid: members[uid].shown_name)
         numbers = {}
         for p in roster:
             if p.number is not None:
@@ -217,10 +246,13 @@ def validate(project, catalog, assets_dir):
 
     # ---- teams per league (new + the original ones still in it)
     hidden_teams = set(project.originals.hidden_teams)
-    league_teams = Counter(tm.league for tm in project.teams)
+    league_teams = Counter(tm.league for tm in project.new_teams)
+    moved = {tm.original_id: tm.league for tm in project.original_teams}
+    checked = set(league_teams) | set(moved.values())
     for t in catalog.teams:
-        if t['league'] in league_teams and t['id'] not in hidden_teams:
-            league_teams[t['league']] += 1
+        league = moved.get(t['id'], t['league'])
+        if t['id'] not in hidden_teams and league in checked:
+            league_teams[league] += 1
     for league, count in league_teams.items():
         if count <= builder.MAX_LEAGUE_TEAMS:
             continue

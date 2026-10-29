@@ -18,6 +18,8 @@ KitPart = Literal['jersey', 'shorts', 'socks']
 RealKitSlot = Literal['home', 'away', 'goalkeeper']
 REAL_KIT_FILES = ('thumbnail', 'jersey', 'shorts')  # image fields of a RealKit
 StreetPartName = Literal['top', 'bottom', 'socks']
+TakerRole = Literal['penalty', 'free_kick', 'long_free_kick', 'left_corner', 'right_corner']
+PlayerRef = Union[str, int]  # project player uid, or playerid of one of the game's own players
 
 
 class Entity(BaseModel):
@@ -70,6 +72,8 @@ class RealKit(BaseModel):
     shorts_number_color: int = 1  # shortsnumbercolor
     collar: int = 0  # jerseycollargeometrytype ("collar N" in the packs)
     front_number: bool = False  # jerseyfrontnumberplacementcode (the packs bring the front without room for it)
+    shorts_number: Optional[bool] = None  # shortsnumberplacementcode (number on the shorts); None = keep the row's
+    # (new team: the template's, off; original team: the game's)
 
     @property
     def complete(self):
@@ -121,8 +125,17 @@ class Lineup(BaseModel):
     players: Annotated[int, Field(ge=1, le=6)]  # numberofplayers
     goalkeeper: bool  # hasgoalie
     tactic: int = 1  # fs4tactics id: 0 static, 1 dynamic, 2 street (only 5 and 6 players have 0 and 2)
-    starters: list[Optional[str]] = []  # player uid per slot (areas of fs4playersareas); None = filled by the build
-    reserves: list[str] = []  # bench order; players left out follow in roster order
+    starters: list[Optional[PlayerRef]] = []  # player per slot (areas of fs4playersareas); None = filled by the build
+    reserves: list[PlayerRef] = []  # bench order; players left out follow in roster order
+    # players: new team = project player uids; original team = playerids of the game's players
+
+
+class OriginalSnapshot(BaseModel):
+    """What the app loaded from the game when the user started editing one of its teams (fsmod.original_team): the
+    build compares the team with it and only rewrites what changed, so untouched files and rows stay the game's
+    own (no DXT re-compression, the street pieces the game picks at random kept)."""
+    team: dict = {}  # the editable Team fields as loaded (JSON, original_team.EDITABLE_FIELDS)
+    images: dict[str, str] = {}  # SHA-1 of each image as loaded, by field path ('crest', 'real_kits.home.jersey'...)
 
 
 class Team(Entity):
@@ -132,6 +145,8 @@ class Team(Entity):
     primary_color: RGB
     secondary_color: RGB
     team_id: Optional[int] = None  # teamid in the game (a new one, unused by the game); None = given by the build
+    original_id: Optional[int] = None  # the game's own team this entry edits (same teamid in the game); None = new
+    loaded: Optional[OriginalSnapshot] = None  # original team: what was loaded from the game (fsmod.original_team)
     short_name: Optional[str] = None
     name_10: Optional[str] = None
     name_7: Optional[str] = None
@@ -142,7 +157,9 @@ class Team(Entity):
     use_real_kits: bool = False  # team kits from real_kits (FIFA 14-16 packs) instead of solid color + crest
     real_kits: dict[RealKitSlot, RealKit] = {}  # kept when use_real_kits is off (switching back keeps them)
     template: int = 112298  # generic FS4 team whose rows are cloned (default values: players, street kits)
-    captain: Optional[str] = None  # player uid; None = first player
+    captain: Optional[PlayerRef] = None  # new team: player uid, None = first player; original team: playerid,
+    # None = the game's
+    takers: dict[TakerRole, PlayerRef] = {}  # set pieces; a role left out = the captain (original team: the game's)
     lineups: list[Lineup] = []  # starting lineup per game mode (fs4lineup); a mode without one = the game's pick
     hidden: bool = False  # left out of the patch (with its players), e.g. not ready yet
 
@@ -157,6 +174,10 @@ class Team(Entity):
         """The RealKit the build uses for slot, or None (generic kit; goalkeeper: the game's default)."""
         k = self.real_kits.get(slot) if self.use_real_kits else None
         return k if k and k.complete else None
+
+    @property
+    def is_original(self):
+        return self.original_id is not None
 
 
 class OriginalChanges(BaseModel):
@@ -182,6 +203,15 @@ class Project(Entity):
 
     def roster(self, team_uid):
         return [p for p in self.players if p.team == team_uid]
+
+    @property
+    def new_teams(self):
+        return [t for t in self.teams if not t.is_original]
+
+    @property
+    def original_teams(self):
+        """Entries that edit the game's own teams (Team.original_id)."""
+        return [t for t in self.teams if t.is_original]
 
     def visible(self):
         """The project without what the user hid: hidden leagues (and their teams), hidden teams (and their

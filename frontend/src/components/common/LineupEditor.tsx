@@ -1,13 +1,12 @@
 import { ArrowDown, ArrowUp, Plus, RotateCcw } from 'lucide-react'
-import { useState } from 'react'
-import type { Lineup, LineupMode, Player, Team } from '@/api/types'
+import { type ReactNode, useState } from 'react'
+import type { Lineup, LineupMode, PlayerRef, Team } from '@/api/types'
 import { EntityIssues, Field } from '@/components/common/form'
-import { PlayerAvatar } from '@/components/common/PlayerPhoto'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { type MessageKey, useI18n } from '@/i18n'
-import { lineupOrder, modeKey } from '@/lib/lineup'
+import { lineupOrder, modeKey, suggestLineup } from '@/lib/lineup'
 import { useProject } from '@/state/project'
 import { useCatalog, useLookups } from '@/state/queries'
 
@@ -28,8 +27,13 @@ const MODE_NAMES: Record<string, MessageKey> = {
   [modeKey(2, false)]: 'lineup.modePanna',
 }
 
-const playerName = (p: Player | undefined, fallback: string) =>
-  (p && (p.display_name || `${p.first_name} ${p.last_name}`.trim())) || fallback
+/** A player the lineup can use: project player (ref = uid) or one of the game's (ref = playerid). */
+export interface LineupPlayer {
+  ref: PlayerRef
+  name: string
+  position?: number | null
+  avatar: ReactNode
+}
 
 function AreaBadge({ area }: { area: number }) {
   const { t } = useI18n()
@@ -41,22 +45,28 @@ function AreaBadge({ area }: { area: number }) {
   )
 }
 
-/** Starting lineup and tactic per game mode (fs4lineup). A mode left automatic gets the game's pick. */
-export function LineupEditor({ team }: { team: Team }) {
+/** Starting lineup and tactic per game mode (fs4lineup). A mode left automatic gets the game's pick. Players are
+ * handled by string keys (String(ref)), mapped back to their refs when saved. */
+export function LineupEditor({ team, players: roster }: { team: Team; players: LineupPlayer[] }) {
   const { t } = useI18n()
-  const { draft, updateTeam, defaults } = useProject()
+  const { updateTeam } = useProject()
   const { position: positionAbbr } = useLookups()
   const modes = useCatalog().data?.lineup_modes ?? []
   const [selected, setSelected] = useState(DEFAULT_MODE)
-  const roster = draft.players.filter((p) => p.team === team.uid && !p.hidden)
-  const rosterUids = roster.map((p) => p.uid)
-  const byUid = new Map(roster.map((p) => [p.uid, p]))
+  const rosterUids = roster.map((p) => String(p.ref))
+  const byUid = new Map(roster.map((p) => [String(p.ref), p]))
+  const ref = (key: string) => byUid.get(key)?.ref ?? key
   const lineups = team.lineups ?? []
   const mode = modes.find((m) => modeKey(m.players, m.goalkeeper) === selected)
   const index = lineups.findIndex((l) => modeKey(l.players, l.goalkeeper) === selected)
-  const lineup = index >= 0 ? lineups[index] : undefined
+  const stored = index >= 0 ? lineups[index] : undefined
+  const keyed = (l: Lineup) => ({
+    ...l,
+    starters: l.starters.map((u) => (u == null ? null : String(u))),
+    reserves: l.reserves.map(String),
+  })
+  const lineup = stored && keyed(stored)
 
-  const position = (p: Player) => p.position ?? defaults[p.uid]?.position
   const modeLabel = (m: LineupMode) => {
     const key = modeKey(m.players, m.goalkeeper)
     const base = t(m.goalkeeper ? 'lineup.modeWithGK' : 'lineup.modeWithoutGK', { count: m.players })
@@ -68,11 +78,22 @@ export function LineupEditor({ team }: { team: Team }) {
   const create = (m: LineupMode) => {
     // starts from the default mode's lineup when there is one (its goalkeeper left out of a mode without one)
     const main = lineups.find((l) => modeKey(l.players, l.goalkeeper) === DEFAULT_MODE)
-    let base = main ? lineupOrder(main, rosterUids) : rosterUids
+    let base = main
+      ? lineupOrder(keyed(main), rosterUids)
+      : suggestLineup(
+          roster.map((p) => ({ key: String(p.ref), position: p.position })),
+          m.tactics[String(DEFAULT_TACTIC)] ?? [],
+        )
     if (main && !m.goalkeeper) base = [...base.slice(1), ...base.slice(0, 1)]
     setLineups([
       ...lineups,
-      { players: m.players, goalkeeper: m.goalkeeper, tactic: DEFAULT_TACTIC, starters: base.slice(0, m.players), reserves: base.slice(m.players) },
+      {
+        players: m.players,
+        goalkeeper: m.goalkeeper,
+        tactic: DEFAULT_TACTIC,
+        starters: base.slice(0, m.players).map(ref),
+        reserves: base.slice(m.players).map(ref),
+      },
     ])
   }
 
@@ -89,12 +110,12 @@ export function LineupEditor({ team }: { team: Team }) {
     const other = uid ? starters.indexOf(uid) : -1
     if (other >= 0) starters[other] = starters[slot]
     starters[slot] = uid
-    setLineup({ starters })
+    setLineup({ starters: starters.map((u) => (u == null ? null : ref(u))) })
   }
   const moveBench = (k: number, delta: number) => {
     const reserves = [...bench]
     ;[reserves[k], reserves[k + delta]] = [reserves[k + delta], reserves[k]]
-    setLineup({ reserves })
+    setLineup({ reserves: reserves.map(ref) })
   }
 
   return (
@@ -181,20 +202,20 @@ export function LineupEditor({ team }: { team: Team }) {
                       <SelectContent>
                         <SelectItem value={AUTO}>
                           {filled && !valid
-                            ? t('lineup.autoSlotFilled', { name: playerName(byUid.get(filled), t('common.unnamed')) })
+                            ? t('lineup.autoSlotFilled', { name: byUid.get(filled)?.name ?? t('common.unnamed') })
                             : t('lineup.autoSlot')}
                         </SelectItem>
                         {roster.map((p) => (
-                          <SelectItem key={p.uid} value={p.uid}>
-                            {playerName(p, t('common.unnamed'))}
-                            {position(p) != null && (
-                              <span className="text-muted-foreground"> · {positionAbbr.get(position(p)!) ?? position(p)}</span>
+                          <SelectItem key={String(p.ref)} value={String(p.ref)}>
+                            {p.name}
+                            {p.position != null && (
+                              <span className="text-muted-foreground"> · {positionAbbr.get(p.position) ?? p.position}</span>
                             )}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    {filled && <PlayerAvatar player={byUid.get(filled)!} />}
+                    {filled && byUid.get(filled)?.avatar}
                   </div>
                 )
               })}
@@ -208,8 +229,8 @@ export function LineupEditor({ team }: { team: Team }) {
                   {bench.map((uid, k) => (
                     <li key={uid} className="flex items-center gap-3 px-3 py-1.5 text-sm">
                       <span className="w-5 text-muted-foreground">{k + 1}</span>
-                      <PlayerAvatar player={byUid.get(uid)!} />
-                      <span className="flex-1">{playerName(byUid.get(uid), t('common.unnamed'))}</span>
+                      {byUid.get(uid)?.avatar}
+                      <span className="flex-1">{byUid.get(uid)?.name ?? t('common.unnamed')}</span>
                       <Button variant="ghost" size="icon" disabled={k === 0} onClick={() => moveBench(k, -1)} title={t('lineup.moveUp')}>
                         <ArrowUp />
                       </Button>

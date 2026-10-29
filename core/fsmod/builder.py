@@ -29,7 +29,8 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from . import big, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, photo, preview, scanface, t3db
+from . import (big, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, original_team, photo, preview,
+               rx3tex, scanface, t3db)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
 HIDDEN_LEAGUES = {382, 76, 2092, 2095, 2097}  # ids the league selector never shows
@@ -66,6 +67,7 @@ TEAM_TEXT_KEYS = {'name': 'TeamName_{}', 'short_name': 'TeamName_Abbr15_{}', 'na
 LINEUP_SLOTS = 13  # fs4lineup position0..12
 TAKER_FIELDS = ('captainid', 'penaltytakerid', 'freekicktakerid', 'leftcornerkicktakerid',
                 'rightcornerkicktakerid', 'longkicktakerid')
+TAKER_ROLES = original_team.TAKER_ROLES  # model.TakerRole -> teams column
 
 
 def lineup_order(lineup, roster_uids):
@@ -86,6 +88,7 @@ def lineup_order(lineup, roster_uids):
 
 
 def _lineup_rows(db, tid, lineups, pids, roster_uids):
+    """fs4lineup rows of a team. pids: player ref (project uid or the game's playerid) -> playerid."""
     t = db.table('fs4lineup')
     for lineup in lineups:
         order = [pids[u] for u in lineup_order(lineup, roster_uids)]
@@ -188,9 +191,9 @@ def team_id_is_free(game, teamid):
 
 def assign_team_ids(project, reserved, is_free=lambda teamid: True):
     """{team uid: teamid} for the teams without team_id: the smallest free ids from FIRST_NEW_TEAMID."""
-    used = set(reserved) | {t.team_id for t in project.teams if t.team_id is not None}
+    used = set(reserved) | {t.team_id for t in project.new_teams if t.team_id is not None}
     out, tid = {}, FIRST_NEW_TEAMID
-    for tm in project.teams:
+    for tm in project.new_teams:
         if tm.team_id is not None:
             continue
         while tid in used or not is_free(tid):
@@ -269,7 +272,7 @@ def template_sources(project, team_links):
     the team's template team (cycling). team_links(teamid) -> [(playerid, number, position)] in database order.
     Free agents only have a source when they set `template` (they are not built)."""
     out = {}
-    for tm in project.teams:
+    for tm in project.new_teams:
         links = team_links(tm.template)
         for k, pl in enumerate(project.roster(tm.uid)):
             if not links:
@@ -330,6 +333,33 @@ def _real_kit_files(game, tid, kind_n, real, assets_dir, crest_img, uid):
     return files, lines
 
 
+def _kit_color_fields(db, table, row, colors):
+    """teamkits colors of a generic kit ({'jersey'|'shorts'|'socks': RGB})."""
+    for part, key in (('top', 'jersey'), ('bottom', 'shorts'), ('sock', 'socks')):
+        for which in ('primary', 'secondary', 'tertiary'):
+            # secondary = trim: shorts use the jersey color, the others use the shorts color
+            c = colors[key] if which != 'secondary' else (colors['jersey'] if key == 'shorts' else colors['shorts'])
+            for ch, v in zip('rgb', c):
+                db.put(table, row, f'{part}_color_{which}_{ch}', v)
+    for ch, v in zip('rgb', colors['jersey']):
+        db.put(table, row, f'teamcolorprim{ch}', v)
+
+
+def _street_kit_fields(db, table, row, street):
+    """teamkits fields of the street pieces a StreetKit sets (None or a missing part keeps the row's)."""
+    for part, col in (('top', 'top'), ('bottom', 'bottom'), ('socks', 'sock')):
+        piece = street and getattr(street, part)
+        if not piece:
+            continue
+        # the game picks one of the slots at random: the same piece in all of them fixes it
+        for n in range(1, STREET_SLOTS[col] + 1):
+            db.put(table, row, f'{col}_geo_type_{n}', piece.style)
+            db.put(table, row, f'{col}_texture_pattern_{n}', piece.pattern)
+        for which, c in zip(('primary', 'secondary', 'tertiary'), piece.colors):
+            for ch, v in zip('rgb', c):
+                db.put(table, row, f'{col}_color_{which}_{ch}', v)
+
+
 def _real_kit_fields(db, table, row, real):
     """teamkits fields of a real kit: name/number colors, collar, front number."""
     for ch, v in zip('rgb', real.name_color):
@@ -338,6 +368,103 @@ def _real_kit_fields(db, table, row, real):
     db.put(table, row, 'shortsnumbercolor', real.shorts_number_color)
     db.put(table, row, 'jerseycollargeometrytype', real.collar)
     db.put(table, row, 'jerseyfrontnumberplacementcode', 1 if real.front_number else 0)
+    if real.shorts_number is not None:
+        db.put(table, row, 'shortsnumberplacementcode', 1 if real.shorts_number else 0)
+
+
+def _build_original_team(db, game, tm, assets_dir, league_id, texts, say):
+    """Applies an original team entry (Team.original_id) to the game's own rows, texts and files, only where it
+    differs from what was loaded (original_team.changes). Returns the jobs that make its image files
+    (() -> ({internal name: bytes}, log lines)), run in the image pool."""
+    tid = tm.original_id
+    ch = original_team.changes(tm, assets_dir)
+    teams = db.table('teams')
+    rows = db.rows('teams', 'teamid', tid)
+    if not rows:
+        raise BuildError(f'{tm.name}: original team {tid} does not exist', tm.uid)
+    row = teams.records[rows[0]]
+    say(f'original team {tid} "{tm.name}"' + ('' if ch.any else ' (unchanged)'))
+    if 'name' in ch.texts:
+        db.put(teams, row, 'teamname', tm.name[:30])
+        texts[f'CT_TeamName_{tid}'] = tm.name
+    for attr in ch.texts:
+        texts[TEAM_TEXT_KEYS[attr].format(tid)] = getattr(tm, attr) or tm.name
+    # captain and set-piece takers: playerids of the game's players, written only where they differ from the game's
+    for f, pid in (('captainid', tm.captain), *((TAKER_ROLES[r], p) for r, p in tm.takers.items())):
+        if isinstance(pid, int) and pid != db.get(teams, row, f):
+            db.put(teams, row, f, pid)
+    if tm.lineups:
+        links = db.table('teamplayerlinks')
+        squad = [db.get(links, links.records[k], 'playerid') for k in db.rows('teamplayerlinks', 'teamid', tid)]
+        _lineup_rows(db, tid, tm.lineups, {pid: pid for pid in squad}, squad)
+    if ch.colors:
+        for n, rgb in (('1', tm.primary_color), ('2', tm.secondary_color)):
+            for c, v in zip('rgb', _rgb(rgb, f'teamcolor{n}', tm.uid)):
+                db.put(teams, row, f'teamcolor{n}{c}', v)
+    if ch.league:
+        links = db.table('leagueteamlinks')
+        for k in db.rows('leagueteamlinks', 'teamid', tid):
+            db.put(links, links.records[k], 'leagueid', league_id)
+            db.put(links, links.records[k], 'tableposition', len(db.rows('leagueteamlinks', 'leagueid', league_id)))
+
+    team_kits = db.table('teamkits')
+    kit_rows = {db.get(team_kits, r, 'teamkittypetechid'): r for r in team_kits.records
+                if db.get(team_kits, r, 'teamtechid') == tid}
+    for kind, n in original_team.STREET_KINDS:
+        if kind in ch.street_kits and n in kit_rows:
+            _street_kit_fields(db, team_kits, kit_rows[n], tm.street_kits.get(kind))
+
+    jobs = []
+    crest_path = os.path.join(assets_dir, tm.crest) if tm.crest else None
+
+    def crest_image():
+        return Image.open(crest_path).convert('RGBA') if crest_path else Image.new('RGBA', (26, 26))
+
+    if ch.crest and crest_path:
+        jobs.append(lambda: ({**crest.ui_crest_files(game, tid, crest_image()),
+                              **crest.scene_crest_files(game, tid, crest_image())}, []))
+    if tm.use_real_kits:
+        for kind, n in original_team.KIT_SLOTS:
+            real = tm.real_kit(kind)
+            parts = ch.real_kits.get(kind, set())
+            if real is None:
+                continue
+            if 'settings' in parts and n in kit_rows:
+                _real_kit_fields(db, team_kits, kit_rows[n], real)
+            if 'jersey' in parts or ch.kits_mode:
+                # a new jersey is a real kit of its own (crest painted in, FIFA 16 positions): built like a new team's
+                thumb = real.thumbnail if 'thumbnail' in parts else None
+                jobs.append(lambda n=n, real=real, thumb=thumb: _real_kit_files(
+                    game, tid, n, real.model_copy(update={'thumbnail': thumb}), assets_dir, crest_image(), tm.uid))
+                continue
+            if 'shorts' in parts or (ch.crest and crest_path):
+                # the game's own kit with the new shorts and/or crest (its jersey, crest decal and positions kept)
+                jobs.append(lambda n=n, real=real, shorts='shorts' in parts: _edited_kit_files(
+                    game, tid, n, os.path.join(assets_dir, real.shorts) if shorts else None,
+                    crest_image() if ch.crest and crest_path else None))
+            if 'thumbnail' in parts and real.thumbnail:
+                jobs.append(lambda n=n, real=real: ({kit.thumbnail_name(tid, n): kit.thumbnail_dds(
+                    Image.open(os.path.join(assets_dir, real.thumbnail)))}, []))
+    elif ch.kits_mode or ch.kit_colors or ch.colors or ch.crest:
+        for kind, n in original_team.STREET_KINDS:  # generic kits (solid colors + crest), like a new team's
+            colors = tm.kit(kind)
+            colors = {part: _rgb(getattr(colors, part), f'{kind}.{part}', tm.uid)
+                      for part in ('jersey', 'shorts', 'socks')}
+            if n in kit_rows:
+                _kit_color_fields(db, team_kits, kit_rows[n], colors)
+            jobs.append(lambda n=n, colors=colors: _kit_files(game, tid, n, colors, crest_image()))
+    return jobs
+
+
+def _edited_kit_files(game, tid, kind_n, shorts_path, crest_img):
+    """The game's own kit rx3 of an original team with new shorts and/or a new crest decal."""
+    name = kit.kit_name(tid, kind_n)
+    d = bytearray(chunk.decode(game.read_entry(name)[2]))
+    if shorts_path:
+        rx3tex.set_image_dxt1(d, rx3tex.by_name(d, 'shorts_cm'), Image.open(shorts_path).convert('RGB'))
+    if crest_img is not None:
+        rx3tex.set_image(d, rx3tex.by_name(d, 'crest_cm'), crest.square(crest_img), bg=(255, 255, 255))
+    return {name: chunk.chunkzip(bytes(d))}, [f'{name}: edited']
 
 
 def _face_files(pl, pid, hair_color_code, game, assets_dir, templates):
@@ -425,7 +552,7 @@ def build(project, game, assets_dir, log=None, progress=None):
     teams = db.table('teams')
     bank_teams = {db.get(teams, r, 'teamid') for r in teams.records}
     reserved_teams = reserved_team_ids(bank_teams, locale_keys)
-    result.assigned_team_ids = assign_team_ids(project, reserved_teams | {t.team_id for t in every.teams},
+    result.assigned_team_ids = assign_team_ids(project, reserved_teams | {t.team_id for t in every.new_teams},
                                                lambda t: team_id_is_free(game, t))
     # players: playerids no one uses in the game; photo and face go as loose files named by it
     original_pids = {db.get(db.table('players'), r, 'playerid') for r in db.table('players').records}
@@ -445,7 +572,7 @@ def build(project, game, assets_dir, log=None, progress=None):
     for k, r in enumerate(players_table.records):
         original_player_rows.setdefault(db.get(players_table, r, 'playerid'), k)
     step('leagues', len(project.leagues), len(project.leagues))
-    for k, tm in enumerate(project.teams):
+    for k, tm in enumerate(project.new_teams):
         step('teams', k, len(project.teams))
         league_id = league_ids.get(tm.league) if isinstance(tm.league, str) else int(tm.league)
         if league_id is None or league_id not in existing:
@@ -560,8 +687,9 @@ def build(project, game, assets_dir, log=None, progress=None):
         db.put(teams, row, 'assetid', tid)
         db.put(teams, row, 'teamname', tm.name[:30])
         captain = pids.get(tm.captain, pids[roster[0].uid])
-        for f in TAKER_FIELDS:
-            db.put(teams, row, f, captain)
+        db.put(teams, row, 'captainid', captain)
+        for role, f in TAKER_ROLES.items():
+            db.put(teams, row, f, pids.get(tm.takers.get(role), captain))
         for n, rgb in (('1', primary), ('2', secondary), ('3', primary)):
             for ch, v in zip('rgb', rgb):
                 db.put(teams, row, f'teamcolor{n}{ch}', v)
@@ -588,26 +716,8 @@ def build(project, game, assets_dir, log=None, progress=None):
             db.put(team_kits, r, 'teamtechid', tid)
             db.put(team_kits, r, 'teamkitid', kit_id)
             kit_id += 1
-            for part, key in (('top', 'jersey'), ('bottom', 'shorts'), ('sock', 'socks')):
-                for which in ('primary', 'secondary', 'tertiary'):
-                    # secondary = trim: shorts use the jersey color, the others use the shorts color
-                    c = colors[key] if which != 'secondary' else (colors['jersey'] if key == 'shorts' else colors['shorts'])
-                    for ch, v in zip('rgb', c):
-                        db.put(team_kits, r, f'{part}_color_{which}_{ch}', v)
-            for ch, v in zip('rgb', colors['jersey']):
-                db.put(team_kits, r, f'teamcolorprim{ch}', v)
-            street = tm.street_kits.get(kind)
-            for part, col in (('top', 'top'), ('bottom', 'bottom'), ('socks', 'sock')):
-                piece = street and getattr(street, part)
-                if not piece:
-                    continue
-                # the game picks one of the slots at random: the same piece in all of them fixes it
-                for n in range(1, STREET_SLOTS[col] + 1):
-                    db.put(team_kits, r, f'{col}_geo_type_{n}', piece.style)
-                    db.put(team_kits, r, f'{col}_texture_pattern_{n}', piece.pattern)
-                for which, c in zip(('primary', 'secondary', 'tertiary'), piece.colors):
-                    for ch, v in zip('rgb', c):
-                        db.put(team_kits, r, f'{col}_color_{which}_{ch}', v)
+            _kit_color_fields(db, team_kits, r, colors)
+            _street_kit_fields(db, team_kits, r, tm.street_kits.get(kind))
             real = tm.real_kit(kind)
             if real:
                 _real_kit_fields(db, team_kits, r, real)
@@ -641,12 +751,29 @@ def build(project, game, assets_dir, log=None, progress=None):
                 jobs.append(pool.submit(_real_kit_files, game, tid, kind_n, real, assets_dir, crest_img, tm.uid))
             elif kind != 'goalkeeper':
                 jobs.append(pool.submit(_kit_files, game, tid, kind_n, kits[kind], crest_img))
+
+    # ---- original teams edited in place (same teamid): only what changed since they were loaded
+    original_jobs = set()
+    for k, tm in enumerate(project.original_teams):
+        step('teams', len(project.new_teams) + k, len(project.teams))
+        league_id = league_ids.get(tm.league) if isinstance(tm.league, str) else int(tm.league)
+        if league_id is None or league_id not in existing:
+            raise BuildError(f'{tm.name}: league {tm.league} does not exist', tm.uid)
+        for job in _build_original_team(db, game, tm, assets_dir, league_id, texts, say):
+            future = pool.submit(job)
+            jobs.append(future)
+            original_jobs.add(future)
     step('teams', len(project.teams), len(project.teams))
     try:
         for k, job in enumerate(jobs):
             step('images', k, len(jobs))
             files, lines = job.result()
-            result.loose.update(files)
+            for name, data in files.items():
+                loc = game.locate(name) if job in original_jobs else None
+                if loc:  # a file the game has: replaced inside its archive (a loose file would lose)
+                    entries[f'data{loc[0]}.big', name] = data
+                else:
+                    result.loose[name] = data
             for line in lines:
                 say('  ' + line)
     finally:

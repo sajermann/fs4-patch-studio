@@ -141,6 +141,8 @@ class Catalog:
                 'primary_color': [self.db.get(t, r, f'teamcolor1{c}') for c in 'rgb'],
                 'secondary_color': [self.db.get(t, r, f'teamcolor2{c}') for c in 'rgb'],
                 'generic': bool(self.db.get(t, r, 'isgeneric')),
+                'captain': self.db.get(t, r, 'captainid'),
+                'takers': {role: self.db.get(t, r, f) for role, f in builder.TAKER_ROLES.items()},
                 'lockable': tid in self._unlockables[builder.UNLOCKABLE_TEAM],
                 'locked': self._unlockables[builder.UNLOCKABLE_TEAM].get(tid, False)})
         return out

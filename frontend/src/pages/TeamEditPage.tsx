@@ -4,12 +4,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError, api, imageUrl, kitPreviewUrl } from '@/api/client'
 import type { KitKind, KitPart, RGB, Team } from '@/api/types'
-import { ColorInput, EntityIssues, Field, FieldIssues, NumberInput } from '@/components/common/form'
+import { ColorInput, EntityIssues, Field, FieldIssues, NumberInput, OriginalBadge } from '@/components/common/form'
 import { OutOfPatchBadge } from '@/components/common/HideButton'
-import { LineupEditor } from '@/components/common/LineupEditor'
-import { PlayerAvatar } from '@/components/common/PlayerPhoto'
+import { LineupEditor, type LineupPlayer } from '@/components/common/LineupEditor'
+import { OriginalPlayerAvatar, PlayerAvatar } from '@/components/common/PlayerPhoto'
 import { RealKitEditor } from '@/components/common/RealKitEditor'
 import { StreetKitEditor } from '@/components/common/StreetKitEditor'
+import { RoleCells, RoleHeads, TakersCard } from '@/components/common/TakersCard'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,11 +32,11 @@ import { BackButton, useBack, useFrom, useGoBack, useKeepBack, useTabParam } fro
 import { useI18n } from '@/i18n'
 import { useCopy } from '@/lib/copy'
 import { KIT_LABELS, KIT_PART_LABELS } from '@/lib/labels'
-import { lineupsWithout } from '@/lib/lineup'
-import { fullKit, useLeagueTeams } from '@/lib/teams'
+import { lineupsWithout, takersWithout } from '@/lib/lineup'
+import { effectiveRoles, fullKit, useLeagueTeams } from '@/lib/teams'
 import { cn } from '@/lib/utils'
 import { newUid, useIssues, useProject } from '@/state/project'
-import { useCatalog, useLookups, useOriginalLeagues } from '@/state/queries'
+import { useCatalog, useLookups, useOriginalLeagues, useOriginalPlayers, useOriginalTeams } from '@/state/queries'
 
 const AUTO = 'auto'
 
@@ -285,152 +286,240 @@ function RosterTab({ team }: { team: Team }) {
     navigate(`/players/${uid}`, from)
   }
 
+  const name = (p: (typeof roster)[number]) => p.display_name || `${p.first_name} ${p.last_name}`.trim() || t('common.unnamed')
+  const captainPlayer = active.find((p) => p.uid === captain)
+  const roles = effectiveRoles(captain, team.takers ?? {})
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          {t('teamEdit.roster')}{' '}
-          <span className="font-normal text-muted-foreground">
-            ({active.length}/{max})
-          </span>
-        </CardTitle>
-        <CardDescription>{t('teamEdit.rosterDescription')}</CardDescription>
-        <CardAction>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setFreeOpen(true)} disabled={active.length >= max}>
-              <UserPlus /> {t('teamEdit.addFreeAgent')}
-            </Button>
-            <Button size="sm" onClick={createPlayer} disabled={active.length >= max}>
-              <Plus /> {t('players.new')}
-            </Button>
-          </div>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
-        <FieldIssues issues={rosterIssues} />
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-20">{t('teamEdit.captain')}</TableHead>
-              <TableHead>{t('list.colName')}</TableHead>
-              <TableHead className="w-24">{t('teamEdit.number')}</TableHead>
-              <TableHead className="w-36">{t('players.colPosition')}</TableHead>
-              <TableHead className="w-20" />
-              <TableHead className="w-12" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {roster.map((p) => (
-              <TableRow key={p.uid}>
-                <TableCell>
-                  <input
-                    type="radio"
-                    name={`captain-${team.uid}`}
-                    checked={captain === p.uid}
-                    disabled={p.hidden}
-                    onChange={() => updateTeam(team.uid, { captain: p.uid })}
-                    className="size-4 accent-primary"
-                    aria-label={t('teamEdit.captain')}
-                  />
-                </TableCell>
-                <TableCell>
-                  <span className="flex items-center gap-2">
-                    <PlayerAvatar player={p} />
-                    <Link
-                      to={`/players/${p.uid}`}
-                      state={from.state}
-                      className={cn('font-medium underline-offset-4 hover:underline', p.hidden && 'text-muted-foreground')}
-                    >
-                      {p.display_name || `${p.first_name} ${p.last_name}`.trim() || t('common.unnamed')}
-                    </Link>
-                    {p.hidden && <OutOfPatchBadge />}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <NumberInput
-                    value={p.number}
-                    onChange={(v) => updatePlayer(p.uid, { number: v })}
-                    min={1}
-                    max={99}
-                    className="h-8"
-                    placeholder={defaults[p.uid]?.number != null ? t('common.inherited', { value: defaults[p.uid].number }) : t('common.default')}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Select
-                    value={p.position === undefined ? AUTO : String(p.position)}
-                    onValueChange={(v) => updatePlayer(p.uid, { position: v === AUTO ? undefined : Number(v) })}
-                  >
-                    <SelectTrigger size="sm" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={AUTO}>
-                        {defaults[p.uid]?.position != null
-                          ? t('common.inherited', { value: positionAbbr.get(defaults[p.uid].position!) ?? defaults[p.uid].position })
-                          : t('street.reset')}
-                      </SelectItem>
-                      {(catalog?.positions ?? []).map((pos) => (
-                        <SelectItem key={pos.code} value={String(pos.code)}>
-                          {pos.abbr}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell>
-                  <EntityIssues uid={p.uid} />
-                </TableCell>
-                <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    title={t('teamEdit.removeFromTeam')}
-                    onClick={() => {
-                      updatePlayer(p.uid, { team: null })
-                      updateTeam(team.uid, {
-                        captain: team.captain === p.uid ? undefined : team.captain,
-                        lineups: lineupsWithout(team, p.uid),
-                      })
-                    }}
-                  >
-                    <UserMinus />
-                  </Button>
-                </TableCell>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            {t('teamEdit.roster')}{' '}
+            <span className="font-normal text-muted-foreground">
+              ({active.length}/{max})
+            </span>
+          </CardTitle>
+          <CardDescription>{t('teamEdit.rosterDescription')}</CardDescription>
+          <CardAction>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setFreeOpen(true)} disabled={active.length >= max}>
+                <UserPlus /> {t('teamEdit.addFreeAgent')}
+              </Button>
+              <Button size="sm" onClick={createPlayer} disabled={active.length >= max}>
+                <Plus /> {t('players.new')}
+              </Button>
+            </div>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <FieldIssues issues={rosterIssues} />
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t('list.colName')}</TableHead>
+                <TableHead className="w-24">{t('teamEdit.number')}</TableHead>
+                <TableHead className="w-36">{t('players.colPosition')}</TableHead>
+                <RoleHeads />
+                <TableHead className="w-20" />
+                <TableHead className="w-12" />
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-      <Dialog open={freeOpen} onOpenChange={setFreeOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('teamEdit.addFreeAgentTitle')}</DialogTitle>
-            <DialogDescription>{t('teamEdit.addFreeAgentDescription')}</DialogDescription>
-          </DialogHeader>
-          {freeAgents.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t('teamEdit.noFreeAgents')}</p>
-          ) : (
-            <ul className="divide-y">
-              {freeAgents.map((p) => (
-                <li key={p.uid} className="flex items-center justify-between py-2">
-                  <span>{p.display_name || `${p.first_name} ${p.last_name}`.trim() || t('common.unnamed')}</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={roster.length >= max}
-                    onClick={() => updatePlayer(p.uid, { team: team.uid })}
-                  >
-                    {t('common.add')}
-                  </Button>
-                </li>
+            </TableHeader>
+            <TableBody>
+              {roster.map((p) => (
+                <TableRow key={p.uid}>
+                  <TableCell>
+                    <span className="flex items-center gap-2">
+                      <PlayerAvatar player={p} />
+                      <Link
+                        to={`/players/${p.uid}`}
+                        state={from.state}
+                        className={cn('font-medium underline-offset-4 hover:underline', p.hidden && 'text-muted-foreground')}
+                      >
+                        {p.display_name || `${p.first_name} ${p.last_name}`.trim() || t('common.unnamed')}
+                      </Link>
+                      {p.hidden && <OutOfPatchBadge />}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <NumberInput
+                      value={p.number}
+                      onChange={(v) => updatePlayer(p.uid, { number: v })}
+                      min={1}
+                      max={99}
+                      className="h-8"
+                      placeholder={defaults[p.uid]?.number != null ? t('common.inherited', { value: defaults[p.uid].number }) : t('common.default')}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={p.position === undefined ? AUTO : String(p.position)}
+                      onValueChange={(v) => updatePlayer(p.uid, { position: v === AUTO ? undefined : Number(v) })}
+                    >
+                      <SelectTrigger size="sm" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={AUTO}>
+                          {defaults[p.uid]?.position != null
+                            ? t('common.inherited', { value: positionAbbr.get(defaults[p.uid].position!) ?? defaults[p.uid].position })
+                            : t('street.reset')}
+                        </SelectItem>
+                        {(catalog?.positions ?? []).map((pos) => (
+                          <SelectItem key={pos.code} value={String(pos.code)}>
+                            {pos.abbr}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <RoleCells player={p.uid} roles={roles} />
+                  <TableCell>
+                    <EntityIssues uid={p.uid} />
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title={t('teamEdit.removeFromTeam')}
+                      onClick={() => {
+                        updatePlayer(p.uid, { team: null })
+                        updateTeam(team.uid, {
+                          captain: team.captain === p.uid ? undefined : team.captain,
+                          takers: takersWithout(team, p.uid),
+                          lineups: lineupsWithout(team, p.uid),
+                        })
+                      }}
+                    >
+                      <UserMinus />
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </ul>
-          )}
-        </DialogContent>
-      </Dialog>
-    </Card>
+            </TableBody>
+          </Table>
+        </CardContent>
+        <Dialog open={freeOpen} onOpenChange={setFreeOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('teamEdit.addFreeAgentTitle')}</DialogTitle>
+              <DialogDescription>{t('teamEdit.addFreeAgentDescription')}</DialogDescription>
+            </DialogHeader>
+            {freeAgents.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t('teamEdit.noFreeAgents')}</p>
+            ) : (
+              <ul className="divide-y">
+                {freeAgents.map((p) => (
+                  <li key={p.uid} className="flex items-center justify-between py-2">
+                    <span>{p.display_name || `${p.first_name} ${p.last_name}`.trim() || t('common.unnamed')}</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={roster.length >= max}
+                      onClick={() => updatePlayer(p.uid, { team: team.uid })}
+                    >
+                      {t('common.add')}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </DialogContent>
+        </Dialog>
+      </Card>
+      <TakersCard
+        entity={team.uid}
+        players={active.map((p) => ({ value: p.uid, label: name(p) }))}
+        captain={captain}
+        takers={team.takers ?? {}}
+        fallback={{ label: t('takers.captain', { name: captainPlayer ? name(captainPlayer) : '—' }) }}
+        onCaptainChange={(c) => updateTeam(team.uid, { captain: c })}
+        onChange={(takers) => updateTeam(team.uid, { takers })}
+      />
+    </div>
   )
+}
+
+function OriginalRosterTab({ team }: { team: Team }) {
+  const { t } = useI18n()
+  const { updateTeam } = useProject()
+  const { position: positionAbbr } = useLookups()
+  const players = useOriginalPlayers({ team: team.original_id!, limit: 100 }).data?.items ?? []
+  const game = useOriginalTeams().data?.find((o) => o.id === team.original_id)
+  const captain = team.captain ?? game?.captain
+  const takers = { ...game?.takers, ...team.takers }
+  const roles = effectiveRoles(captain, takers)
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            {t('teamEdit.roster')} <span className="font-normal text-muted-foreground">({players.length})</span>
+          </CardTitle>
+          <CardDescription>{t('teamEdit.originalRosterDescription')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t('list.colName')}</TableHead>
+                <TableHead className="w-24">{t('teamEdit.number')}</TableHead>
+                <TableHead className="w-36">{t('players.colPosition')}</TableHead>
+                <RoleHeads />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {players.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell>
+                    <span className="flex items-center gap-2">
+                      <OriginalPlayerAvatar player={p} />
+                      {p.display_name}
+                    </span>
+                  </TableCell>
+                  <TableCell className="tabular-nums">{p.number ?? '—'}</TableCell>
+                  <TableCell>{p.position != null ? (positionAbbr.get(p.position) ?? p.position) : '—'}</TableCell>
+                  <RoleCells player={p.id} roles={roles} />
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+      <TakersCard
+        entity={team.uid}
+        players={players.map((p) => ({ value: p.id, label: p.display_name }))}
+        captain={captain}
+        takers={takers}
+        onCaptainChange={(c) => updateTeam(team.uid, { captain: c })}
+        onChange={(takers) => updateTeam(team.uid, { takers })}
+      />
+    </div>
+  )
+}
+
+function ProjectLineupTab({ team }: { team: Team }) {
+  const { t } = useI18n()
+  const { draft, defaults } = useProject()
+  const players: LineupPlayer[] = draft.players
+    .filter((p) => p.team === team.uid && !p.hidden)
+    .map((p) => ({
+      ref: p.uid,
+      name: p.display_name || `${p.first_name} ${p.last_name}`.trim() || t('common.unnamed'),
+      position: p.position ?? defaults[p.uid]?.position,
+      avatar: <PlayerAvatar player={p} />,
+    }))
+  return <LineupEditor team={team} players={players} />
+}
+
+function OriginalLineupTab({ team }: { team: Team }) {
+  const squad = useOriginalPlayers({ team: team.original_id!, limit: 100 }).data?.items ?? []
+  const players: LineupPlayer[] = squad.map((p) => ({
+    ref: p.id,
+    name: p.display_name,
+    position: p.position,
+    avatar: <OriginalPlayerAvatar player={p} />,
+  }))
+  return <LineupEditor team={team} players={players} />
 }
 
 export function TeamEditPage() {
@@ -446,6 +535,7 @@ export function TeamEditPage() {
   const goBack = useGoBack()
   const keepBack = useKeepBack()
   const tabs = useTabParam('data')
+  const original = team?.original_id != null
 
   const copyTeam = async (withRoster: boolean) => {
     setCopyOpen(false)
@@ -472,22 +562,30 @@ export function TeamEditPage() {
         <div className="flex items-center gap-3">
           {team.crest && <img src={imageUrl(team.crest)} alt="" className="size-10 object-contain" />}
           <h1 className="text-2xl font-semibold">{team.name || t('teams.new')}</h1>
+          {original && <OriginalBadge edited />}
           <EntityIssues uid={team.uid} />
         </div>
         <div className="flex gap-2">
+          {!original && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!copy.canCopyTeam(team.uid)}
+              title={
+                copy.canCopyTeam(team.uid) ? t('teamEdit.copyHint') : t('teamEdit.copyMax', { max: copy.maxLeagueTeams })
+              }
+              onClick={() => setCopyOpen(true)}
+            >
+              <Copy /> {t('common.copy')}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
-            disabled={!copy.canCopyTeam(team.uid)}
-            title={
-              copy.canCopyTeam(team.uid) ? t('teamEdit.copyHint') : t('teamEdit.copyMax', { max: copy.maxLeagueTeams })
-            }
-            onClick={() => setCopyOpen(true)}
+            title={original ? t('teamEdit.restoreOriginalHint') : undefined}
+            onClick={() => setDeleteOpen(true)}
           >
-            <Copy /> {t('common.copy')}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
-            <Trash2 /> {t('teamEdit.delete')}
+            {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('teamEdit.delete')}
           </Button>
         </div>
       </div>
@@ -508,11 +606,9 @@ export function TeamEditPage() {
         <TabsContent value="kits">
           <KitsTab team={team} />
         </TabsContent>
-        <TabsContent value="roster">
-          <RosterTab team={team} />
-        </TabsContent>
+        <TabsContent value="roster">{original ? <OriginalRosterTab team={team} /> : <RosterTab team={team} />}</TabsContent>
         <TabsContent value="lineup">
-          <LineupEditor team={team} />
+          {original ? <OriginalLineupTab team={team} /> : <ProjectLineupTab team={team} />}
         </TabsContent>
       </Tabs>
       <Dialog open={copyOpen} onOpenChange={setCopyOpen}>
@@ -532,8 +628,14 @@ export function TeamEditPage() {
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('teamEdit.deleteTitle', { name: team.name || t('teamEdit.theTeam') })}</AlertDialogTitle>
-            <AlertDialogDescription>{t('teamEdit.deleteDescription')}</AlertDialogDescription>
+            <AlertDialogTitle>
+              {t(original ? 'teamEdit.restoreOriginalTitle' : 'teamEdit.deleteTitle', {
+                name: team.name || t('teamEdit.theTeam'),
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {original ? t('teamEdit.restoreOriginalDescription') : t('teamEdit.deleteDescription')}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
@@ -543,7 +645,7 @@ export function TeamEditPage() {
                 goBack(back)
               }}
             >
-              {t('common.delete')}
+              {original ? t('teamEdit.restoreOriginal') : t('common.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

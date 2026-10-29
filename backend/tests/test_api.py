@@ -633,3 +633,36 @@ def test_bad_backups_leave_the_project_alone(env, entries, reason):
     r = c.post('/api/project/restore', files={'file': ('b.zip', data)})
     assert r.status_code == 400 and r.json()['detail']['reason'] == reason, r.text
     assert c.get('/api/project').json()['project'] == saved
+
+
+def test_editing_an_original_team_starts_from_the_game_and_survives_saving(env):
+    from fsmod import model, original_team
+    c = env['client']
+    r = c.post('/api/originals/teams/241/edit', params={'uid': 'tm_barca'})
+    assert r.status_code == 200
+    team = r.json()
+    assert team['original_id'] == 241 and team['league'] == 53 and team['crest'].startswith('images/upload-')
+    assert set(team['real_kits']) == {'home', 'away', 'goalkeeper'} and team['loaded']['images']['crest']
+    assert c.post('/api/originals/teams/999999/edit', params={'uid': 'x'}).status_code == 404
+
+    r = c.put('/api/project', json={'version': 2, 'teams': [team]})
+    assert r.status_code == 200 and not [i for i in r.json()['issues'] if i['severity'] == 'error']
+    saved = model.Team.model_validate(r.json()['project']['teams'][0])
+    assert saved.crest.startswith('images/teams/team-tm_barca')  # fixed names: still unchanged (by content)
+    assert not original_team.changes(saved, str(env['tmp'] / 'project')).any
+
+
+def test_real_kit_preview_prints_name_and_numbers(env):
+    c = env['client']
+    team = c.post('/api/originals/teams/241/edit', params={'uid': 'tm_barca'}).json()
+    home = team['real_kits']['home']
+    loaded = team['loaded']['images']['real_kits.home.jersey']
+    plain = c.get('/api/preview/real-kit/jersey.png', params={'image': home['jersey']}).content
+    printed = c.get('/api/preview/real-kit/jersey.png', params={
+        'image': home['jersey'], 'number': 5, 'name': 'Puyol', 'team': 241, 'kind': 0, 'name_color': '240,218,40',
+        'number_color': 5, 'jersey': home['jersey'], 'loaded': loaded})
+    assert printed.status_code == 200 and printed.content != plain
+    shorts = dict(image=home['shorts'], number=5, team=241, number_color=5, shorts_number_color=5)
+    without = c.get('/api/preview/real-kit/shorts.png', params=shorts).content
+    with_number = c.get('/api/preview/real-kit/shorts.png', params={**shorts, 'shorts_number': True}).content
+    assert with_number != without

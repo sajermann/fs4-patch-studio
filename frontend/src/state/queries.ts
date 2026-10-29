@@ -12,10 +12,11 @@ export const useOriginalTeams = () => useQuery({ queryKey: ['originals', 'teams'
 export const useOriginalStadiums = () =>
   useQuery({ queryKey: ['originals', 'stadiums'], queryFn: api.originalStadiums, ...forever })
 
-export function useOriginalPlayers(params: { team?: number; q?: string; offset?: number; limit?: number }) {
+export function useOriginalPlayers(params: { team?: number; q?: string; offset?: number; limit?: number }, enabled = true) {
   return useQuery({
     queryKey: ['originals', 'players', params],
     queryFn: () => api.originalPlayers(params),
+    enabled,
     ...forever,
     placeholderData: (prev) => prev,
   })

@@ -22,7 +22,7 @@ import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
 import { useOriginalChanges } from '@/lib/originals'
 import { newUid, useProject } from '@/state/project'
-import { useCatalog, useOriginalLeagues } from '@/state/queries'
+import { useCatalog, useOriginalLeagues, useOriginalTeams } from '@/state/queries'
 
 type Row = { kind: 'project'; league: League } | { kind: 'original'; league: OriginalLeague }
 
@@ -30,6 +30,7 @@ export function LeaguesPage() {
   const { t } = useI18n()
   const { draft, addLeague, updateLeague } = useProject()
   const originals = useOriginalLeagues().data ?? []
+  const originalTeams = useOriginalTeams().data ?? []
   const navigate = useNavigate()
   const from = useFrom(t('nav.leagues'))
   const { isLeagueHidden, toggleLeague } = useOriginalChanges()
@@ -45,7 +46,10 @@ export function LeaguesPage() {
   }
 
   const teamCount = (uid: string) => draft.teams.filter((t) => t.league === uid).length
-  const newInOriginal = (id: number) => draft.teams.filter((t) => t.league === id).length
+  const originalLeagueOf = new Map(originalTeams.map((t) => [t.id, t.league]))
+  const newInOriginal = (id: number) =>
+    draft.teams.filter((t) => t.league === id && (t.original_id == null || originalLeagueOf.get(t.original_id) !== id))
+      .length
 
   const list = useListParams(['q', 'origin', 'status'] as const)
   const f = list.values

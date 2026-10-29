@@ -19,7 +19,7 @@ from .faces import FaceError, FaceService
 from .original_images import OriginalImages
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
 from .project_store import BackupError, ProjectStore, migrate_folder
-from fsmod import builder, kit, model, photo, preview, scanface, validation
+from fsmod import builder, kit, kitprint, model, original_team, photo, preview, scanface, validation
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
 
@@ -238,6 +238,16 @@ def create_app(state=None):
         teams = state.catalog().teams
         images = state.original_images
         return [{**t, 'crest': images.has_crest(t['id'])} for t in teams if league is None or t['league'] == league]
+
+    @app.post('/api/originals/teams/{teamid}/edit')
+    def edit_original_team(teamid: int, uid: str):
+        """Starts editing an original team: its crest and kits go into the project as provisional images and the
+        Team comes back filled with what the game has (Team.original_id; the client adds it to the draft)."""
+        c = state.catalog()
+        if teamid not in c.team_ids:
+            raise HTTPException(404, {'code': 'original_team_not_found', 'message': f'Time {teamid} não existe.'})
+        tm = original_team.load(state.game, c, teamid, uid, state.store.save_image)
+        return tm.model_dump(mode='json', exclude_none=True)
 
     @app.get('/api/originals/stadiums')
     def original_stadiums():
@@ -597,10 +607,34 @@ def create_app(state=None):
         return Response(preview_asset(preview.kit_png, part, rgb, crest_img), media_type='image/png')
 
     @app.get('/api/preview/real-kit/{part}.png')
-    def real_kit_texture_preview(image: str, part: str = Path(..., pattern='^(jersey|shorts)$')):
-        """Real kit texture (project PNG of a FIFA 14-16 kit) as the game draws it; shorts also cover the socks."""
-        return Response(preview_asset(preview.real_kit_png, part, Image.open(project_image(image))),
-                        media_type='image/png')
+    def real_kit_texture_preview(image: str, part: str = Path(..., pattern='^(jersey|shorts)$'),
+                                 number: int | None = None, name: str | None = None, team: int | None = None,
+                                 kind: int = 0, name_color: str = '255,255,255', number_color: int = 1,
+                                 shorts_number_color: int = 1, front: bool = False, shorts_number: bool = False,
+                                 jersey: str | None = None, loaded: str | None = None):
+        """Real kit texture (project PNG of a FIFA 14-16 kit) as the game draws it; shorts also cover the socks.
+        With number/name, the player's name and numbers are printed like the game does (fsmod.kitprint): fonts from
+        the teamkits row of `team` (an original team, or a new team's template) and `kind`; positions of the game's
+        own kit when `jersey` is still the one loaded from the game (its SHA-1 = `loaded`), else the real kits'."""
+        img = Image.open(project_image(image))
+        if (number is not None or name) and team is not None:
+            c = state.catalog()
+            kits = c.db.table('teamkits')
+            rows = {c.db.get(kits, r, 'teamkittypetechid'): r for r in kits.records
+                    if c.db.get(kits, r, 'teamtechid') == team}
+            row = rows.get(kind, rows.get(0))
+            if row is not None:
+                same = loaded and jersey and original_team.image_sha1(state.store.folder, jersey) == loaded
+                get = lambda f: c.db.get(kits, row, f)  # noqa: E731
+                img = kitprint.print_kit(
+                    img.convert('RGBA'), part, state.game, number=number, name=name,
+                    rects=kitprint.positions(state.game, team if same else None, kind),
+                    number_font=get('numberfonttype'), shorts_number_font=get('shortsnumberfonttype'),
+                    name_font=get('jerseynamefonttype'), name_case=get('jerseybacknamefontcase'),
+                    number_color=number_color, shorts_number_color=shorts_number_color,
+                    name_color=tuple(int(v) for v in name_color.split(',')), front_number=front,
+                    shorts_number=shorts_number)
+        return Response(preview_asset(preview.real_kit_png, part, img), media_type='image/png')
 
     # ---------------------------------------------------------------- patch
     @app.post('/api/patch/build')

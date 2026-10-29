@@ -11,10 +11,10 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useI18n, type MessageKey } from '@/i18n'
 import { NUMBER_COLORS, REAL_KIT_LABELS } from '@/lib/labels'
-import { GOALKEEPER_POSITION, previewAppearance, teamPreviewKit } from '@/lib/preview'
+import { GOALKEEPER_POSITION, backName, previewAppearance, teamPreviewKit } from '@/lib/preview'
 import { cn } from '@/lib/utils'
 import { useIssues, usePlayerDefaults, useProject } from '@/state/project'
-import { useCatalog } from '@/state/queries'
+import { useCatalog, useOriginalPlayers, useOriginalTeams } from '@/state/queries'
 
 const PlayerPreview = lazy(() => import('@/components/common/PlayerPreview'))
 
@@ -220,6 +220,17 @@ function RealKitCard({ team, slot, previewing, onPreview }: { team: Team; slot: 
             <span className="block text-xs text-muted-foreground">{t('realKit.frontNumberHint')}</span>
           </span>
         </label>
+        <label className="flex items-start gap-2 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={kit.shorts_number ?? false}
+            onCheckedChange={(c) => set({ shorts_number: c === true })}
+          />
+          <span>
+            {t('realKit.shortsNumberOn')}
+            <span className="block text-xs text-muted-foreground">{t('realKit.shortsNumberOnHint')}</span>
+          </span>
+        </label>
       </CardContent>
     </Card>
   )
@@ -235,6 +246,17 @@ function RealKitPreview({ team, slot }: { team: Team; slot: RealKitSlot }) {
   const captain = roster.find((p) => p.uid === team.captain) ?? roster[0]
   const model = (slot === 'goalkeeper' && roster.find((p) => p.position === GOALKEEPER_POSITION)) || captain
   const defaults = usePlayerDefaults(model?.uid)
+  // original team: its game players (the captain, or the goalkeeper for the goalkeeper kit)
+  const squad = useOriginalPlayers({ team: team.original_id ?? undefined, limit: 100 }, team.original_id != null).data?.items ?? []
+  const gameCaptain = useOriginalTeams().data?.find((o) => o.id === team.original_id)?.captain
+  const gameModel =
+    (slot === 'goalkeeper' && squad.find((p) => p.position === GOALKEEPER_POSITION)) ||
+    squad.find((p) => p.id === (team.captain ?? gameCaptain)) ||
+    squad[0]
+  const wearer =
+    team.original_id != null
+      ? gameModel && { number: gameModel.number, name: backName(gameModel) }
+      : model && { number: model.number ?? defaults?.number, name: backName(model) }
   return (
     <Card className="gap-2 overflow-hidden pb-0">
       <CardHeader>
@@ -252,7 +274,7 @@ function RealKitPreview({ team, slot }: { team: Team; slot: RealKitSlot }) {
           {catalog && (
             <PlayerPreview
               appearance={previewAppearance(model, defaults, catalog)}
-              outfit={{ kind: 'team', kit: teamPreviewKit(team, slot) }}
+              outfit={{ kind: 'team', kit: teamPreviewKit(team, slot, wearer || undefined) }}
               initialView="body"
             />
           )}

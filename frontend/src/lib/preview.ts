@@ -8,17 +8,38 @@ export const GOALKEEPER_POSITION = 0 // teamplayerlinks.position of a goalkeeper
 /** Team kit the 3D preview dresses for a slot, as the build writes it: the real kit when the team uses real kits and
  * the slot has jersey and shorts, else the generic kit (an empty goalkeeper slot shows the generic home kit; the game
  * uses its own default there). No team: neutral grey. */
-export function teamPreviewKit(team: Team | undefined, slot: RealKitSlot): PreviewKit {
+const KIT_KINDS: Record<RealKitSlot, number> = { home: 0, away: 1, goalkeeper: 2 }
+
+/** The team's kit for the 3D preview; `wearer` (number and name on the back) is printed on a real kit. */
+export function teamPreviewKit(team: Team | undefined, slot: RealKitSlot, wearer?: { number?: number | null; name?: string }): PreviewKit {
   if (!team) return { jersey: [200, 200, 200], shorts: [60, 60, 60] }
   const kit = fullKit(team, slot === 'away' ? 'away' : 'home')
   const real = team.use_real_kits ? team.real_kits?.[slot] : undefined
+  const print =
+    real && wearer
+      ? {
+          number: wearer.number ?? undefined,
+          name: wearer.name,
+          team: team.original_id ?? team.template,
+          kind: KIT_KINDS[slot],
+          name_color: real.name_color,
+          number_color: real.number_color,
+          shorts_number_color: real.shorts_number_color,
+          front: real.front_number,
+          shorts_number: real.shorts_number ?? false,
+          loaded: team.loaded?.images[`real_kits.${slot}.jersey`],
+        }
+      : undefined
   return {
     jersey: kit.jersey,
     shorts: kit.shorts,
     crest: team.crest,
-    real: real?.jersey && real.shorts ? { jersey: real.jersey, shorts: real.shorts, collar: real.collar } : undefined,
+    real: real?.jersey && real.shorts ? { jersey: real.jersey, shorts: real.shorts, collar: real.collar, print } : undefined,
   }
 }
+
+/** Name the game prints on the back of the jersey. */
+export const backName = (p: { jersey_name?: string | null; last_name: string }) => p.jersey_name || p.last_name
 
 /** Values the 3D preview shows for a player: own value, else the template's, else the first valid code. */
 export function previewAppearance(player: Player | undefined, defaults: PlayerDefaults | undefined, catalog: Catalog | undefined): PreviewAppearance {

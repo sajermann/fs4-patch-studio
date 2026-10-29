@@ -1,3 +1,4 @@
+import type { PreviewKit } from '@/components/common/PlayerPreview'
 import type {
   BasePlayer,
   BuildProgress,
@@ -16,6 +17,7 @@ import type {
   OriginalPlayer,
   OriginalStadium,
   OriginalTeam,
+  Team,
   PatchStatus,
   PlayerDefaults,
   Project,
@@ -100,6 +102,9 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => v !== undefined && v !== '' && qs.set(k, String(v)))
     return request<{ total: number; items: OriginalPlayer[] }>(`/api/originals/players?${qs}`)
   },
+  /** Starts editing an original team: its crest and kits become project images; returns the filled Team. */
+  editOriginalTeam: (teamid: number, uid: string) =>
+    request<Team>(`/api/originals/teams/${teamid}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),
   catalog: () => request<Catalog>('/api/catalog'),
 
   /** Provisional path until the project is saved, when the image gets the fixed name of its entity. */
@@ -171,8 +176,25 @@ export const kitPreviewUrl = (jersey: RGB, crest?: string) => {
 }
 
 /** Kit texture for the 3D preview: a real kit PNG of the project, or the solid color + crest decal. */
-export const kitTextureUrl = (part: 'jersey' | 'shorts', kit: { jersey: RGB; shorts: RGB; crest?: string | null; real?: { jersey: string; shorts: string } }) => {
-  if (kit.real) return withRevision(`/api/preview/real-kit/${part}.png?${new URLSearchParams({ image: kit.real[part] })}`)
+export const kitTextureUrl = (part: 'jersey' | 'shorts', kit: PreviewKit) => {
+  if (kit.real) {
+    const qs = new URLSearchParams({ image: kit.real[part] })
+    const p = kit.real.print
+    if (p && (p.number != null || p.name)) {
+      if (p.number != null) qs.set('number', String(p.number))
+      if (p.name) qs.set('name', p.name)
+      qs.set('team', String(p.team))
+      qs.set('kind', String(p.kind))
+      qs.set('name_color', p.name_color.join(','))
+      qs.set('number_color', String(p.number_color))
+      qs.set('shorts_number_color', String(p.shorts_number_color))
+      qs.set('front', String(p.front))
+      qs.set('shorts_number', String(p.shorts_number))
+      qs.set('jersey', kit.real.jersey)
+      if (p.loaded) qs.set('loaded', p.loaded)
+    }
+    return withRevision(`/api/preview/real-kit/${part}.png?${qs}`)
+  }
   const qs = new URLSearchParams({ color: kit[part].join(',') })
   if (!kit.crest) return `/api/preview/kit/${part}.png?${qs}`
   qs.set('crest', kit.crest)

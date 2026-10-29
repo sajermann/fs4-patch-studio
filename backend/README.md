@@ -56,6 +56,7 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `GET/PUT /api/project`, `POST /api/project/validate` | project (contract v2) + validation issues (`code`, `severity`, `entity`, `field`, pt-BR `message`) + `defaults` (per player: values inherited from the template player where the project leaves a field unset) |
 | `GET /api/project/backup` | zip of the project folder (`database.json` + `images/` + `faces/`), downloaded by the "Fazer backup" button |
 | `POST /api/project/restore` (zip) | replaces the project with a backup zip (its content or the `project` folder itself); checked and extracted beside the folder first, so a bad zip (`invalid_backup` + `reason`) changes nothing |
+| `POST /api/originals/teams/{teamid}/edit?uid=` | starts editing an original team: its crest and kits become provisional project images and the `Team` comes back filled with the game's data (`original_id`, `loaded` = what was loaded; the build only rewrites what changed) |
 | `GET /api/originals/leagues`, `/teams`, `/players` | original game data, read-only (`players`: `team`, `q`, `offset`, `limit`); teams say `crest`, players say `photo` (has a menu image) |
 | `GET /api/originals/crests/{teamid}.webp`, `/photos/{playerid}.webp` | menu crest / photo of an original team / player (128 px; 404 when the game has none), converted once and kept in `cache/originals/` |
 | `GET /api/catalog` | valid values: free league ids, free team slots, positions, nations, appearance codes, skills, ranges |

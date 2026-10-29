@@ -78,7 +78,9 @@ export function PlayersPage() {
   const teamOptions = [
     { value: ALL, label: t('players.allTeams') },
     { value: FREE, label: t('players.freeAgents') },
-    ...draft.teams.map((tm) => ({ value: `new:${tm.uid}`, label: tm.name || t('team.unnamed'), group: t('players.newTeams') })),
+    ...draft.teams
+      .filter((tm) => tm.original_id == null)
+      .map((tm) => ({ value: `new:${tm.uid}`, label: tm.name || t('team.unnamed'), group: t('players.newTeams') })),
     ...[...originalTeams]
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((tm) => ({ value: `orig:${tm.id}`, label: tm.name, group: t('players.originalTeams') })),

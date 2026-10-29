@@ -42,7 +42,7 @@ export function Field({
   className,
   children,
 }: {
-  label: string
+  label: ReactNode
   entity?: string
   field?: string
   hint?: string
@@ -133,11 +133,11 @@ export function Stepper({
   )
 }
 
-export function OriginalBadge() {
+export function OriginalBadge({ edited = false }: { edited?: boolean }) {
   const { t } = useI18n()
   return (
-    <Badge variant="secondary" className="font-normal">
-      {t('common.original')}
+    <Badge variant="secondary" className="font-normal" title={edited ? t('common.wasOriginalHint') : undefined}>
+      {edited ? t('common.wasOriginal') : t('common.original')}
     </Badge>
   )
 }

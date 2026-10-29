@@ -46,7 +46,21 @@ export interface PreviewKit {
   shorts: RGB // the socks are mapped on the shorts texture, so they show this color too
   crest?: string | null // project image path
   // real kit (lib/preview teamPreviewKit): project PNGs drawn instead of the solid colors, and its collar mesh
-  real?: { jersey: string; shorts: string; collar: number }
+  real?: { jersey: string; shorts: string; collar: number; print?: KitPrint }
+}
+
+/** Name and numbers printed on a real kit (fsmod.kitprint; GET /api/preview/real-kit params). */
+export interface KitPrint {
+  number?: number
+  name?: string
+  team: number // teamid whose teamkits row gives the fonts: an original team, or a new team's template
+  kind: number // 0 home, 1 away, 2 goalkeeper
+  name_color: RGB
+  number_color: number
+  shorts_number_color: number
+  front: boolean
+  shorts_number: boolean
+  loaded?: string // SHA-1 of the jersey loaded from the game (original team): still it = the game's positions
 }
 
 /** What the player wears: the team kit or a street kit (arms = arms mesh for the top's sleeves). */

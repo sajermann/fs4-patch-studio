@@ -67,6 +67,12 @@ export function useCopy() {
       name: team.name + suffix,
       team_id: undefined,
       captain: typeof captain === 'number' && captain >= 0 ? players[captain].uid : undefined,
+      takers: Object.fromEntries(
+        Object.entries(team.takers ?? {}).flatMap(([role, p]) => {
+          const k = roster.findIndex((pl) => pl.uid === p)
+          return k >= 0 ? [[role, players[k].uid]] : []
+        }),
+      ),
       lineups: copyLineups(team, new Map(roster.map((p, k) => [p.uid, players[k].uid]))),
     }
     setDraft((p) => ({ ...p, teams: [...p.teams, copy], players: [...p.players, ...players] }))

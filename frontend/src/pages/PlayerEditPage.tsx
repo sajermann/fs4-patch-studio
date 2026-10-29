@@ -31,7 +31,7 @@ import { useI18n, type MessageKey, type TFunction } from '@/i18n'
 import { useCopy } from '@/lib/copy'
 import { APPEARANCE_LABELS, FOOT_LABELS, SKILL_LABELS } from '@/lib/labels'
 import { computeOverall } from '@/lib/skills'
-import { GOALKEEPER_POSITION, previewAppearance, teamPreviewKit } from '@/lib/preview'
+import { GOALKEEPER_POSITION, backName, previewAppearance, teamPreviewKit } from '@/lib/preview'
 import { cn } from '@/lib/utils'
 import { usePlayerDefaults, useProject } from '@/state/project'
 import { useCatalog, useLookups, useStatus } from '@/state/queries'
@@ -101,7 +101,7 @@ function DataTab({ player }: { player: Player }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>{t('playerEdit.noTeam')}</SelectItem>
-                {draft.teams.map((tm) => (
+                {draft.teams.filter((tm) => tm.original_id == null).map((tm) => (
                   <SelectItem key={tm.uid} value={tm.uid}>
                     {tm.name || t('team.unnamed')}
                   </SelectItem>
@@ -367,7 +367,10 @@ function AppearanceTab({ player }: { player: Player }) {
     : null
   // Team Home kit of the player's team (the goalkeeper kit for a goalkeeper; neutral grey for free agents)
   const team = player.team ? draft.teams.find((tm) => tm.uid === player.team) : undefined
-  const kit = teamPreviewKit(team, (player.position ?? defaults?.position) === GOALKEEPER_POSITION ? 'goalkeeper' : 'home')
+  const kit = teamPreviewKit(team, (player.position ?? defaults?.position) === GOALKEEPER_POSITION ? 'goalkeeper' : 'home', {
+    number: player.number ?? defaults?.number,
+    name: backName(player),
+  })
   const set = (code: string, value: number | undefined) => {
     const appearance = { ...player.appearance }
     if (value === undefined) delete appearance[code]

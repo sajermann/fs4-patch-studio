@@ -46,8 +46,10 @@ The interface is available in Portuguese (Brazil) and English, with light and da
 - Choose the team's league and its colors.
 - Kits: generic ones made in the studio's own kit editor, or real kits by uploading their PNG.
 - Street kits, made in the studio's own editor.
-- Choose the team captain.
+- Choose the team captain and who takes each set piece (penalty, free kicks, corners).
 - Set the formation for each game mode.
+- Edit the game's original teams: name, crest, colors, kits, street kits and league. The editor opens with what
+  the game has, and only what you change is written into the patch.
 - Hide or show the game's original teams.
 
 ### Players editor
@@ -73,7 +75,7 @@ Make your creations, build the patch, install it and have fun!
 
 ## What it can't do (yet)
 
-- Edit the game's original teams (only hide or show them).
+- Change the players of the game's original teams.
 - Edit the game's original players.
 - Put a player you created into one of the game's original teams.
 - Put the same player in two teams at the same time (e.g. a club and a national team).

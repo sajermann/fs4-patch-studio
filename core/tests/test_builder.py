@@ -618,3 +618,24 @@ def test_lineups_go_to_fs4lineup_on_both_sides(game):
     codes = {i.code for i in validation.validate(project, catalog, PALMEIRAS) if i.entity == team.uid}
     assert {'lineup_tactic_invalid', 'lineup_mode_repeated', 'lineup_player_repeated',
             'lineup_player_not_in_roster'} <= codes
+
+
+def test_set_piece_takers_default_to_the_captain(game):
+    """Each set-piece role can have its own player; a role left out is the captain's."""
+    from fsmod import t3db
+    project = load_palmeiras()
+    team = project.teams[0]
+    roster = project.roster(team.uid)
+    team.captain = roster[0].uid
+    team.takers = {'left_corner': roster[1].uid, 'penalty': roster[2].uid}
+    result = builder.build(project, game, PALMEIRAS)
+    db = t3db.Database(result.database, game.meta)
+    teams = db.by_name('teams')
+    get = lambda r, f: teams.value(r, teams.field(f))
+    tid = result.assigned_team_ids[team.uid]
+    row = next(r for r in teams.records if get(r, 'teamid') == tid)
+    pid = {p.uid: result.assigned_player_ids[p.uid] for p in roster}
+    assert get(row, 'captainid') == pid[roster[0].uid]
+    assert get(row, 'leftcornerkicktakerid') == pid[roster[1].uid]
+    assert get(row, 'penaltytakerid') == pid[roster[2].uid]
+    assert get(row, 'rightcornerkicktakerid') == get(row, 'freekicktakerid') == pid[roster[0].uid]

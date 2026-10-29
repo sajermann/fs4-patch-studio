@@ -101,7 +101,13 @@ export function LeagueEditPage() {
   const league = draft.leagues.find((l) => l.uid === key)
   const original = !league && /^\d+$/.test(key) ? lookups.originalLeague.get(Number(key)) : undefined
   const leagueRef: number | string | undefined = league?.uid ?? original?.id
-  const projectTeams = draft.teams.filter((tm) => tm.league === leagueRef)
+  const originalLeagueOf = new Map(originalTeams.map((tm) => [tm.id, tm.league]))
+  const projectTeams = draft.teams.filter(
+    (tm) => tm.league === leagueRef && (tm.original_id == null || originalLeagueOf.get(tm.original_id) !== leagueRef),
+  )
+  const movedAway = new Set(
+    draft.teams.filter((tm) => tm.original_id != null && tm.league !== originalLeagueOf.get(tm.original_id)).map((tm) => tm.original_id!),
+  )
 
   const back = useBack({ to: '/leagues', label: t('nav.leagues') })
   const goBack = useGoBack()
@@ -135,7 +141,7 @@ export function LeagueEditPage() {
   )
 
   if (original) {
-    const teams = originalTeams.filter((tm) => tm.league === original.id)
+    const teams = originalTeams.filter((tm) => tm.league === original.id && !movedAway.has(tm.id))
     return (
       <div className="max-w-3xl space-y-4">
         <BackButton back={back} />
