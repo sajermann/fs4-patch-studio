@@ -71,6 +71,13 @@ The interface is available in Portuguese (Brazil) and English, with light and da
 
 Make your creations, build the patch, install it and have fun!
 
+## What it can't do (yet)
+
+- Edit the game's original teams (only hide or show them).
+- Edit the game's original players.
+- Put a player you created into one of the game's original teams.
+- Put the same player in two teams at the same time (e.g. a club and a national team).
+
 ## Known issues
 
 Real faces (FIFA 14-16 face packs):
