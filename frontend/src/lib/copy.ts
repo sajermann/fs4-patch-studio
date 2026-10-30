@@ -10,7 +10,7 @@ import { useCatalog } from '@/state/queries'
 
 /** Copy of a player with a new uid and no game id (the build gives a new one); a real face gets its files copied. */
 async function clonePlayer(player: Player, patch: Partial<Player>): Promise<Player> {
-  const uid = newUid('jg')
+  const uid = newUid()
   const copy: Player = { ...player, ...patch, uid, player_id: undefined }
   if (!player.generic && player.face) {
     try {
@@ -40,7 +40,7 @@ export function useCopy() {
   const copyLeague = (uid: string) => {
     const league = draft.leagues.find((l) => l.uid === uid)
     if (!league || !canCopyLeague) return null
-    const copy = { ...league, uid: newUid('lg'), name: league.name + suffix, league_id: undefined }
+    const copy = { ...league, uid: newUid(), name: league.name + suffix, league_id: undefined }
     setDraft((p) => ({ ...p, leagues: [...p.leagues, copy] }))
     return copy.uid
   }
@@ -53,7 +53,7 @@ export function useCopy() {
   const copyTeam = async (uid: string, withRoster: boolean) => {
     const team = draft.teams.find((t) => t.uid === uid)
     if (!team || !canCopyTeam(uid)) return null
-    const teamUid = newUid('tm')
+    const teamUid = newUid()
     // the copies only play for the copied team (their other teams already have the originals); the game's players
     // are not copied (they would be new players with the same face and name)
     const roster = withRoster ? rosterOf(draft, uid).filter((p) => p.original_id == null) : []

@@ -100,6 +100,11 @@ class Catalog:
         """Playerids of one of the game's teams (as the game has it)."""
         return {pid for pid, _, _ in self._links_by_team.get(teamid, [])}
 
+    def squad(self, teamid):
+        """[{'player', 'number', 'position'}] of one of the game's teams (as the game has it)."""
+        return [{'player': pid, 'number': number, 'position': position}
+                for pid, number, position in self._links_by_team.get(teamid, [])]
+
     def player_links(self, playerid):
         """[{'team', 'number', 'position'}] of one of the game's players, in database order."""
         return [dict(link) for link in self._links_by_player.get(playerid, [])]

@@ -7,7 +7,7 @@ import type { KitKind, KitPart, RGB, Team } from '@/api/types'
 import { ColorInput, EntityIssues, Field, FieldIssues, OriginalBadge } from '@/components/common/form'
 import { LineupEditor, type LineupPlayer } from '@/components/common/LineupEditor'
 import { RosterCard } from '@/components/common/Roster'
-import { useTeamMembers } from '@/lib/members'
+import { useEntryOfPath, useTeamMembers } from '@/lib/members'
 import { RealKitEditor } from '@/components/common/RealKitEditor'
 import { StreetKitEditor } from '@/components/common/StreetKitEditor'
 import {
@@ -32,7 +32,7 @@ import { useCopy } from '@/lib/copy'
 import { KIT_LABELS, KIT_PART_LABELS } from '@/lib/labels'
 import { fullKit, useLeagueTeams } from '@/lib/teams'
 import { cn } from '@/lib/utils'
-import { useIssues, useProject } from '@/state/project'
+import { useIssues, useProject, useWasEdited } from '@/state/project'
 import { useOriginalLeagues } from '@/state/queries'
 
 /** League dropdown: the project's new leagues + the original leagues the selector shows. */
@@ -266,18 +266,20 @@ function LineupTab({ team }: { team: Team }) {
 
 export function TeamEditPage() {
   const { t } = useI18n()
-  const { uid } = useParams()
-  const { draft, removeTeam } = useProject()
+  const { uid: param } = useParams()
+  const { removeTeam } = useProject()
   const navigate = useNavigate()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [copyOpen, setCopyOpen] = useState(false)
   const copy = useCopy()
-  const team = draft.teams.find((tm) => tm.uid === uid)
+  const { entry: team, loading } = useEntryOfPath<Team>('team', param)
+  const uid = team?.uid
   const back = useBack({ to: '/teams', label: t('nav.teams') })
   const goBack = useGoBack()
   const keepBack = useKeepBack()
   const tabs = useTabParam('data')
   const original = team?.original_id != null
+  const edited = useWasEdited(uid, team?.original_id)
 
   const copyTeam = async (withRoster: boolean) => {
     setCopyOpen(false)
@@ -292,7 +294,11 @@ export function TeamEditPage() {
     return (
       <div className="space-y-2">
         <BackButton back={back} />
-        <p className="text-muted-foreground">{t('issue.team_not_found')}</p>
+        {loading ? (
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        ) : (
+          <p className="text-muted-foreground">{t('issue.team_not_found')}</p>
+        )}
       </div>
     )
   }
@@ -304,7 +310,7 @@ export function TeamEditPage() {
         <div className="flex items-center gap-3">
           {team.crest && <img src={imageUrl(team.crest)} alt="" className="size-10 object-contain" />}
           <h1 className="text-2xl font-semibold">{team.name || t('teams.new')}</h1>
-          {original && <OriginalBadge edited />}
+          {original && <OriginalBadge entry={team.uid} team={team.original_id} />}
           <EntityIssues uid={team.uid} />
         </div>
         <div className="flex gap-2">
@@ -324,7 +330,8 @@ export function TeamEditPage() {
           <Button
             variant="outline"
             size="sm"
-            title={original ? t('teamEdit.restoreOriginalHint') : undefined}
+            title={original ? t(edited ? 'teamEdit.restoreOriginalHint' : 'common.unchangedHint') : undefined}
+            disabled={original && !edited}
             onClick={() => setDeleteOpen(true)}
           >
             {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('teamEdit.delete')}
@@ -384,8 +391,18 @@ export function TeamEditPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
-                removeTeam(team.uid)
+              onClick={async () => {
+                if (team.original_id != null) {
+                  // the game's squad comes back too (who left returns, who joined leaves)
+                  try {
+                    removeTeam(team.uid, await api.originalSquad(team.original_id))
+                  } catch (e) {
+                    toast.error(e instanceof ApiError ? e.message : t('teamEdit.restoreFailed'))
+                    return
+                  }
+                } else {
+                  removeTeam(team.uid)
+                }
                 goBack(back)
               }}
             >

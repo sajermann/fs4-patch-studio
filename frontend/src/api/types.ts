@@ -304,6 +304,13 @@ export interface OriginalStadium {
   locked: boolean
 }
 
+/** One player of an original team's squad as the game has it (GET /api/originals/teams/{id}/squad). */
+export interface OriginalSquadLink {
+  player: number
+  number: number | null
+  position: number | null
+}
+
 export interface OriginalPlayer {
   id: number
   first_name: string

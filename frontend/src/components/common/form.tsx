@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useI18n } from '@/i18n'
 import { issueText } from '@/lib/issues'
-import { useIssues } from '@/state/project'
+import { useIssues, useWasEdited } from '@/state/project'
 import { cn } from '@/lib/utils'
 
 /** Validation messages of one entity field. */
@@ -133,8 +133,12 @@ export function Stepper({
   )
 }
 
-export function OriginalBadge({ edited = false }: { edited?: boolean }) {
+/** "original", or "era original" for an entry that edits one of the game's teams/players (entry = its uid; an entry
+ * opened without changing anything still reads "original") and for a game team whose squad the project changes
+ * (team = its teamid, with or without an entry). */
+export function OriginalBadge({ entry, team }: { entry?: string; team?: number | null }) {
   const { t } = useI18n()
+  const edited = useWasEdited(entry, team)
   return (
     <Badge variant="secondary" className="font-normal" title={edited ? t('common.wasOriginalHint') : undefined}>
       {edited ? t('common.wasOriginal') : t('common.original')}

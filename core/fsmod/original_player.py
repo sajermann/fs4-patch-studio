@@ -3,7 +3,7 @@
 Same idea as original_team: the entry is filled with what the game has (names, data, skills, appearance codes, teams
 with their number and position, menu photo as a PNG) and the build only rewrites what changed, in the player's own
 row (same playerid). Head: generic = headclasscode 1 + appearance codes; a scanned head of the game stays as it is
-unless the user picks a generic head or a real face of a pack (scanface: only 6-digit playerids).
+unless the user picks a generic head or a real face of a pack (scanface, for playerids of any length).
 """
 import hashlib
 import io
@@ -16,7 +16,6 @@ from .model import OriginalPlayerSnapshot, Player, TeamLink
 EDITABLE_FIELDS = ('first_name', 'last_name', 'display_name', 'jersey_name', 'height', 'weight', 'birthdate', 'foot',
                    'skills', 'appearance', 'fields', 'generic', 'face')
 FIELDS = ('nationality',)  # players columns an original entry carries in Player.fields
-FACE_ID_DIGITS = 6  # scanface.convert keeps the template's number of digits (Messi, 158023)
 
 
 def sha1(data):
@@ -26,11 +25,6 @@ def sha1(data):
 def snapshot_fields(pl):
     """The editable fields of a player as JSON (the photo is compared by content)."""
     return pl.model_dump(mode='json', include=set(EDITABLE_FIELDS))
-
-
-def can_take_face(playerid):
-    """A real face of a pack can be converted for this playerid (scanface needs FACE_ID_DIGITS digits)."""
-    return len(str(playerid)) == FACE_ID_DIGITS
 
 
 def load(game, catalog, playerid, uid, save_image):
@@ -94,6 +88,32 @@ def changes(pl, assets_dir):
     out.fields = {f for f in EDITABLE_FIELDS if now.get(f) != before.get(f)}
     out.photo = image_sha1(assets_dir, pl.photo) != loaded.images.get('photo')
     return out
+
+
+
+def untouched(pl, assets_dir, catalog):
+    """The entry still has exactly what was loaded from the game, teams included (opened without changing anything):
+    the project can drop it (the player stays the game's) and the UI shows him as an original, not as an edited one."""
+    if pl.loaded is None or pl.hidden:
+        return False
+    game = [(lk['team'], lk['number'], lk['position']) for lk in catalog.player_links(pl.original_id)]
+    mine = [(lk.team, lk.number, lk.position) for lk in pl.teams]
+    return len(mine) == len(game) and set(mine) == set(game) and not changes(pl, assets_dir).any
+
+
+def changed_squads(project, catalog):
+    """Teamids of the game's teams whose squad the project changes: a game player who left or whose number or
+    position changed, or a player who joined (squads live in the players' links, so such a team counts as edited
+    even without a team entry of its own)."""
+    out = set()
+    for pl in project.players:
+        if pl.hidden and not pl.is_original:
+            continue  # left out of the patch
+        mine = {(lk.team, lk.number, lk.position) for lk in pl.teams if isinstance(lk.team, int)}
+        game = ({(lk['team'], lk['number'], lk['position']) for lk in catalog.player_links(pl.original_id)}
+                if pl.is_original else set())
+        out |= {team for team, _, _ in mine ^ game}
+    return sorted(out & set(catalog.team_ids))
 
 
 def absorb_game_links(data, load_player):

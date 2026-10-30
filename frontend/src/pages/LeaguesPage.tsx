@@ -40,7 +40,7 @@ export function LeaguesPage() {
 
   const create = () => {
     if (full) return
-    const uid = newUid('lg')
+    const uid = newUid()
     addLeague({ uid, name: '', sort_order: 6 })
     navigate(`/leagues/${uid}`, from)
   }

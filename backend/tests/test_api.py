@@ -29,6 +29,10 @@ def test_catalog_and_originals(env):
     barca = c.get('/api/originals/players', params={'team': 241}).json()
     assert 1 <= barca['total'] <= 13
     assert c.get('/api/originals/players', params={'q': 'messi'}).json()['total'] >= 1
+    squad = c.get('/api/originals/teams/241/squad').json()
+    assert len(squad) == barca['total'] and any(lk['player'] == 158023 for lk in squad)
+    assert all(lk['number'] is not None and lk['position'] is not None for lk in squad)
+    assert c.get('/api/originals/teams/999999/squad').status_code == 404
 
 
 def test_original_crests_and_photos_are_cached_on_disk(env):
@@ -645,11 +649,35 @@ def test_editing_an_original_team_starts_from_the_game_and_survives_saving(env):
     assert set(team['real_kits']) == {'home', 'away', 'goalkeeper'} and team['loaded']['images']['crest']
     assert c.post('/api/originals/teams/999999/edit', params={'uid': 'x'}).status_code == 404
 
+    # opened and not changed: shown as an original (untouched) and dropped by saving (it stays the game's)
+    r = c.post('/api/project/validate', json={'version': 2, 'teams': [team]})
+    assert r.json()['untouched'] == ['tm_barca']
+    r = c.put('/api/project', json={'version': 2, 'teams': [team]})
+    assert r.status_code == 200 and r.json()['project']['teams'] == [] and r.json()['untouched'] == []
+
+    team = c.post('/api/originals/teams/241/edit', params={'uid': 'tm_barca'}).json()
+    team['abbreviation'] = 'FCB'
+    assert c.post('/api/project/validate', json={'version': 2, 'teams': [team]}).json()['untouched'] == []
     r = c.put('/api/project', json={'version': 2, 'teams': [team]})
     assert r.status_code == 200 and not [i for i in r.json()['issues'] if i['severity'] == 'error']
     saved = model.Team.model_validate(r.json()['project']['teams'][0])
     assert saved.crest.startswith('images/teams/team-tm_barca')  # fixed names: still unchanged (by content)
-    assert not original_team.changes(saved, str(env['tmp'] / 'project')).any
+    assert original_team.changes(saved, str(env['tmp'] / 'project')).texts == {'abbreviation'}
+    assert not original_team.changes(saved, str(env['tmp'] / 'project')).crest
+
+
+def test_an_original_player_opened_without_changes_is_dropped_by_saving(env):
+    c = env['client']
+    messi = c.post('/api/originals/players/158023/edit', params={'uid': 'jg_messi'}).json()
+    assert c.post('/api/project/validate', json={'version': 2, 'players': [messi]}).json()['untouched'] == ['jg_messi']
+    assert c.put('/api/project', json={'version': 2, 'players': [messi]}).json()['project']['players'] == []
+    moved = {**messi, 'teams': messi['teams'][1:]}  # leaves one of his teams: an edit
+    r = c.post('/api/project/validate', json={'version': 2, 'players': [moved]}).json()
+    assert r['untouched'] == [] and r['changed_squads'] == [messi['teams'][0]['team']]  # that team counts as edited
+    renumbered = {**messi, 'teams': [{**messi['teams'][0], 'number': 99}, *messi['teams'][1:]]}
+    assert c.post('/api/project/validate', json={'version': 2, 'players': [renumbered]}).json()['changed_squads'] == [
+        messi['teams'][0]['team']]
+    assert len(c.put('/api/project', json={'version': 2, 'players': [moved]}).json()['project']['players']) == 1
 
 
 def test_real_kit_preview_prints_name_and_numbers(env):
@@ -679,10 +707,11 @@ def test_editing_an_original_player_and_converting_old_game_links(env):
     messi = r.json()
     assert messi['original_id'] == 158023 and len(messi['teams']) == 5 and messi['photo'].startswith('images/upload-')
     assert c.post('/api/originals/players/1/edit', params={'uid': 'x'}).status_code == 404
-    r = c.put('/api/project', json={'version': 2, 'players': [messi]})
+    r = c.put('/api/project', json={'version': 2, 'players': [{**messi, 'height': messi['height'] + 1}]})
     assert r.status_code == 200 and not [i for i in r.json()['issues'] if i['severity'] == 'error']
     saved = model.Player.model_validate(r.json()['project']['players'][0])
-    assert not original_player.changes(saved, str(env['tmp'] / 'project')).any
+    changed = original_player.changes(saved, str(env['tmp'] / 'project'))
+    assert changed.fields == {'height'} and not changed.photo  # the photo's fixed name: unchanged by content
     assert c.get('/api/preview/game-head/158023/head.glb').status_code == 200
 
     old = {'version': 2, 'teams': [{'uid': 'tm_a', 'name': 'A', 'league': 39, 'primary_color': [0, 0, 0],

@@ -16,6 +16,14 @@ export const teamsWithout = (player: Player, team: TeamKey) => player.teams.filt
 export const teamsWith = (player: Player, team: TeamKey, patch: Partial<TeamLink>) =>
   player.teams.map((l) => (l.team === team ? { ...l, ...patch } : l))
 
+/** Edit page addresses: an original team/player by its game id (opened from the game when not in the project yet),
+ * a new one by its uid. Stable, so a reload or a copied link finds it again. */
+export const teamPath = (team: TeamKey) => `/teams/${team}`
+export const playerPath = (player: PlayerRef) => `/players/${player}`
+/** The TeamKey/PlayerRef an edit page address names (digits = the game's id). */
+export const keyOfPath = (param: string | undefined): string | number | undefined =>
+  param === undefined ? undefined : /^\d+$/.test(param) ? Number(param) : param
+
 /** The project Team a link points to: a new team by uid, an edited original by teamid (undefined: not in the project). */
 export const linkedTeam = (project: Project, team: TeamKey) =>
   project.teams.find((t) => (typeof team === 'string' ? t.uid === team : t.original_id === team))

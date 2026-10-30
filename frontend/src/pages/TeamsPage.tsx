@@ -1,8 +1,6 @@
-import { Eye, EyeOff, Loader2, Lock, LockOpen, Pencil, Plus } from 'lucide-react'
-import { useState } from 'react'
+import { Eye, EyeOff, Lock, LockOpen, Pencil, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
-import { ApiError, api, imageUrl } from '@/api/client'
+import { imageUrl } from '@/api/client'
 import type { OriginalTeam, Player, Team } from '@/api/types'
 import { EntityIssues, OriginalBadge, OriginalCrest, Swatch } from '@/components/common/form'
 import { GameHiddenBadge, HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
@@ -26,8 +24,8 @@ import { useFrom } from '@/lib/back'
 import { useOriginalChanges } from '@/lib/originals'
 import { defaultLeague, editedOriginals, useLeagueName, useLeagueTeams } from '@/lib/teams'
 import { useGamePlayers } from '@/lib/members'
-import { linkOf, rosterOf, teamKey } from '@/lib/players'
-import { newUid, useProject } from '@/state/project'
+import { linkOf, rosterOf, teamKey, teamPath } from '@/lib/players'
+import { newUid, useProject, useSameAsGame } from '@/state/project'
 import { useOriginalLeagues, useOriginalTeams } from '@/state/queries'
 
 type Row = { kind: 'project'; team: Team } | { kind: 'original'; team: OriginalTeam }
@@ -38,15 +36,16 @@ export function TeamsPage() {
   const { t } = useI18n()
   const { draft, addTeam, updateTeam } = useProject()
   const games = useGamePlayers()
-  // players of a project team: new team = its roster; edited original = how many joined minus how many left
-  const joined = (team: Team) => {
-    const key = teamKey(team)
-    if (team.original_id == null) return rosterOf(draft, key).filter((p) => !p.hidden).length
-    const inGame = (p: Player) => p.original_id != null && !!games.get(p.original_id)?.teams.includes(team.original_id!)
-    const joiners = rosterOf(draft, key).filter((p) => !p.hidden && !inGame(p)).length
-    const leavers = draft.players.filter((p) => inGame(p) && !linkOf(p, key)).length
+  // a game team's squad size change: how many joined minus how many left (squads live in the players' links)
+  const squadDelta = (teamid: number) => {
+    const inGame = (p: Player) => p.original_id != null && !!games.get(p.original_id)?.teams.includes(teamid)
+    const joiners = rosterOf(draft, teamid).filter((p) => !p.hidden && !inGame(p)).length
+    const leavers = draft.players.filter((p) => inGame(p) && !linkOf(p, teamid)).length
     return joiners - leavers
   }
+  // players of a project team: new team = its roster; edited original = its squad size change
+  const joined = (team: Team) =>
+    team.original_id == null ? rosterOf(draft, teamKey(team)).filter((p) => !p.hidden).length : squadDelta(team.original_id)
   const originalLeagues = useOriginalLeagues().data ?? []
   const originals = useOriginalTeams().data ?? []
   const leagueName = useLeagueName()
@@ -59,28 +58,18 @@ export function TeamsPage() {
   const firstFreeLeague = defaultLeague(draft, originalLeagues, leagueTeams.isFull)
   const list = useListParams(['q', 'origin', 'league', 'status'] as const)
   const f = list.values
-  const edited = editedOriginals(draft)
+  // originals only opened (or changed back) list as the game's teams, not the project's
+  const sameAsGame = useSameAsGame()
+  const mine = draft.teams.filter((tm) => !sameAsGame(tm.uid))
+  const edited = editedOriginals({ ...draft, teams: mine })
   const originalById = new Map(originals.map((o) => [o.id, o]))
-  const [opening, setOpening] = useState<number>()
 
-  // editing an original team: its data, crest and kits come from the game into a project entry (same teamid)
-  const edit = async (team: OriginalTeam) => {
-    if (opening !== undefined) return
-    setOpening(team.id)
-    try {
-      const entry = await api.editOriginalTeam(team.id, newUid('tm'))
-      addTeam(entry)
-      navigate(`/teams/${entry.uid}`, from)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('teams.editOriginalFailed'))
-    } finally {
-      setOpening(undefined)
-    }
-  }
+  // editing an original team: its page loads its data, crest and kits from the game into a project entry (same teamid)
+  const edit = (team: OriginalTeam) => navigate(teamPath(team.id), from)
 
   const create = () => {
     if (firstFreeLeague === null) return
-    const uid = newUid('tm')
+    const uid = newUid()
     addTeam({
       uid,
       name: '',
@@ -105,7 +94,7 @@ export function TeamsPage() {
   const isLocked = (r: Row) => r.kind === 'original' && r.team.lockable && teamLocked(r.team)
 
   const rows: Row[] = [
-    ...draft.teams.map((team) => ({ kind: 'project' as const, team })),
+    ...mine.map((team) => ({ kind: 'project' as const, team })),
     ...originals.filter((team) => !edited.has(team.id)).map((team) => ({ kind: 'original' as const, team })),
   ].filter(
     (r) =>
@@ -198,7 +187,7 @@ export function TeamsPage() {
                 originalHidden={r.team.original_id != null && isTeamHidden(r.team.original_id)}
                 players={joined(r.team)}
                 leagueName={leagueName(r.team.league)}
-                onOpen={() => navigate(`/teams/${r.team.uid}`, from)}
+                onOpen={() => navigate(teamPath(teamKey(r.team)), from)}
                 onToggleHidden={() =>
                   r.team.original_id != null
                     ? toggleTeam(r.team.original_id)
@@ -210,14 +199,14 @@ export function TeamsPage() {
                 key={r.team.id}
                 className="cursor-pointer text-muted-foreground"
                 title={t('teams.editOriginalHint')}
-                onClick={() => void edit(r.team)}
+                onClick={() => edit(r.team)}
               >
                 <TableCell>
                   <OriginalCrest team={r.team} />
                 </TableCell>
                 <TableCell data-grow>
                   <span className="mr-2 text-foreground">{r.team.name}</span>
-                  <OriginalBadge />
+                  <OriginalBadge team={r.team.id} />
                   {r.team.lockable && (
                     <Badge variant="outline" className="ml-1 font-normal">
                       {teamLocked(r.team) ? t('teams.badgeLocked') : t('teams.badgeUnlocked')}
@@ -231,7 +220,7 @@ export function TeamsPage() {
                   )}
                 </TableCell>
                 <TableCell>{r.team.league !== null ? leagueName(r.team.league) : '—'}</TableCell>
-                <TableCell className="tabular-nums">{r.team.player_count}</TableCell>
+                <TableCell className="tabular-nums">{r.team.player_count + squadDelta(r.team.id)}</TableCell>
                 <TableCell className="tabular-nums">{r.team.id}</TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <span className="flex items-center gap-1">
@@ -239,10 +228,9 @@ export function TeamsPage() {
                       variant="ghost"
                       size="icon"
                       title={t('teams.editOriginalHint')}
-                      disabled={opening !== undefined}
-                      onClick={() => void edit(r.team)}
+                      onClick={() => edit(r.team)}
                     >
-                      {opening === r.team.id ? <Loader2 className="animate-spin" /> : <Pencil />}
+                      <Pencil />
                     </Button>
                     <OriginalTeamAction
                     team={r.team}
@@ -299,7 +287,7 @@ function ProjectTeamRow({
       </TableCell>
       <TableCell data-grow className={hidden ? 'font-medium text-muted-foreground' : 'font-medium'}>
         <span className="mr-2">{team.name || <span className="text-muted-foreground">{t('common.unnamed')}</span>}</span>
-        {team.original_id != null && <OriginalBadge edited />}
+        {team.original_id != null && <OriginalBadge entry={team.uid} team={team.original_id} />}
         {original && originalHidden ? (
           <Badge variant="outline" className="ml-1 font-normal">
             {t('teams.hiddenByProject')}

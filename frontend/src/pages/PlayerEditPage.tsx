@@ -32,10 +32,11 @@ import { useCopy } from '@/lib/copy'
 import { APPEARANCE_LABELS, FOOT_LABELS, SKILL_LABELS } from '@/lib/labels'
 import { computeOverall } from '@/lib/skills'
 import { GOALKEEPER_POSITION, backName, previewAppearance, teamPreviewKit } from '@/lib/preview'
-import { linkedTeam } from '@/lib/players'
+import { useEntryOfPath } from '@/lib/members'
+import { linkedTeam, teamKey, teamPath } from '@/lib/players'
 import { PlayerTeamsCard } from '@/components/common/PlayerTeams'
 import { cn } from '@/lib/utils'
-import { usePlayerDefaults, useProject } from '@/state/project'
+import { usePlayerDefaults, useProject, useWasEdited } from '@/state/project'
 import { useCatalog, useLookups, useStatus } from '@/state/queries'
 
 const PlayerPreview = lazy(() => import('@/components/common/PlayerPreview'))
@@ -341,7 +342,6 @@ function AppearanceTab({ player }: { player: Player }) {
     : !generic && gameHead
       ? { base: `/api/preview/game-head/${player.original_id}`, query: '' }
       : null
-  const canTakeFace = !original || String(player.original_id).length === 6 // fsmod.original_player.can_take_face
   // Team Home kit of the player's team (the goalkeeper kit for a goalkeeper; neutral grey for free agents)
   const link = player.teams.find((l) => linkedTeam(draft, l.team)) ?? player.teams[0]
   const team = link && linkedTeam(draft, link.team)
@@ -415,11 +415,7 @@ function AppearanceTab({ player }: { player: Player }) {
                 )}
               </div>
             )}
-            {canTakeFace ? (
-              <FacePicker key={player.uid} player={player} browsing={browsing} onBrowse={setBrowsing} />
-            ) : (
-              <p className="text-sm text-muted-foreground">{t('playerEdit.faceNeedsSixDigits')}</p>
-            )}
+            <FacePicker key={player.uid} player={player} browsing={browsing} onBrowse={setBrowsing} />
             {player.face && (
               <label className="mt-3 flex items-start gap-2 text-sm">
                 <Checkbox
@@ -529,28 +525,34 @@ function AppearanceTab({ player }: { player: Player }) {
 
 export function PlayerEditPage() {
   const { t } = useI18n()
-  const { uid } = useParams()
+  const { uid: param } = useParams()
   const { draft, removePlayer } = useProject()
   const navigate = useNavigate()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [baseOpen, setBaseOpen] = useState(false)
   const hasBase = !!useStatus().data?.config.players_base_file
   const { copyPlayer } = useCopy()
-  const player = draft.players.find((p) => p.uid === uid)
+  const { entry: player, loading } = useEntryOfPath<Player>('player', param)
+  const uid = player?.uid
   const team = player?.teams.map((l) => linkedTeam(draft, l.team)).find((tm) => tm)
 
   const back = useBack(
-    team ? { to: `/teams/${team.uid}`, label: team.name || t('players.colTeam') } : { to: '/players', label: t('nav.players') },
+    team ? { to: teamPath(teamKey(team)), label: team.name || t('players.colTeam') } : { to: '/players', label: t('nav.players') },
   )
   const goBack = useGoBack()
   const keepBack = useKeepBack()
   const tabs = useTabParam('data')
+  const edited = useWasEdited(uid)
 
   if (!player) {
     return (
       <div className="space-y-2">
         <BackButton back={back} />
-        <p className="text-muted-foreground">{t('playerEdit.notFound')}</p>
+        {loading ? (
+          <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+        ) : (
+          <p className="text-muted-foreground">{t('playerEdit.notFound')}</p>
+        )}
       </div>
     )
   }
@@ -564,7 +566,7 @@ export function PlayerEditPage() {
         <div className="flex items-center gap-3">
           <PlayerAvatar player={player} className="size-10" />
           <h1 className="text-2xl font-semibold">{name || t('players.new')}</h1>
-          {original && <OriginalBadge edited />}
+          {original && <OriginalBadge entry={player.uid} />}
           <EntityIssues uid={player.uid} />
         </div>
         <div className="flex gap-2">
@@ -593,7 +595,8 @@ export function PlayerEditPage() {
           <Button
             variant="outline"
             size="sm"
-            title={original ? t('playerEdit.restoreOriginalHint') : undefined}
+            title={original ? t(edited ? 'playerEdit.restoreOriginalHint' : 'common.unchangedHint') : undefined}
+            disabled={original && !edited}
             onClick={() => setDeleteOpen(true)}
           >
             {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('playerEdit.delete')}

@@ -30,6 +30,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { BuildProgressDialog } from '@/components/layout/BuildProgress'
 import { useI18n, type TFunction } from '@/i18n'
 import { issueText } from '@/lib/issues'
+import { playerPath, playerRef, teamKey, teamPath } from '@/lib/players'
 import { useProject } from '@/state/project'
 import { useStatus } from '@/state/queries'
 
@@ -39,12 +40,12 @@ function entityLink(t: TFunction, project: Project, uid: string | null) {
   const league = project.leagues.find((l) => l.uid === uid)
   if (league) return { label: t('issues.linkLeague', { name: league.name || unnamed }), to: `/leagues/${uid}` }
   const team = project.teams.find((tm) => tm.uid === uid)
-  if (team) return { label: t('issues.linkTeam', { name: team.name || unnamed }), to: `/teams/${uid}` }
+  if (team) return { label: t('issues.linkTeam', { name: team.name || unnamed }), to: teamPath(teamKey(team)) }
   const player = project.players.find((p) => p.uid === uid)
   if (player)
     return {
       label: t('issues.linkPlayer', { name: `${player.first_name} ${player.last_name}`.trim() || unnamed }),
-      to: `/players/${uid}`,
+      to: playerPath(playerRef(player)),
     }
   return null
 }

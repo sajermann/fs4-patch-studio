@@ -54,6 +54,13 @@ def snapshot_fields(tm):
     return data
 
 
+def game_leaders(db, teamid):
+    """(captain, {TakerRole: playerid}) of one of the game's teams, as the game has them."""
+    teams = db.table('teams')
+    row = teams.records[db.rows('teams', 'teamid', teamid)[0]]
+    return db.get(teams, row, 'captainid'), {role: db.get(teams, row, f) for role, f in TAKER_ROLES.items()}
+
+
 def load(game, catalog, teamid, uid, save_image):
     """Team that edits original team teamid, filled with what the game has. save_image(file name, bytes) stores an
     image in the project and returns its path (the backend's provisional upload)."""
@@ -108,9 +115,7 @@ def load(game, catalog, teamid, uid, save_image):
             colors=tuple(tuple(db.get(kits_t, row, f'{col}_color_{which}_{ch}') for ch in 'rgb')
                          for which in ('primary', 'secondary', 'tertiary'))) for part, col in STREET_PARTS})
 
-    teams = db.table('teams')
-    team_row = teams.records[db.rows('teams', 'teamid', teamid)[0]]
-    takers = {role: db.get(teams, team_row, f) for role, f in TAKER_ROLES.items()}
+    captain, takers = game_leaders(db, teamid)
 
     texts = catalog.texts
     name = info['name']
@@ -122,7 +127,7 @@ def load(game, catalog, teamid, uid, save_image):
         abbreviation=texts.get(f'TeamName_Abbr3_{teamid}') or name[:3].upper(),
         primary_color=tuple(info['primary_color']), secondary_color=tuple(info['secondary_color']),
         crest=crest_path, use_real_kits=bool(real_kits), real_kits=real_kits, street_kits=street_kits,
-        captain=db.get(teams, team_row, 'captainid'), takers=takers)
+        captain=captain, takers=takers)
     tm.loaded = OriginalSnapshot(team=snapshot_fields(tm), images=images)
     return tm
 
@@ -179,3 +184,12 @@ def changes(tm, assets_dir):
     out.street_kits = {kind for kind, _ in STREET_KINDS
                        if now.get('street_kits', {}).get(kind) != before.get('street_kits', {}).get(kind)}
     return out
+
+
+def untouched(tm, assets_dir, catalog):
+    """The entry still has exactly what was loaded from the game (opened without changing anything): the project
+    can drop it (the team stays the game's) and the UI shows it as an original, not as an edited one."""
+    if tm.loaded is None or tm.hidden or tm.lineups:
+        return False
+    captain, takers = game_leaders(catalog.db, tm.original_id)
+    return tm.captain == captain and tm.takers == takers and not changes(tm, assets_dir).any

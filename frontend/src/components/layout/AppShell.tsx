@@ -61,7 +61,7 @@ function GameWarnings() {
 
 export function AppShell() {
   const { t } = useI18n()
-  const { draft, loaded } = useProject()
+  const { draft, loaded, opened } = useProject()
   // pages assume the project and the original game data are available
   const catalog = useCatalog().data
   const leagues = useOriginalLeagues().data
@@ -70,8 +70,8 @@ export function AppShell() {
   const ready = loaded && !!catalog && !!leagues && !!teams
   const counts: Record<string, number> = {
     '/leagues': draft.leagues.length,
-    '/teams': draft.teams.length,
-    '/players': draft.players.length,
+    '/teams': draft.teams.filter((e) => !opened.has(e.uid)).length, // originals only opened are not in the project
+    '/players': draft.players.filter((e) => !opened.has(e.uid)).length,
     '/stadiums': stadiums?.length ?? 0,
     '/patches': Object.values(draft.game_patches ?? {}).filter(Boolean).length,
   }

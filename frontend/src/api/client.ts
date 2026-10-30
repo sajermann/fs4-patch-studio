@@ -15,6 +15,7 @@ import type {
   Issue,
   OriginalLeague,
   OriginalPlayer,
+  OriginalSquadLink,
   OriginalStadium,
   OriginalTeam,
   Player,
@@ -77,23 +78,23 @@ export const api = {
   config: () => request<Config>('/api/config'),
   saveConfig: (config: Config) => request<Config>('/api/config', json('PUT', config)),
 
-  project: () => request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults> }>('/api/project'),
+  project: () => request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[] }>('/api/project'),
   /** Replaces the project with a backup zip (database.json + images + faces). */
   restoreBackup: (file: File) => {
     const form = new FormData()
     form.append('file', file)
-    return request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults> }>('/api/project/restore', {
+    return request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[] }>('/api/project/restore', {
       method: 'POST',
       body: form,
     })
   },
   saveProject: (project: Project) =>
-    request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; patch: PatchStatus }>(
+    request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; patch: PatchStatus }>(
       '/api/project',
       json('PUT', project),
     ),
   validate: (project: Project) =>
-    request<{ issues: Issue[]; defaults: Record<string, PlayerDefaults> }>('/api/project/validate', json('POST', project)),
+    request<{ issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[] }>('/api/project/validate', json('POST', project)),
 
   originalLeagues: () => request<OriginalLeague[]>('/api/originals/leagues'),
   originalTeams: () => request<OriginalTeam[]>('/api/originals/teams'),
@@ -106,6 +107,8 @@ export const api = {
   /** Starts editing an original team: its crest and kits become project images; returns the filled Team. */
   editOriginalTeam: (teamid: number, uid: string) =>
     request<Team>(`/api/originals/teams/${teamid}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),
+  /** The game's own squad of an original team (restoring it puts this squad back). */
+  originalSquad: (teamid: number) => request<OriginalSquadLink[]>(`/api/originals/teams/${teamid}/squad`),
   /** Starts editing one of the game's players: his photo becomes a project image; returns the filled Player. */
   editOriginalPlayer: (playerid: number, uid: string) =>
     request<Player>(`/api/originals/players/${playerid}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),

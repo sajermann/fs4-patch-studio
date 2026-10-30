@@ -12,7 +12,7 @@ from typing import Optional
 
 from PIL import Image
 
-from . import builder, kit, original_player, original_team, scanface
+from . import builder, kit, original_team, scanface
 from .catalog import POSITIONS, SKILLS
 from .model import REAL_KIT_FILES
 
@@ -357,8 +357,6 @@ def validate(project, catalog, assets_dir):
                 error('original_player_not_found', p.uid, 'original_id', id=p.original_id)
             elif p.original_id in edited and edited[p.original_id] is not p:
                 error('original_player_edited_twice', p.uid, 'original_id', id=p.original_id)
-            if not p.generic and p.face is not None and not original_player.can_take_face(p.original_id):
-                error('face_needs_six_digits', p.uid, 'face', id=p.original_id)
         if not p.generic:
             if p.face is None:
                 # an original player without a real face keeps the game's scanned head (only if he had one)

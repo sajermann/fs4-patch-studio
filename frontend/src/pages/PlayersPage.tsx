@@ -1,5 +1,4 @@
-import { Loader2, Plus } from 'lucide-react'
-import { useState } from 'react'
+import { Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import type { OriginalPlayer, Player, TeamKey } from '@/api/types'
 import { EntityIssues, OriginalBadge } from '@/components/common/form'
@@ -17,13 +16,13 @@ import {
   usePage,
 } from '@/components/common/list'
 import { OriginalPlayerAvatar, PlayerAvatar } from '@/components/common/PlayerPhoto'
-import { useGamePlayerEntry, useTeamName } from '@/lib/members'
+import { useTeamName } from '@/lib/members'
 import { Button } from '@/components/ui/button'
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
-import { linkOf } from '@/lib/players'
-import { newUid, useProject } from '@/state/project'
+import { linkOf, playerPath, playerRef } from '@/lib/players'
+import { newUid, useProject, useSameAsGame } from '@/state/project'
 import { useLookups, useOriginalPlayers, useOriginalTeams } from '@/state/queries'
 
 type Row = { kind: 'project'; player: Player } | { kind: 'original'; player: OriginalPlayer }
@@ -44,7 +43,7 @@ export function PlayersPage() {
   const teamName = useTeamName()
 
   const create = () => {
-    const uid = newUid('jg')
+    const uid = newUid()
     addPlayer({
       uid,
       teams: f.team.startsWith('new:') ? [{ team: f.team.slice(4) }] : [],
@@ -58,17 +57,11 @@ export function PlayersPage() {
     navigate(`/players/${uid}`, from)
   }
 
-  // the game's players edited in the project show once, as their entry ("was original")
-  const edited = new Map(draft.players.filter((p) => p.original_id != null).map((p) => [p.original_id!, p]))
-  const ensure = useGamePlayerEntry()
-  const [opening, setOpening] = useState<number>()
-  const openOriginal = async (id: number) => {
-    if (opening !== undefined) return
-    setOpening(id)
-    const entry = await ensure(id)
-    setOpening(undefined)
-    if (entry) navigate(`/players/${entry.uid}`, from)
-  }
+  // the game's players edited in the project show once, as their entry ("was original"); ones only opened (or
+  // changed back) list as the game's
+  const sameAsGame = useSameAsGame()
+  const mine = draft.players.filter((p) => !sameAsGame(p.uid))
+  const edited = new Map(mine.filter((p) => p.original_id != null).map((p) => [p.original_id!, p]))
 
   // a team's players: the project's linked to it and the game's own (as the game has them)
   const filterKey: TeamKey | null = f.team.startsWith('new:') ? f.team.slice(4) : f.team.startsWith('orig:') ? Number(f.team.slice(5)) : null
@@ -80,7 +73,7 @@ export function PlayersPage() {
         : filterKey !== null && !!linkOf(r.player, filterKey)
       : typeof filterKey === 'number' && r.player.teams.includes(filterKey))
   const rows: Row[] = [
-    ...draft.players.map((player) => ({ kind: 'project' as const, player })),
+    ...mine.map((player) => ({ kind: 'project' as const, player })),
     ...(originals ?? []).filter((p) => !edited.has(p.id)).map((player) => ({ kind: 'original' as const, player })),
   ].filter(
     (r) =>
@@ -166,14 +159,13 @@ export function PlayersPage() {
                   key={p.id}
                   className="cursor-pointer text-muted-foreground"
                   title={t('players.editOriginalHint')}
-                  onClick={() => void openOriginal(p.id)}
+                  onClick={() => navigate(playerPath(p.id), from)}
                 >
                   <TableCell data-grow>
                     <span className="flex items-center gap-2">
                       <OriginalPlayerAvatar player={p} />
                       <span className="text-foreground">{p.display_name}</span>
                       <OriginalBadge />
-                      {opening === p.id && <Loader2 className="size-4 animate-spin" />}
                     </span>
                   </TableCell>
                   <TableCell title={p.teams.map((id) => originalTeam.get(id)?.name ?? id).join(', ')}>
@@ -189,14 +181,14 @@ export function PlayersPage() {
             }
             const p = r.player
             return (
-              <TableRow key={p.uid} className="cursor-pointer" onClick={() => navigate(`/players/${p.uid}`, from)}>
+              <TableRow key={p.uid} className="cursor-pointer" onClick={() => navigate(playerPath(playerRef(p)), from)}>
                 <TableCell data-grow className={p.hidden ? 'font-medium text-muted-foreground' : 'font-medium'}>
                   <span className="flex items-center gap-2">
                     <PlayerAvatar player={p} />
                     {p.display_name || `${p.first_name} ${p.last_name}`.trim() || (
                       <span className="text-muted-foreground">{t('common.unnamed')}</span>
                     )}
-                    {p.original_id != null && <OriginalBadge edited />}
+                    {p.original_id != null && <OriginalBadge entry={p.uid} />}
                     {p.hidden && <OutOfPatchBadge />}
                   </span>
                 </TableCell>

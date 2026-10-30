@@ -569,8 +569,6 @@ def _build_original_player(db, game, pl, assets_dir, nameid, face_templates, say
             raise BuildError(f'{pl.shown_name}: cannot read photo {pl.photo}: {e}', pl.uid) from e
         jobs.append(lambda: ({photo.photo_name(pid): photo.photo_file(game, img)}, []))
     if not pl.generic and pl.face is not None and (ch.head or 'appearance' in f):
-        if not original_player.can_take_face(pid):
-            raise BuildError(f'{pl.shown_name}: a real face needs a 6-digit playerid ({pid})', pl.uid)
         files = _face_files(pl, pid, db.get(players, row, 'haircolorcode'), game, assets_dir, face_templates)
         jobs.append(lambda: (files, []))
     return jobs

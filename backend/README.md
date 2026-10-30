@@ -57,6 +57,7 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `GET /api/project/backup` | zip of the project folder (`database.json` + `images/` + `faces/`), downloaded by the "Fazer backup" button |
 | `POST /api/project/restore` (zip) | replaces the project with a backup zip (its content or the `project` folder itself); checked and extracted beside the folder first, so a bad zip (`invalid_backup` + `reason`) changes nothing |
 | `POST /api/originals/teams/{teamid}/edit?uid=` | starts editing an original team: its crest and kits become provisional project images and the `Team` comes back filled with the game's data (`original_id`, `loaded` = what was loaded; the build only rewrites what changed) |
+| `GET /api/originals/teams/{teamid}/squad` | the game's own squad of an original team (`player`, `number`, `position`); "restore original" puts it back |
 | `POST /api/originals/players/{playerid}/edit?uid=` | starts editing one of the game's players: his photo becomes a provisional project image and the `Player` comes back filled with the game's data (`original_id`, `loaded`; the build only rewrites what changed) |
 | `GET /api/originals/leagues`, `/teams`, `/players` | original game data, read-only (`players`: `team`, `q`, `offset`, `limit`); teams say `crest`, players say `photo` (has a menu image) |
 | `GET /api/originals/crests/{teamid}.webp`, `/photos/{playerid}.webp` | menu crest / photo of an original team / player (128 px; 404 when the game has none), converted once and kept in `cache/originals/` |

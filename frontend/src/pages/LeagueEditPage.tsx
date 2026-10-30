@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { BackButton, useBack, useFrom, useGoBack, useKeepBack } from '@/lib/back'
 import { useI18n } from '@/i18n'
 import { useCopy } from '@/lib/copy'
+import { teamKey, teamPath } from '@/lib/players'
 import { useProject } from '@/state/project'
 import { useLookups, useOriginalTeams } from '@/state/queries'
 
@@ -73,7 +74,7 @@ function ProjectTeamsTable({ teams, leagueName }: { teams: Team[]; leagueName: s
     <Table>
       <TableBody>
         {teams.map((tm) => (
-          <TableRow key={tm.uid} className="cursor-pointer" onClick={() => navigate(`/teams/${tm.uid}`, from)}>
+          <TableRow key={tm.uid} className="cursor-pointer" onClick={() => navigate(teamPath(teamKey(tm)), from)}>
             <TableCell className="w-8">
               <Swatch rgb={tm.primary_color} />
             </TableCell>

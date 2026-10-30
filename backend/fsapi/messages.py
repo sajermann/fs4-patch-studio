@@ -47,7 +47,6 @@ ISSUE_TEXT = {
     'team_full': 'O time fica com {count} jogadores; o máximo é {max}. Tire alguém do time.',
     'original_player_not_found': 'O jogador {id} não é um jogador original do jogo.',
     'original_player_edited_twice': 'O jogador original {id} já está sendo editado por outra entrada do projeto.',
-    'face_needs_six_digits': 'Face real só em jogador com id de 6 dígitos (este é {id}); use a cabeça genérica ou a do jogo.',
     'invalid_position': 'Posição inválida.',
     'unknown_skill': 'Habilidade desconhecida.',
     'unknown_field': 'Campo desconhecido.',

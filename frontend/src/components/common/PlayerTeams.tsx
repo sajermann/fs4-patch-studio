@@ -1,4 +1,4 @@
-import { ExternalLink, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { Player, TeamLink } from '@/api/types'
 import { FieldIssues, NumberInput } from '@/components/common/form'
@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
 import { useJoinTeam, useTeamName } from '@/lib/members'
-import { leaveTeam, linkedTeam, playerName, playerRef } from '@/lib/players'
+import { leaveTeam, playerName, playerRef, teamPath } from '@/lib/players'
 import { useIssues, usePlayerDefaults, useProject } from '@/state/project'
 import { useCatalog, useLookups } from '@/state/queries'
 
@@ -23,7 +23,7 @@ function LinkIssues({ player, index }: { player: string; index: number }) {
  * full asks who leaves it (useJoinTeam). */
 export function PlayerTeamsCard({ player }: { player: Player }) {
   const { t } = useI18n()
-  const { draft, setDraft, updatePlayer } = useProject()
+  const { setDraft, updatePlayer } = useProject()
   const { position: positionAbbr } = useLookups()
   const catalog = useCatalog().data
   const defaults = usePlayerDefaults(player.uid)
@@ -51,17 +51,22 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
                 <TableHead>{t('players.colTeam')}</TableHead>
                 <TableHead className="w-24">{t('teamEdit.number')}</TableHead>
                 <TableHead className="w-32">{t('players.colPosition')}</TableHead>
-                <TableHead className="w-24" />
+                <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {player.teams.map((l, k) => {
                 const inherited = defaults?.team === l.team ? defaults : undefined
-                const team = linkedTeam(draft, l.team)
                 return (
                   <TableRow key={String(l.team)} className="align-top">
                     <TableCell className="whitespace-normal">
-                      <span className="block truncate py-1.5 text-sm font-medium">{teamName(l.team)}</span>
+                      <Link
+                        to={teamPath(l.team)}
+                        state={from.state}
+                        className="block max-w-full truncate py-1.5 text-sm font-medium underline-offset-4 hover:underline"
+                      >
+                        {teamName(l.team)}
+                      </Link>
                       <LinkIssues player={player.uid} index={k} />
                     </TableCell>
                     <TableCell>
@@ -86,18 +91,9 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
                       />
                     </TableCell>
                     <TableCell>
-                      <span className="flex">
-                        {team && (
-                          <Button variant="ghost" size="icon" asChild title={t('playerEdit.openTeam')}>
-                            <Link to={`/teams/${team.uid}`} state={from.state}>
-                              <ExternalLink />
-                            </Link>
-                          </Button>
-                        )}
-                        <Button variant="ghost" size="icon" title={t('roster.removeFromTeam')} onClick={() => setDraft((p) => leaveTeam(p, ref, l.team))}>
-                          <Trash2 />
-                        </Button>
-                      </span>
+                      <Button variant="ghost" size="icon" title={t('roster.removeFromTeam')} onClick={() => setDraft((p) => leaveTeam(p, ref, l.team))}>
+                        <Trash2 />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 )

@@ -15,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
 import { type Member, useGamePlayerEntry, useJoinTeam, useTeamMembers, useTeamName } from '@/lib/members'
-import { firstFreeNumber, leaveTeam, linkOf, playerName, playerRef, teamKey, teamsWith } from '@/lib/players'
+import { firstFreeNumber, leaveTeam, linkOf, playerName, playerPath, playerRef, teamKey, teamsWith } from '@/lib/players'
 import { effectiveRoles } from '@/lib/teams'
 import { cn } from '@/lib/utils'
 import { newUid, useIssues, useProject } from '@/state/project'
@@ -70,7 +70,7 @@ function ProjectPlayerPicker({ team, open, onOpenChange, onPick }: { team: TeamK
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5 truncate">
                       {playerName(p, t('common.unnamed'))}
-                      {p.original_id != null && <OriginalBadge edited />}
+                      {p.original_id != null && <OriginalBadge entry={p.uid} />}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
                       {p.teams.length ? p.teams.map((l) => teamName(l.team)).join(', ') : t('players.freeAgent')}
@@ -149,13 +149,19 @@ export function RosterCard({ team }: { team: Team }) {
   const takers = { ...(original ? game?.takers : {}), ...team.takers }
   const roles = effectiveRoles(captain, takers)
 
-  const setLink = (m: Member, patch: Partial<TeamLink>) => m.player && updatePlayer(m.player.uid, { teams: teamsWith(m.player, key, patch) })
+  // number/position in this team; one of the game's players as the game has him gets his entry first (the change is
+  // applied by playerid: typing fast may ask for his entry twice)
+  const setLink = async (m: Member, patch: Partial<TeamLink>) => {
+    if (m.player) return updatePlayer(m.player.uid, { teams: teamsWith(m.player, key, patch) })
+    if (!(await ensure(m.ref as number))) return
+    setDraft((p) => ({ ...p, players: p.players.map((pl) => (pl.original_id === m.ref ? { ...pl, teams: teamsWith(pl, key, patch) } : pl)) }))
+  }
   const remove = async (m: Member) => {
     if (m.kind === 'squad' && !(await ensure(m.ref as number))) return
     setDraft((p) => leaveTeam(p, m.ref, key))
   }
   const createPlayer = () => {
-    const uid = newUid('jg')
+    const uid = newUid()
     const number = firstFreeNumber(members.map((m) => m.number))
     addPlayer({ uid, teams: [{ team: key, number }], first_name: '', last_name: '', generic: true, skills: {}, appearance: {}, fields: {} })
     navigate(`/players/${uid}`, from)
@@ -207,28 +213,23 @@ export function RosterCard({ team }: { team: Team }) {
             <TableBody>
               {members.map((m) => (
                 <MemberRow key={String(m.ref)} member={m} from={from.state}>
-                  {m.kind === 'squad' ? (
-                    <>
-                      <TableCell className="tabular-nums">{m.number ?? '—'}</TableCell>
-                      <TableCell>{m.position != null ? (positionAbbr.get(m.position) ?? m.position) : '—'}</TableCell>
-                    </>
-                  ) : (
-                    <>
-                      <TableCell>
-                        <NumberInput
-                          value={linkOf(m.player!, key)?.number ?? undefined}
-                          onChange={(v) => setLink(m, { number: v })}
-                          min={1}
-                          max={99}
-                          className="h-8"
-                          placeholder={inheritedNumber(m)}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <PositionSelect value={linkOf(m.player!, key)?.position} placeholder={inheritedPosition(m)} onChange={(v) => setLink(m, { position: v })} />
-                      </TableCell>
-                    </>
-                  )}
+                  <TableCell>
+                    <NumberInput
+                      value={(m.player ? linkOf(m.player, key)?.number : m.number) ?? undefined}
+                      onChange={(v) => void setLink(m, { number: v })}
+                      min={1}
+                      max={99}
+                      className="h-8"
+                      placeholder={inheritedNumber(m)}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <PositionSelect
+                      value={m.player ? linkOf(m.player, key)?.position : m.position}
+                      placeholder={inheritedPosition(m)}
+                      onChange={(v) => void setLink(m, { position: v })}
+                    />
+                  </TableCell>
                   <RoleCells player={m.ref} roles={roles} />
                   <TableCell>{m.player && <EntityIssues uid={m.player.uid} />}</TableCell>
                   <TableCell>
@@ -280,18 +281,14 @@ function MemberRow({ member: m, from, children }: { member: Member; from: unknow
       <TableCell>
         <span className="flex items-center gap-2">
           {m.avatar}
-          {m.player ? (
-            <Link
-              to={`/players/${m.player.uid}`}
-              state={from}
-              className={cn('font-medium underline-offset-4 hover:underline', m.hidden && 'text-muted-foreground')}
-            >
-              {m.name}
-            </Link>
-          ) : (
-            <span className="text-muted-foreground">{m.name}</span>
-          )}
-          {m.kind === 'edited' && <OriginalBadge edited />}
+          <Link
+            to={playerPath(m.ref)}
+            state={from}
+            className={cn('font-medium underline-offset-4 hover:underline', m.hidden && 'text-muted-foreground')}
+          >
+            {m.name}
+          </Link>
+          {m.kind !== 'project' && <OriginalBadge entry={m.player?.uid} />}
           {m.hidden && <OutOfPatchBadge />}
         </span>
       </TableCell>

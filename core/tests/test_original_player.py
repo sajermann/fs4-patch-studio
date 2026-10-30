@@ -91,12 +91,14 @@ def test_edited_original_player(game, catalog, assets):
     assert value(db, 'players', row, 'weight') == catalog.players_by_id[XAVI]['weight']
 
 
-def test_real_face_needs_a_six_digit_playerid(game, catalog, assets):
+def test_real_face_on_a_short_playerid(game, catalog, assets):
+    """A real face on an original player whose playerid has fewer than 6 digits is not refused (the face files of
+    the pack are missing here, so only that is reported)."""
     folder, save_image = assets
     pl = entry(game, catalog, XAVI, 'jg_xavi', save_image)
     pl.generic, pl.face = False, model.ScannedFace(source_id=1)
     codes = {i.code for i in validation.validate(model.Project(players=[pl]), catalog, folder)}
-    assert 'face_needs_six_digits' in codes
+    assert 'face_needs_six_digits' not in codes
 
 
 def test_players_in_several_teams(game, catalog):

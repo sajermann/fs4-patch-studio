@@ -493,11 +493,29 @@ def rebuild(template, replace):
 
 
 def rename(template, sec_index, old, new):
-    secs = sections(template, '>')
-    o, s = secs[sec_index][1], secs[sec_index][2]
-    if len(old) != len(new):
-        raise ValueError('player ids of different lengths')
-    return template[o:o + s].replace(old.encode(), new.encode())
+    """Name section sec_index with old replaced by new in every entry. Ids of any length (an original player with a
+    4-digit playerid gets Messi's files): the entries [type, length incl. NUL, text] are written again and the
+    section is padded to 16 with its size field updated (rebuild moves the sections after it)."""
+    o = sections(template, '>')[sec_index][1]
+    count = struct.unpack('>I', template[o + 4:o + 8])[0]
+    pos, body = o + 16, b''
+    for _ in range(count):
+        type_, n = struct.unpack('>II', template[pos:pos + 8])
+        text = bytes(template[pos + 8:pos + 8 + n]).rstrip(b'\0').replace(old.encode(), new.encode())
+        body += struct.pack('>II', type_, len(text) + 1) + text + b'\0'
+        pos += 8 + n
+    size = 16 + len(body)
+    size += -size % 16
+    return (struct.pack('>IIII', size, count, 0, 0) + body).ljust(size, b'\0')
+
+
+def renamed(d, old, new):
+    """RX3b d with its name section renamed (rename). The header's value at 8 is not the file size in every file
+    (textures: less), so it keeps the original moved by the size change (same id length: d unchanged)."""
+    k = next(i for i, s in enumerate(sections(d, '>')) if s[0] == NAMES)
+    out = rebuild(d, {k: rename(d, k, old, new)})
+    struct.pack_into('>I', out, 8, struct.unpack('>I', d[8:12])[0] + len(out) - len(d))
+    return out
 
 
 def convert_mesh(template, src, slot_of, old_id, new_id, fit_neck=False, offset=(0.0, 0.0, 0.0), vote=False,
@@ -618,9 +636,7 @@ def convert_textures(template, src, pairs, old_id, new_id):
                 raise ValueError(f'texture {ti}: mip levels differ')
             out[q + 16:q + 16 + mt[2]] = rx3tex.swap16(src[r + 16:r + 16 + ms[2]])
             q, r = q + 16 + mt[2], r + 16 + ms[2]
-    n = of_type(template, '>', NAMES)[0]
-    out[n[0]:n[0] + n[1]] = template[n[0]:n[0] + n[1]].replace(old_id.encode(), new_id.encode())
-    return out
+    return renamed(out, old_id, new_id)
 
 
 def paint_scalp(face, head, hair, hair_tex, color, res=256, reach=3.0):
@@ -913,7 +929,7 @@ def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_mo
     """FIFA Street files {asset name relative to data/sceneassets: RX3b bytes} of a FIFA 14 face.
 
     tpl: template_files(); src: {kind: RX3l bytes} of the pack (REQUIRED kinds, optional hair/hair_textures/
-    hairlod); new_id: playerassetid of the result (same number of digits as the template's); hair_color: '#rrggbb'
+    hairlod); new_id: playerassetid of the result (any number of digits); hair_color: '#rrggbb'
     painted on the scalp (preview.hair_color(haircolorcode)); paint=False skips that (ScannedFace.paint_scalp). Eyes: the template's eyeball (FIFA Street slides it
     to move the gaze; some packs bring a photo of the eye with lids, which turned into "eyes rolled back").
     hair_mode: key of HAIR_MODES (ScannedFace.hair_mode); hair_thickness: 0..HAIR_THICKNESS_MAX, used by the 'thick'
@@ -931,10 +947,7 @@ def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_mo
     offset = align_offset(tpl['head'], src['head'])
     files = {name['head']: convert_mesh(tpl['head'], src['head'], [0, 1], old, new, True, offset, vote=True),
              name['face']: convert_textures(tpl['face'], src['face'], [(0, 0)], old, new)}
-    eyes = bytearray(tpl['eyes'])
-    n = of_type(eyes, '>', NAMES)[0]
-    eyes[n[0]:n[0] + n[1]] = eyes[n[0]:n[0] + n[1]].replace(old.encode(), new.encode())
-    files[name['eyes']] = eyes
+    files[name['eyes']] = renamed(tpl['eyes'], old, new)
     hair = src.get('hair') if src.get('hair_textures') else None
     if hair and 'cap' not in hair_parts(hair):
         raise ValueError('hair without a cap (alphaA)')

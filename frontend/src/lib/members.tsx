@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError, api } from '@/api/client'
 import type { OriginalPlayer, Player, PlayerDefaults, PlayerRef, Project, Team, TeamKey, TeamLink } from '@/api/types'
@@ -8,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useI18n } from '@/i18n'
-import { firstFreeNumber, leaveTeam, linkOf, playerName, playerOf, playerRef, rosterOf, takePlace, teamKey } from '@/lib/players'
+import { firstFreeNumber, keyOfPath, leaveTeam, linkedTeam, linkOf, playerName, playerOf, playerRef, rosterOf, takePlace, teamKey } from '@/lib/players'
 import { newUid, useProject } from '@/state/project'
 import { useCatalog, useLookups, useOriginalPlayers } from '@/state/queries'
 
@@ -101,19 +102,69 @@ export const useTeamMembers = (team: Team) => useSquad(teamKey(team))
 /** The project entry of one of the game's players, created (loaded from the game) the first time. */
 export function useGamePlayerEntry() {
   const { t } = useI18n()
-  const { draft, addPlayer } = useProject()
+  const { draft, openOriginal } = useProject()
   return async (playerid: number): Promise<Player | null> => {
     const known = playerOf(draft, playerid)
     if (known) return known
     try {
-      const entry = await api.editOriginalPlayer(playerid, newUid('jg'))
-      addPlayer(entry)
+      const entry = await api.editOriginalPlayer(playerid, newUid())
+      openOriginal({ player: entry })
       return entry
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('players.editOriginalFailed'))
       return null
     }
   }
+}
+
+/** The project entry of one of the game's teams, created (loaded from the game) the first time. */
+export function useGameTeamEntry() {
+  const { t } = useI18n()
+  const { draft, openOriginal } = useProject()
+  return async (teamid: number): Promise<Team | null> => {
+    const known = linkedTeam(draft, teamid)
+    if (known) return known
+    try {
+      const entry = await api.editOriginalTeam(teamid, newUid())
+      openOriginal({ team: entry })
+      return entry
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('teams.editOriginalFailed'))
+      return null
+    }
+  }
+}
+
+/** The team/player an edit page address names (teamPath/playerPath): a new one by uid, one of the game's by its id,
+ * loaded from the game when the project does not have it yet (also after a reload, or a save that dropped it). An old
+ * address of an original by uid moves to its game id. loading: still coming from the game. */
+export function useEntryOfPath<T extends Team | Player>(kind: 'team' | 'player', param: string | undefined) {
+  const { loaded, draft } = useProject()
+  const ensureTeam = useGameTeamEntry()
+  const ensurePlayer = useGamePlayerEntry()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [failed, setFailed] = useState<number>()
+  const key = keyOfPath(param)
+  const entry = (key === undefined ? undefined : kind === 'team' ? linkedTeam(draft, key) : playerOf(draft, key)) as T | undefined
+  const gameId = typeof key === 'number' ? key : undefined
+  const legacy = typeof key === 'string' ? entry?.original_id : undefined
+  useEffect(() => {
+    if (legacy != null) navigate(`/${kind}s/${legacy}${location.search}`, { replace: true, state: location.state })
+  }, [legacy, kind, navigate, location.search, location.state])
+  const absent = loaded && gameId !== undefined && !entry
+  useEffect(() => {
+    if (!absent || gameId === undefined) return
+    let live = true
+    void (kind === 'team' ? ensureTeam(gameId) : ensurePlayer(gameId)).then((e) => {
+      if (live && !e) setFailed(gameId)
+    })
+    return () => {
+      live = false
+    }
+    // once per absent id (the ensure functions are new on each render)
+  }, [absent, gameId, kind])
+  return { entry, loading: !entry && (!loaded || (absent && failed !== gameId)) }
 }
 
 const withLink = (project: Project, ref: PlayerRef, team: TeamKey, link: Omit<TeamLink, 'team'>): Project => {

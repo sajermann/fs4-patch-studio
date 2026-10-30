@@ -42,6 +42,21 @@ def test_converter_matches_the_files_validated_in_game(game, assets, monkeypatch
             assert data == f.read(), name
 
 
+def test_converter_takes_ids_of_any_length(game, assets):
+    """An original player with a 4-digit playerid (Henry, 1625; validated in game): the name sections of head, face
+    and eyes are byte for byte the game's own files of that player, and the hair still parses."""
+    henry = 1625
+    out = scanface.convert(scanface.template_files(game), facepack.read_face(assets, FACE), henry, preview.hair_color(1))
+    assert set(out) == {f.format(henry) for f in scanface.FILES.values()}
+    own = scanface.game_files(game, henry)
+    for kind in ('head', 'face', 'eyes'):
+        mine, theirs = (scanface.of_type(d, '>', scanface.NAMES)[0] for d in (out[scanface.FILES[kind].format(henry)],
+                                                                               own[kind]))
+        assert out[scanface.FILES[kind].format(henry)][mine[0]:sum(mine)] == own[kind][theirs[0]:sum(theirs)], kind
+    hair = out[scanface.FILES['hair'].format(henry)]
+    assert scanface.hair_parts(hair) == {'strands': 0, 'cap': 1} and b'hair_1625_0_0player' in hair
+
+
 
 def test_scalp_paint_can_be_turned_off(game, assets):
     """paint=False (ScannedFace.paint_scalp) leaves the face texture as converted, only the scalp paint changes."""

@@ -72,7 +72,7 @@ class AppState:
         """Projects from before the game's players had entries of their own (game players in a team, "replaces"):
         entries for the game's players they mention (original_player.absorb_game_links). Needs the original files."""
         def load_player(playerid):
-            uid = f'jg_{int(time.time() * 1000):x}{os.urandom(2).hex()}'
+            uid = 'u' + os.urandom(6).hex()  # starts with a letter: an all-digit address names a game id
             pl = original_player.load(self.game, self.catalog(), playerid, uid, self.store.save_image)
             return pl.model_dump(mode='json', exclude_none=True)
         return original_player.absorb_game_links(data, load_player)
@@ -100,6 +100,21 @@ def create_app(state=None):
     def issues_for(project, raw=False):
         issues = validation.validate(project, state.catalog(), state.store.folder)
         return issues if raw else [issue_json(i) for i in issues]
+
+    def untouched_uids(project):
+        """Uids of the original team/player entries still exactly as loaded from the game (opened, nothing
+        changed): the UI shows them as originals and saving drops them."""
+        c, folder = state.catalog(), state.store.folder
+        return ([t.uid for t in project.teams if t.is_original and original_team.untouched(t, folder, c)]
+                + [p.uid for p in project.players if p.is_original and original_player.untouched(p, folder, c)])
+
+    def state_of(project, untouched=True):
+        """What the UI shows next to the project: issues, inherited values, untouched original entries and the
+        game's teams whose squad the project changes (shown as edited too)."""
+        c = state.catalog()
+        return {'issues': issues_for(project), 'defaults': c.player_defaults(project),
+                'untouched': untouched_uids(project) if untouched else [],
+                'changed_squads': original_player.changed_squads(project, c)}
 
     # ---------------------------------------------------------------- status / config
     def setup_state():
@@ -200,14 +215,15 @@ def create_app(state=None):
     @app.get('/api/project')
     def get_project():
         project = load_project()
-        return {'project': project.to_json(), 'issues': issues_for(project),
-                'defaults': state.catalog().player_defaults(project)}
+        return {'project': project.to_json(), **state_of(project)}
 
     @app.put('/api/project')
     def put_project(project: model.Project):
+        drop = set(untouched_uids(project))  # opened originals with nothing changed stay the game's
+        project.teams = [t for t in project.teams if t.uid not in drop]
+        project.players = [p for p in project.players if p.uid not in drop]
         state.store.save(project)
-        return {'project': project.to_json(), 'issues': issues_for(project),
-                'defaults': state.catalog().player_defaults(project),
+        return {'project': project.to_json(), **state_of(project, untouched=False),
                 'patch': patch_status(state.store, state.patch_dir)}
 
     BACKUP_ERROR_TEXT = {
@@ -238,8 +254,8 @@ def create_app(state=None):
 
     @app.post('/api/project/validate')
     def validate_project(project: model.Project):
-        """Issues of a draft + the values each player inherits from its template player."""
-        return {'issues': issues_for(project), 'defaults': state.catalog().player_defaults(project)}
+        """Issues of a draft + the values each player inherits from its template player (see state_of)."""
+        return state_of(project)
 
     # ---------------------------------------------------------------- originals (read-only)
     @app.get('/api/originals/leagues')
@@ -261,6 +277,15 @@ def create_app(state=None):
             raise HTTPException(404, {'code': 'original_team_not_found', 'message': f'Time {teamid} não existe.'})
         tm = original_team.load(state.game, c, teamid, uid, state.store.save_image)
         return tm.model_dump(mode='json', exclude_none=True)
+
+    @app.get('/api/originals/teams/{teamid}/squad')
+    def original_squad(teamid: int):
+        """The game's own squad of an original team (playerid, number, position): restoring an edited original team
+        puts it back (who left returns, who joined leaves)."""
+        c = state.catalog()
+        if teamid not in c.team_ids:
+            raise HTTPException(404, {'code': 'original_team_not_found', 'message': f'Time {teamid} não existe.'})
+        return c.squad(teamid)
 
     @app.post('/api/originals/players/{playerid}/edit')
     def edit_original_player(playerid: int, uid: str = Query(pattern=UID_PATTERN)):
