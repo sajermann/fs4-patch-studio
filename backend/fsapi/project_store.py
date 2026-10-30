@@ -84,19 +84,27 @@ class ProjectStore:
     def exists(self):
         return os.path.exists(self.path)
 
-    def upgrade(self):
+    def upgrade(self, migrate=None):
         """Brings a project saved by older versions of the app to the current layout: projeto.json becomes
-        database.json and images get their fixed names and folders (orphans deleted). Returns True when something
+        database.json, migrate(data) converts older contents (returns True when it changed something) and images get
+        their fixed names and folders (orphans deleted). When migrate fails (e.g. no original files yet) the file is
+        left as it is: saving it would drop what the current model no longer reads. Returns True when something
         changed."""
         legacy = os.path.join(self.folder, LEGACY_PROJECT_FILE)
         if not self.exists():
             if not os.path.isfile(legacy):
                 return False
             os.replace(legacy, self.path)
-        project = self.load()
+        with open(self.path, encoding='utf-8') as f:
+            data = json.load(f)
+        try:
+            converted = bool(migrate and migrate(data))
+        except Exception:  # noqa: BLE001 (converted later, when the project is opened)
+            return False
+        project = model.load(data)
         settled = all(not path or path == f'{IMAGES_DIR}/{stem}{os.path.splitext(path)[1].lower()}'
                       for path, stem in ((getattr(e, f), stem) for e, f, stem in image_fields(project)))
-        if settled and not self._loose_images():
+        if settled and not self._loose_images() and not converted:
             return False
         self.save(project)
         return True
@@ -108,12 +116,16 @@ class ProjectStore:
         return [n for n in os.listdir(self.images_dir) if os.path.isfile(os.path.join(self.images_dir, n))
                 and os.path.splitext(n)[1].lower() in IMAGE_EXTENSIONS | {'.tmp'}]
 
-    def load(self):
-        """Saved project (v1 files are converted to v2 in memory); empty project when there is none."""
+    def load(self, migrate=None):
+        """Saved project (v1 files are converted to v2 in memory); empty project when there is none. migrate(data)
+        may change the JSON before it is read (fsapi.main: original_player.absorb_game_links)."""
         if not self.exists():
             return model.Project()
         with open(self.path, encoding='utf-8') as f:
-            return model.load(json.load(f))
+            data = json.load(f)
+        if migrate:
+            migrate(data)
+        return model.load(data)
 
     def save(self, project):
         """Writes the project, renaming its images to their fixed names (the project passed in is updated) and then

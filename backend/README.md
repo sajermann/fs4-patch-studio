@@ -57,6 +57,7 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `GET /api/project/backup` | zip of the project folder (`database.json` + `images/` + `faces/`), downloaded by the "Fazer backup" button |
 | `POST /api/project/restore` (zip) | replaces the project with a backup zip (its content or the `project` folder itself); checked and extracted beside the folder first, so a bad zip (`invalid_backup` + `reason`) changes nothing |
 | `POST /api/originals/teams/{teamid}/edit?uid=` | starts editing an original team: its crest and kits become provisional project images and the `Team` comes back filled with the game's data (`original_id`, `loaded` = what was loaded; the build only rewrites what changed) |
+| `POST /api/originals/players/{playerid}/edit?uid=` | starts editing one of the game's players: his photo becomes a provisional project image and the `Player` comes back filled with the game's data (`original_id`, `loaded`; the build only rewrites what changed) |
 | `GET /api/originals/leagues`, `/teams`, `/players` | original game data, read-only (`players`: `team`, `q`, `offset`, `limit`); teams say `crest`, players say `photo` (has a menu image) |
 | `GET /api/originals/crests/{teamid}.webp`, `/photos/{playerid}.webp` | menu crest / photo of an original team / player (128 px; 404 when the game has none), converted once and kept in `cache/originals/` |
 | `GET /api/catalog` | valid values: free league ids, free team slots, positions, nations, appearance codes, skills, ranges |
@@ -73,6 +74,7 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `GET /api/preview/street/{top\|bottom\|socks}/{style}/{pattern}.png` | street clothes texture: RGB = color mask (primary/secondary/tertiary), alpha = shading |
 | `GET /api/preview/street/{top\|bottom\|socks}/{style}/{pattern}/crest.png?crest=` | crest decal over a street piece (same UV; transparent when the pattern carries no crest) |
 | `GET /api/preview/skin/{tone}.png` / `shoe/{shoetypecode}.png` / `glove/{gkglovetypecode}.png` | skin of arms/legs / boot / goalkeeper glove texture |
+| `GET /api/preview/game-head/{playerid}/{asset}` | one of the game's own scanned heads as it is (same assets as `/api/preview/scanned`) |
 | `GET /api/preview/kit/{jersey\|shorts}.png?color=r,g,b&crest=images/x.png` | team kit texture: solid color + crest decal + shading (shorts also cover the socks) |
 | `GET /api/preview/face.png?headtypecode=&eyebrowcode=&sideburnscode=&facialhaircolorcode=&facialhairtypecode=&skintypecode=&skintonecode=` | face texture the game picks (skin, eyebrows, beard baked in) |
 | `GET /api/facepack[?folder=]` | complete faces of the FIFA 14 face pack folder of the settings (`face_pack_dir`), or of `folder` (to check it before saving); read in place, never written. Each face says who the player is (`player`: name, club, nationality from the players base of the settings, `players_base_file`, by EA player id; `null` without a base or for an unknown id) |

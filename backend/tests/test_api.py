@@ -666,3 +666,39 @@ def test_real_kit_preview_prints_name_and_numbers(env):
     without = c.get('/api/preview/real-kit/shorts.png', params=shorts).content
     with_number = c.get('/api/preview/real-kit/shorts.png', params={**shorts, 'shorts_number': True}).content
     assert with_number != without
+
+
+def test_editing_an_original_player_and_converting_old_game_links(env):
+    """Editing one of the game's players starts from the game; a project saved with Team.game_players and
+    TeamLink.replaces (29/10) gets entries for those game players when it is opened."""
+    import json
+    from fsmod import model, original_player
+    c = env['client']
+    r = c.post('/api/originals/players/158023/edit', params={'uid': 'jg_messi'})
+    assert r.status_code == 200
+    messi = r.json()
+    assert messi['original_id'] == 158023 and len(messi['teams']) == 5 and messi['photo'].startswith('images/upload-')
+    assert c.post('/api/originals/players/1/edit', params={'uid': 'x'}).status_code == 404
+    r = c.put('/api/project', json={'version': 2, 'players': [messi]})
+    assert r.status_code == 200 and not [i for i in r.json()['issues'] if i['severity'] == 'error']
+    saved = model.Player.model_validate(r.json()['project']['players'][0])
+    assert not original_player.changes(saved, str(env['tmp'] / 'project')).any
+    assert c.get('/api/preview/game-head/158023/head.glb').status_code == 200
+
+    old = {'version': 2, 'teams': [{'uid': 'tm_a', 'name': 'A', 'league': 39, 'primary_color': [0, 0, 0],
+                                    'secondary_color': [1, 1, 1], 'game_players': [{'player_id': 158023, 'number': 30}]},
+                                   {'uid': 'tm_barca', 'original_id': 241, 'name': 'B', 'league': 53,
+                                    'primary_color': [0, 0, 0], 'secondary_color': [1, 1, 1],
+                                    'takers': {'penalty': 10535}}],
+           'players': [{'uid': 'jg_x', 'first_name': 'X', 'last_name': 'Y',
+                        'teams': [{'team': 241, 'replaces': 10535}]}]}
+    with open(env['tmp'] / 'project' / 'database.json', 'w', encoding='utf-8') as f:
+        json.dump(old, f)
+    project = c.get('/api/project').json()['project']
+    assert 'game_players' not in project['teams'][0]
+    entries = {p.get('original_id'): p for p in project['players']}
+    assert {'team': 'tm_a', 'number': 30} in [{k: v for k, v in lk.items() if k in ('team', 'number')}
+                                             for lk in entries[158023]['teams']]
+    assert 241 not in [lk['team'] for lk in entries[10535]['teams']]
+    assert project['players'][0]['teams'] == [{'team': 241}]
+    assert project['teams'][1]['takers'] == {'penalty': 'jg_x'}  # the set piece went to the player who joined

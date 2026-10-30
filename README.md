@@ -46,19 +46,25 @@ The interface is available in Portuguese (Brazil) and English, with light and da
 - Choose the team's league and its colors.
 - Kits: generic ones made in the studio's own kit editor, or real kits by uploading their PNG.
 - Street kits, made in the studio's own editor.
+- Build the roster with the players you created and the game's own players (they keep their other teams).
 - Choose the team captain and who takes each set piece (penalty, free kicks, corners).
 - Set the formation for each game mode.
 - Edit the game's original teams: name, crest, colors, kits, street kits and league. The editor opens with what
   the game has, and only what you change is written into the patch.
+- Put players into the game's original teams or take them out: when a team is full you pick who leaves, and the
+  player who joins takes his number, position, captaincy and set pieces.
 - Hide or show the game's original teams.
 
 ### Players editor
 
 - Create new players with their own photo.
-- Fill in their details, team and nationality.
+- Fill in their details and nationality.
+- Put them in several teams at once (e.g. a club and a national team), with a number and position in each.
 - Set their skills.
 - Faces: generic ones made in the studio's own face editor, or real faces from a face pack.
 - See the player in 3D, the way the game will draw them.
+- Edit the game's original players: name, details, skills, teams, photo and look (generic head, a real face from
+  a pack, or the game's own scanned head). Only what you change is written into the patch.
 - Hide or show the players you created.
 
 ### Stadiums editor
@@ -75,10 +81,8 @@ Make your creations, build the patch, install it and have fun!
 
 ## What it can't do (yet)
 
-- Change the players of the game's original teams.
-- Edit the game's original players.
-- Put a player you created into one of the game's original teams.
-- Put the same player in two teams at the same time (e.g. a club and a national team).
+- Delete the game's original teams or players (hiding a team works).
+- Give a real face from a pack to a game player whose id has fewer than 6 digits.
 
 ## Known issues
 

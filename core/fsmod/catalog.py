@@ -11,8 +11,10 @@ from functools import cached_property
 from . import builder, locale, preview
 from .game import LOCALE_ENTRIES, LOCALE_FILES
 
-POSITIONS = {0: 'GK', 3: 'RB', 4: 'RCB', 5: 'CB', 6: 'LCB', 7: 'LB', 10: 'CDM', 12: 'RM', 13: 'RCM', 14: 'CM',
-             15: 'LCM', 16: 'LM', 18: 'CAM', 23: 'RW', 24: 'RS', 25: 'ST', 26: 'LS', 27: 'LW', 28: 'SUB', 29: 'RES'}
+# teamplayerlinks.position (FIFA's codes; the game's own players use all of them but 1)
+POSITIONS = {0: 'GK', 1: 'SW', 2: 'RWB', 3: 'RB', 4: 'RCB', 5: 'CB', 6: 'LCB', 7: 'LB', 8: 'LWB', 9: 'RDM', 10: 'CDM',
+             11: 'LDM', 12: 'RM', 13: 'RCM', 14: 'CM', 15: 'LCM', 16: 'LM', 17: 'RAM', 18: 'CAM', 19: 'LAM', 20: 'RF',
+             21: 'CF', 22: 'LF', 23: 'RW', 24: 'RS', 25: 'ST', 26: 'LS', 27: 'LW', 28: 'SUB', 29: 'RES'}
 SKILLS = {'ATH': (1, 99), 'DEF': (1, 99), 'DRI': (1, 99), 'GK': (1, 99), 'PAS': (1, 99), 'SHO': (1, 99),
           'SPE': (1, 99), 'TRI': (0, 4), 'overall': (1, 99)}
 APPEARANCE_FIELDS = ('headtypecode', 'hairtypecode', 'haircolorcode', 'skintonecode', 'skintypecode',
@@ -94,16 +96,26 @@ class Catalog:
                 (self.db.get(t, r, 'playerid'), self.db.get(t, r, 'jerseynumber'), self.db.get(t, r, 'position')))
         return out
 
+    def player_ids_in(self, teamid):
+        """Playerids of one of the game's teams (as the game has it)."""
+        return {pid for pid, _, _ in self._links_by_team.get(teamid, [])}
+
+    def player_links(self, playerid):
+        """[{'team', 'number', 'position'}] of one of the game's players, in database order."""
+        return [dict(link) for link in self._links_by_player.get(playerid, [])]
+
     def player_defaults(self, project):
         """{player uid: values a new player inherits where the project leaves a field unset} (template player
-        record + its team link), so the UI can show "77 (molde)" instead of just "molde"."""
+        record + its link to the player's first new team, `team`), so the UI can show "77 (molde)" instead of just
+        "molde"."""
         out = {}
         sources = builder.template_sources(project, lambda teamid: self._links_by_team.get(teamid, []))
-        for uid, (pid, number, position) in sources.items():
+        for uid, (pid, number, position, team) in sources.items():
             tpl = self.players_by_id.get(pid)
             if tpl is None:
                 continue
-            out[uid] = {'template': pid, 'template_name': tpl['display_name'], 'number': number, 'position': position,
+            out[uid] = {'template': pid, 'template_name': tpl['display_name'], 'team': team, 'number': number,
+                        'position': position,
                         'height': tpl['height'], 'weight': tpl['weight'], 'birthdate': tpl['birthdate'],
                         'foot': tpl['foot'], 'nationality': tpl['nationality'],
                         'skills': tpl['skills'], 'appearance': tpl['appearance']}

@@ -29,8 +29,8 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from . import (big, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, original_team, photo, preview,
-               rx3tex, scanface, t3db)
+from . import (big, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, original_player, original_team,
+               photo, preview, rx3tex, scanface, t3db)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
 HIDDEN_LEAGUES = {382, 76, 2092, 2095, 2097}  # ids the league selector never shows
@@ -65,6 +65,7 @@ SKILL_FIELDS = {'ATH': 'fsathleticism', 'DEF': 'fsdefending', 'DRI': 'fsdribblin
 TEAM_TEXT_KEYS = {'name': 'TeamName_{}', 'short_name': 'TeamName_Abbr15_{}', 'name_10': 'TeamName_Abbr10_{}',
                   'name_7': 'TeamName_Abbr7_{}', 'abbreviation': 'TeamName_Abbr3_{}'}
 LINEUP_SLOTS = 13  # fs4lineup position0..12
+BENCH_POSITION = 28  # teamplayerlinks.position SUB (catalog.POSITIONS)
 TAKER_FIELDS = ('captainid', 'penaltytakerid', 'freekicktakerid', 'leftcornerkicktakerid',
                 'rightcornerkicktakerid', 'longkicktakerid')
 TAKER_ROLES = original_team.TAKER_ROLES  # model.TakerRole -> teams column
@@ -267,21 +268,26 @@ def apply_original_changes(db, changes):
 
 
 def template_sources(project, team_links):
-    """{player uid: (template playerid, template jersey number, template position)}: where each new player's
-    unset values come from. Same rule as build(): the player's own `template`, otherwise the k-th player of
-    the team's template team (cycling). team_links(teamid) -> [(playerid, number, position)] in database order.
+    """{player uid: (template playerid, template jersey number, template position, team uid)}: where each new
+    player's unset values come from. Same rule as build(): the player's own `template`, otherwise the k-th player
+    of the template team of his first new team (cycling); number and position are those of his link to that team
+    (team uid). Players only in the game's teams cycle through the default template team (no number/position:
+    those come from the game team). team_links(teamid) -> [(playerid, number, position)] in database order.
     Free agents only have a source when they set `template` (they are not built)."""
     out = {}
     for tm in project.new_teams:
         links = team_links(tm.template)
         for k, pl in enumerate(project.roster(tm.uid)):
-            if not links:
+            if not links or pl.uid in out or pl.is_original:
                 continue
             pid, number, position = links[k % len(links)]
-            out[pl.uid] = (pl.template if pl.template is not None else pid, number, position)
-    for pl in project.players:
+            out[pl.uid] = (pl.template if pl.template is not None else pid, number, position, tm.uid)
+    links = team_links(model.DEFAULT_TEMPLATE_TEAM)
+    for k, pl in enumerate(pl for pl in project.new_players if pl.uid not in out and pl.teams):
+        out[pl.uid] = (pl.template if pl.template is not None else links[k % len(links)][0], None, None, None)
+    for pl in project.new_players:
         if pl.uid not in out and pl.template is not None:
-            out[pl.uid] = (pl.template, None, None)
+            out[pl.uid] = (pl.template, None, None, None)
     return out
 
 
@@ -296,7 +302,7 @@ def assign_player_ids(project, reserved):
     are neither reserved nor already in the project. Ids stay with the player once written back."""
     used = set(reserved) | {p.player_id for p in project.players if p.player_id is not None}
     out, pid = {}, FIRST_NEW_PLAYERID
-    for pl in project.players:
+    for pl in project.new_players:
         if pl.player_id is not None:
             continue
         while pid in used:
@@ -372,10 +378,55 @@ def _real_kit_fields(db, table, row, real):
         db.put(table, row, 'shortsnumberplacementcode', 1 if real.shorts_number else 0)
 
 
-def _build_original_team(db, game, tm, assets_dir, league_id, texts, say):
+def free_number(used):
+    """Smallest shirt number from 1 that is not in used."""
+    return next(n for n in range(1, 100) if n not in used)
+
+
+def _game_team_squad(db, tid, leave, update, join, entity):
+    """Changes to the squad of one of the game's teams (teamplayerlinks). leave: playerids whose row is deleted (they
+    stay in their other teams; none left = a free agent); update: {playerid: (number, position)} of rows that stay
+    (None = keep); join: [(playerid, number, position)] new rows (copy of one of the team's rows; number None = a
+    free one). Captain and set-piece roles of a player who left go to the first player who joined (the one taking his
+    place), else to the team's first player."""
+    links, teams = db.table('teamplayerlinks'), db.table('teams')
+    team_rows = db.rows('teams', 'teamid', tid)
+    if not team_rows:
+        raise BuildError(f'team {tid} does not exist', entity)
+    team_row = teams.records[team_rows[0]]
+    rows = db.rows('teamplayerlinks', 'teamid', tid)
+    model_k = rows[0] if rows else 0
+    model_row, model_raw = list(links.records[model_k]), links.raw_records[model_k]
+    for k in sorted((k for k in rows if db.get(links, links.records[k], 'playerid') in leave), reverse=True):
+        del links.records[k], links.raw_records[k]
+    for k in db.rows('teamplayerlinks', 'teamid', tid):
+        row = links.records[k]
+        for f, v in zip(('jerseynumber', 'position'), update.get(db.get(links, row, 'playerid'), ())):
+            if v is not None:
+                db.put(links, row, f, v)
+    for pid, number, position in join:
+        row = list(model_row)
+        db.put(links, row, 'teamid', tid)
+        db.put(links, row, 'playerid', pid)
+        db.put(links, row, 'artificialkey', db.max_value('teamplayerlinks', 'artificialkey') + 1)
+        if number is None:
+            number = free_number({db.get(links, links.records[k], 'jerseynumber')
+                                  for k in db.rows('teamplayerlinks', 'teamid', tid)})
+        db.put(links, row, 'jerseynumber', number)
+        if position is not None:
+            db.put(links, row, 'position', position)
+        db.append('teamplayerlinks', row, model_raw)
+    squad = [db.get(links, links.records[k], 'playerid') for k in db.rows('teamplayerlinks', 'teamid', tid)]
+    heir = join[0][0] if join else (squad[0] if squad else None)
+    for f in TAKER_FIELDS:
+        if db.get(teams, team_row, f) in leave and heir is not None:
+            db.put(teams, team_row, f, heir)
+
+
+def _build_original_team(db, game, tm, assets_dir, league_id, texts, say, player_ids):
     """Applies an original team entry (Team.original_id) to the game's own rows, texts and files, only where it
-    differs from what was loaded (original_team.changes). Returns the jobs that make its image files
-    (() -> ({internal name: bytes}, log lines)), run in the image pool."""
+    differs from what was loaded (original_team.changes). player_ids: {new player uid: playerid}. Returns the jobs
+    that make its image files (() -> ({internal name: bytes}, log lines)), run in the image pool."""
     tid = tm.original_id
     ch = original_team.changes(tm, assets_dir)
     teams = db.table('teams')
@@ -389,14 +440,17 @@ def _build_original_team(db, game, tm, assets_dir, league_id, texts, say):
         texts[f'CT_TeamName_{tid}'] = tm.name
     for attr in ch.texts:
         texts[TEAM_TEXT_KEYS[attr].format(tid)] = getattr(tm, attr) or tm.name
-    # captain and set-piece takers: playerids of the game's players, written only where they differ from the game's
-    for f, pid in (('captainid', tm.captain), *((TAKER_ROLES[r], p) for r, p in tm.takers.items())):
-        if isinstance(pid, int) and pid != db.get(teams, row, f):
+    # captain and set-piece takers (Player.ref), written only where they differ and the player is in the team
+    links = db.table('teamplayerlinks')
+    squad = [db.get(links, links.records[k], 'playerid') for k in db.rows('teamplayerlinks', 'teamid', tid)]
+    for f, ref in (('captainid', tm.captain), *((TAKER_ROLES[r], p) for r, p in tm.takers.items())):
+        pid = player_ids.get(ref) if isinstance(ref, str) else ref
+        if pid in squad and pid != db.get(teams, row, f):
             db.put(teams, row, f, pid)
     if tm.lineups:
-        links = db.table('teamplayerlinks')
-        squad = [db.get(links, links.records[k], 'playerid') for k in db.rows('teamplayerlinks', 'teamid', tid)]
-        _lineup_rows(db, tid, tm.lineups, {pid: pid for pid in squad}, squad)
+        ref_of = {pid: uid for uid, pid in player_ids.items()}
+        refs = [ref_of.get(pid, pid) for pid in squad]
+        _lineup_rows(db, tid, tm.lineups, dict(zip(refs, squad)), refs)
     if ch.colors:
         for n, rgb in (('1', tm.primary_color), ('2', tm.secondary_color)):
             for c, v in zip('rgb', _rgb(rgb, f'teamcolor{n}', tm.uid)):
@@ -453,6 +507,72 @@ def _build_original_team(db, game, tm, assets_dir, league_id, texts, say):
             if n in kit_rows:
                 _kit_color_fields(db, team_kits, kit_rows[n], colors)
             jobs.append(lambda n=n, colors=colors: _kit_files(game, tid, n, colors, crest_image()))
+    return jobs
+
+
+def _archive_of(game, name):
+    """Archive short name that holds a file of the game (a player photo: 2dheads.big), or None."""
+    m = re.fullmatch(r'data/ui/imgassets/heads/p(\d+)\.dds', name)
+    if m:
+        return photo.PHOTOS_ARCHIVE if int(m.group(1)) in game.photo_index else None
+    loc = game.locate(name)
+    return f'data{loc[0]}.big' if loc else None
+
+
+def _build_original_player(db, game, pl, assets_dir, nameid, face_templates, say):
+    """Applies an original player entry (Player.original_id) to the game's own row, only where it differs from what
+    was loaded (original_player.changes). Returns the jobs that make its files (photo, real face)."""
+    pid = pl.original_id
+    ch = original_player.changes(pl, assets_dir)
+    players = db.table('players')
+    rows = db.rows('players', 'playerid', pid)
+    if not rows:
+        raise BuildError(f'{pl.shown_name}: original player {pid} does not exist', pl.uid)
+    row = players.records[rows[0]]
+    before = (pl.loaded.player if pl.loaded else {})
+    f = ch.fields
+    say(f'original player {pid} "{pl.shown_name}"' + ('' if ch.any else ' (unchanged)'))
+    try:
+        if 'first_name' in f:
+            db.put(players, row, 'firstnameid', nameid(pl.first_name))
+        if 'last_name' in f:
+            db.put(players, row, 'lastnameid', nameid(pl.last_name))
+        if f & {'first_name', 'last_name', 'display_name'}:
+            db.put(players, row, 'commonnameid', nameid(pl.shown_name))
+        if f & {'last_name', 'jersey_name'}:
+            db.put(players, row, 'playerjerseynameid', nameid(pl.jersey_name or pl.last_name))
+        if 'height' in f and pl.height is not None:
+            db.put(players, row, 'height', pl.height)
+        if 'weight' in f and pl.weight is not None:
+            db.put(players, row, 'weight', pl.weight)
+        if 'birthdate' in f and pl.birthdate:
+            db.put(players, row, 'birthdate', (datetime.date.fromisoformat(pl.birthdate) - EPOCH).days)
+        if 'foot' in f and pl.foot:
+            db.put(players, row, 'preferredfoot', 2 if pl.foot == 'left' else 1)
+        for skill, v in pl.skills.items():
+            if v != before.get('skills', {}).get(skill):
+                db.put(players, row, SKILL_FIELDS[skill], v)
+        for group, values in (('appearance', pl.appearance), ('fields', pl.fields)):
+            for name, v in values.items():
+                if v != before.get(group, {}).get(name):
+                    db.put(players, row, name, v)
+        if ch.head:
+            db.put(players, row, 'headclasscode', 1 if pl.generic else 0)
+    except (BuildError, ValueError, KeyError) as e:
+        raise BuildError(f'{pl.shown_name}: {e}', pl.uid) from e
+    jobs = []
+    if ch.photo and pl.photo:
+        try:
+            img = Image.open(os.path.join(assets_dir, pl.photo))
+            img.load()
+        except OSError as e:
+            raise BuildError(f'{pl.shown_name}: cannot read photo {pl.photo}: {e}', pl.uid) from e
+        jobs.append(lambda: ({photo.photo_name(pid): photo.photo_file(game, img)}, []))
+    if not pl.generic and pl.face is not None and (ch.head or 'appearance' in f):
+        if not original_player.can_take_face(pid):
+            raise BuildError(f'{pl.shown_name}: a real face needs a 6-digit playerid ({pid})', pl.uid)
+        files = _face_files(pl, pid, db.get(players, row, 'haircolorcode'), game, assets_dir, face_templates)
+        jobs.append(lambda: (files, []))
     return jobs
 
 
@@ -571,6 +691,82 @@ def build(project, game, assets_dir, log=None, progress=None):
     original_player_rows = {}  # playerid -> row of the database's own players (new ones are appended after them)
     for k, r in enumerate(players_table.records):
         original_player_rows.setdefault(db.get(players_table, r, 'playerid'), k)
+    links = db.table('teamplayerlinks')
+    game_links = {}  # playerid -> first teamplayerlinks row of the game's own players
+    teams_of = {}  # playerid -> teamids of the game's own players (before the build changes anything)
+    for r in links.records:
+        game_links.setdefault(db.get(links, r, 'playerid'), r)
+        teams_of.setdefault(db.get(links, r, 'playerid'), set()).add(db.get(links, r, 'teamid'))
+    player_ids = {}  # project player uid -> playerid, once his record is built
+    first_position = {}  # project player uid -> position of his first team link written (default of the others)
+
+    def nameid(text):
+        b = text.encode('utf-8')
+        if b in nameid_by_text:
+            return nameid_by_text[b]
+        names.huff.encode(b)  # validates the characters
+        nid = next(i for i in range(free_nameid[0], 29000) if i not in used_nameids)
+        free_nameid[0] = nid + 1
+        used_nameids.add(nid)
+        row = [None] * len(names.fields)
+        db.put(names, row, 'nameid', nid)
+        row[[f.name for f in names.fields].index('name')] = b
+        db.append('playernames', row, bytes(names.rec_size))
+        nameid_by_text[b] = nid
+        return nid
+
+    def build_player(pl, template_pid, where):
+        """Appends the players record of a project player (cloned from template_pid unless he sets his own)."""
+        players = db.table('players')
+        src_pid = int(pl.template if pl.template is not None else template_pid)
+        src = [original_player_rows[src_pid]] if src_pid in original_player_rows else \
+            db.rows('players', 'playerid', src_pid)
+        if not src:
+            raise BuildError(f'{where}: template player {src_pid} does not exist', pl.uid)
+        row = list(players.records[src[0]])
+        raw = players.raw_records[src[0]]
+        pid = pl.player_id if pl.player_id is not None else result.assigned_player_ids[pl.uid]
+        if pid in reserved or pid in built_pids or not FIRST_NEW_PLAYERID <= pid <= LAST_NEW_PLAYERID:
+            raise BuildError(f'{pl.shown_name}: playerid {pid} is not free', pl.uid)
+        built_pids.add(pid)
+        player_ids[pl.uid] = pid
+        if pl.photo:
+            try:
+                img = Image.open(os.path.join(assets_dir, pl.photo))
+                img.load()
+            except OSError as e:
+                raise BuildError(f'{pl.shown_name}: cannot read photo {pl.photo}: {e}', pl.uid) from e
+            jobs.append(pool.submit(lambda pid=pid, img=img:
+                                    ({photo.photo_name(pid): photo.photo_file(game, img)}, [])))
+        try:
+            db.put(players, row, 'playerid', pid)
+            db.put(players, row, 'firstnameid', nameid(pl.first_name))
+            db.put(players, row, 'lastnameid', nameid(pl.last_name))
+            db.put(players, row, 'commonnameid', nameid(pl.shown_name))
+            db.put(players, row, 'playerjerseynameid', nameid(pl.jersey_name or pl.last_name))
+            if pl.height is not None:
+                db.put(players, row, 'height', pl.height)
+            if pl.weight is not None:
+                db.put(players, row, 'weight', pl.weight)
+            if pl.birthdate:
+                db.put(players, row, 'birthdate', (datetime.date.fromisoformat(pl.birthdate) - EPOCH).days)
+            if pl.foot:
+                db.put(players, row, 'preferredfoot', 2 if pl.foot == 'left' else 1)
+            for skill, v in pl.skills.items():
+                db.put(players, row, SKILL_FIELDS[skill], v)
+            for f, v in {**pl.appearance, **pl.fields}.items():
+                db.put(players, row, f, v)
+            if not pl.generic and pl.face is not None:
+                db.put(players, row, 'headclasscode', 0)
+        except (BuildError, ValueError, KeyError) as e:
+            raise BuildError(f'{pl.shown_name}: {e}', pl.uid) from e
+        if not pl.generic and pl.face is not None:
+            files = _face_files(pl, pid, db.get(players, row, 'haircolorcode'), game, assets_dir, face_templates)
+            jobs.append(pool.submit(lambda files=files: (files, [])))  # made here: face_templates is shared
+        db.append('players', row, raw)
+        say(f'   player {pid} {pl.shown_name}')
+        return pid
+
     step('leagues', len(project.leagues), len(project.leagues))
     for k, tm in enumerate(project.new_teams):
         step('teams', k, len(project.teams))
@@ -596,88 +792,36 @@ def build(project, game, assets_dir, log=None, progress=None):
             kits[kind] = {part: _rgb(getattr(colors, part), f'{kind}.{part}', tm.uid)
                           for part in ('jersey', 'shorts', 'socks')}
 
-        # new players
-        players, links = db.table('players'), db.table('teamplayerlinks')
+        # players: new ones (built the first time a team has them) and the game's own (edited entries: their own
+        # record); each gets a teamplayerlinks row cloned from the k-th of the template team (number/position: the
+        # link's, else the template's; a game player's own when he has a team in the game)
         template_links = [links.records[k] for k in db.rows('teamplayerlinks', 'teamid', tm.template)]
         roster = project.roster(tm.uid)
         if not 1 <= len(roster) <= MAX_ROSTER:
             raise BuildError(f'{tm.name}: a roster needs 1 to {MAX_ROSTER} players', tm.uid)
-
-        def nameid(text):
-            b = text.encode('utf-8')
-            if b in nameid_by_text:
-                return nameid_by_text[b]
-            names.huff.encode(b)  # validates the characters
-            nid = next(i for i in range(free_nameid[0], 29000) if i not in used_nameids)
-            free_nameid[0] = nid + 1
-            used_nameids.add(nid)
-            row = [None] * len(names.fields)
-            db.put(names, row, 'nameid', nid)
-            row[[f.name for f in names.fields].index('name')] = b
-            db.append('playernames', row, bytes(names.rec_size))
-            nameid_by_text[b] = nid
-            return nid
-
-        first_key = db.max_value('teamplayerlinks', 'artificialkey') + 1
+        members = [(pl.ref, pl.link(tm.uid)) for pl in roster]
         pids = {}
-        for k, pl in enumerate(roster):
+        for k, (pl, (ref, join)) in enumerate(zip(roster, members)):
             link = template_links[k % len(template_links)]
-            src_pid = int(pl.template if pl.template is not None else db.get(links, link, 'playerid'))
-            src = [original_player_rows[src_pid]] if src_pid in original_player_rows else \
-                db.rows('players', 'playerid', src_pid)
-            if not src:
-                raise BuildError(f'{tm.name}: template player {src_pid} does not exist', pl.uid)
-            row = list(players.records[src[0]])
-            raw = players.raw_records[src[0]]
-            pid = pl.player_id if pl.player_id is not None else result.assigned_player_ids[pl.uid]
-            if pid in reserved or pid in built_pids or not FIRST_NEW_PLAYERID <= pid <= LAST_NEW_PLAYERID:
-                raise BuildError(f'{pl.shown_name}: playerid {pid} is not free', pl.uid)
-            built_pids.add(pid)
-            pids[pl.uid] = pid
-            if pl.photo:
-                try:
-                    img = Image.open(os.path.join(assets_dir, pl.photo))
-                    img.load()
-                except OSError as e:
-                    raise BuildError(f'{pl.shown_name}: cannot read photo {pl.photo}: {e}', pl.uid) from e
-                jobs.append(pool.submit(lambda pid=pid, img=img:
-                                        ({photo.photo_name(pid): photo.photo_file(game, img)}, [])))
-            try:
-                db.put(players, row, 'playerid', pid)
-                db.put(players, row, 'firstnameid', nameid(pl.first_name))
-                db.put(players, row, 'lastnameid', nameid(pl.last_name))
-                db.put(players, row, 'commonnameid', nameid(pl.shown_name))
-                db.put(players, row, 'playerjerseynameid', nameid(pl.jersey_name or pl.last_name))
-                if pl.height is not None:
-                    db.put(players, row, 'height', pl.height)
-                if pl.weight is not None:
-                    db.put(players, row, 'weight', pl.weight)
-                if pl.birthdate:
-                    db.put(players, row, 'birthdate', (datetime.date.fromisoformat(pl.birthdate) - EPOCH).days)
-                if pl.foot:
-                    db.put(players, row, 'preferredfoot', 2 if pl.foot == 'left' else 1)
-                for skill, v in pl.skills.items():
-                    db.put(players, row, SKILL_FIELDS[skill], v)
-                for f, v in {**pl.appearance, **pl.fields}.items():
-                    db.put(players, row, f, v)
-                if not pl.generic and pl.face is not None:
-                    db.put(players, row, 'headclasscode', 0)
-            except (BuildError, ValueError, KeyError) as e:
-                raise BuildError(f'{pl.shown_name}: {e}', pl.uid) from e
-            if not pl.generic and pl.face is not None:
-                files = _face_files(pl, pid, db.get(players, row, 'haircolorcode'), game, assets_dir, face_templates)
-                jobs.append(pool.submit(lambda files=files: (files, [])))  # made here: face_templates is shared
-            db.append('players', row, raw)
             link_row = list(link)
+            if pl.is_original:
+                pid = pl.original_id
+                own = game_links.get(pid)
+                if own is not None:
+                    for f in ('jerseynumber', 'position'):
+                        db.put(links, link_row, f, db.get(links, own, f))
+            else:
+                pid = player_ids.get(ref) or build_player(pl, db.get(links, link, 'playerid'), tm.name)
+            pids[ref] = pid
             db.put(links, link_row, 'teamid', tid)
             db.put(links, link_row, 'playerid', pid)
-            db.put(links, link_row, 'artificialkey', first_key + k)
-            if pl.number is not None:
-                db.put(links, link_row, 'jerseynumber', pl.number)
-            if pl.position is not None:
-                db.put(links, link_row, 'position', pl.position)
+            db.put(links, link_row, 'artificialkey', db.max_value('teamplayerlinks', 'artificialkey') + 1)
+            if join.number is not None:
+                db.put(links, link_row, 'jerseynumber', join.number)
+            if join.position is not None:
+                db.put(links, link_row, 'position', join.position)
+            first_position.setdefault(ref, db.get(links, link_row, 'position'))
             db.append('teamplayerlinks', link_row, links.raw_records[links.records.index(link)])
-            say(f'   player {pid} {pl.shown_name}')
 
         # team record and links
         ti = db.rows('teams', 'teamid', tm.template)[0]
@@ -686,7 +830,7 @@ def build(project, game, assets_dir, log=None, progress=None):
         db.put(teams, row, 'teamid', tid)
         db.put(teams, row, 'assetid', tid)
         db.put(teams, row, 'teamname', tm.name[:30])
-        captain = pids.get(tm.captain, pids[roster[0].uid])
+        captain = pids.get(tm.captain, pids[members[0][0]])
         db.put(teams, row, 'captainid', captain)
         for role, f in TAKER_ROLES.items():
             db.put(teams, row, f, pids.get(tm.takers.get(role), captain))
@@ -695,7 +839,7 @@ def build(project, game, assets_dir, log=None, progress=None):
                 db.put(teams, row, f'teamcolor{n}{ch}', v)
         db.insert_sorted('teams', 'teamid', row, raw)
         bank_teams.add(tid)
-        _lineup_rows(db, tid, tm.lineups, pids, [pl.uid for pl in roster])
+        _lineup_rows(db, tid, tm.lineups, pids, [ref for ref, _ in members])
         for table_name in ('teamstadiumlinks', 'leagueteamlinks'):
             t = db.table(table_name)
             for k in db.rows(table_name, 'teamid', tm.template):
@@ -752,14 +896,59 @@ def build(project, game, assets_dir, log=None, progress=None):
             elif kind != 'goalkeeper':
                 jobs.append(pool.submit(_kit_files, game, tid, kind_n, kits[kind], crest_img))
 
-    # ---- original teams edited in place (same teamid): only what changed since they were loaded
+    # ---- players only in the game's teams: records cloned from the default template team
+    default_links = [links.records[k] for k in db.rows('teamplayerlinks', 'teamid', model.DEFAULT_TEMPLATE_TEAM)]
+    for k, pl in enumerate(pl for pl in project.new_players if pl.uid not in player_ids and pl.teams):
+        build_player(pl, db.get(links, default_links[k % len(default_links)], 'playerid'), pl.shown_name)
+
+    # ---- the game's players edited in place (same playerid): their row, photo and head, only what changed
     original_jobs = set()
+    for pl in project.original_players:
+        for job in _build_original_player(db, game, pl, assets_dir, nameid, face_templates, say):
+            future = pool.submit(job)
+            jobs.append(future)
+            original_jobs.add(future)
+
+    # ---- squads of the game's teams: edited game players leave the teams they dropped and change number/position
+    # in the ones they keep; new and edited players join
+    squads = {}  # teamid -> (leave set, update dict, join list)
+    for pl in project.original_players:
+        own = teams_of.get(pl.original_id, set())
+        kept = {lk.team: lk for lk in pl.teams if isinstance(lk.team, int)}
+        for tid in own:
+            if tid not in kept:
+                squads.setdefault(tid, (set(), {}, []))[0].add(pl.original_id)
+        for tid, lk in kept.items():
+            if tid in own:
+                squads.setdefault(tid, (set(), {}, []))[1][pl.original_id] = (lk.number, lk.position)
+    for pl in project.players:
+        game_teams = [lk for lk in pl.teams if isinstance(lk.team, int)]
+        if not game_teams:
+            continue
+        pid = pl.original_id if pl.is_original else player_ids[pl.uid]
+        own = teams_of.get(pid, set()) if pl.is_original else set()
+        for lk in game_teams:
+            if lk.team not in own:
+                position = lk.position
+                if position is None:
+                    position = first_position.get(pl.ref)
+                    if position is None and pl.is_original and game_links.get(pid) is not None:
+                        position = db.get(links, game_links[pid], 'position')
+                    position = BENCH_POSITION if position is None else position
+                squads.setdefault(lk.team, (set(), {}, []))[2].append((pid, lk.number, position))
+                first_position.setdefault(pl.ref, position)
+    for tid, (leave, update, join) in squads.items():
+        if leave or join:
+            say(f'team {tid}: {len(leave)} leave, {len(join)} join')
+        _game_team_squad(db, tid, leave, update, join, None)
+
+    # ---- original teams edited in place (same teamid): only what changed since they were loaded
     for k, tm in enumerate(project.original_teams):
         step('teams', len(project.new_teams) + k, len(project.teams))
         league_id = league_ids.get(tm.league) if isinstance(tm.league, str) else int(tm.league)
         if league_id is None or league_id not in existing:
             raise BuildError(f'{tm.name}: league {tm.league} does not exist', tm.uid)
-        for job in _build_original_team(db, game, tm, assets_dir, league_id, texts, say):
+        for job in _build_original_team(db, game, tm, assets_dir, league_id, texts, say, player_ids):
             future = pool.submit(job)
             jobs.append(future)
             original_jobs.add(future)
@@ -769,9 +958,9 @@ def build(project, game, assets_dir, log=None, progress=None):
             step('images', k, len(jobs))
             files, lines = job.result()
             for name, data in files.items():
-                loc = game.locate(name) if job in original_jobs else None
-                if loc:  # a file the game has: replaced inside its archive (a loose file would lose)
-                    entries[f'data{loc[0]}.big', name] = data
+                archive = _archive_of(game, name) if job in original_jobs else None
+                if archive:  # a file the game has: replaced inside its archive (a loose file would lose)
+                    entries[archive, name] = data
                 else:
                     result.loose[name] = data
             for line in lines:

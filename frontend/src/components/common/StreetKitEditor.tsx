@@ -8,6 +8,7 @@ import { useI18n } from '@/i18n'
 import type { MessageKey } from '@/i18n'
 import { KIT_LABELS } from '@/lib/labels'
 import { previewAppearance, STREET_PARTS, streetOutfit, streetPiece } from '@/lib/preview'
+import { rosterOf, teamKey } from '@/lib/players'
 import { cn } from '@/lib/utils'
 import { usePlayerDefaults, useProject } from '@/state/project'
 import { useCatalog } from '@/state/queries'
@@ -24,7 +25,7 @@ export function StreetKitEditor({ team }: { team: Team }) {
   const { draft, updateTeam } = useProject()
   const catalog = useCatalog().data
   const [kind, setKind] = useState<KitKind>('home')
-  const roster = draft.players.filter((p) => p.team === team.uid)
+  const roster = rosterOf(draft, teamKey(team))
   const model = roster.find((p) => p.uid === team.captain) ?? roster[0]
   const defaults = usePlayerDefaults(model?.uid)
   const options = catalog?.street_options

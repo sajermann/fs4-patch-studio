@@ -7,9 +7,10 @@ from_v1() converts the older v1 contract (Portuguese keys, players nested inside
 """
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CONTRACT_VERSION = 2
+DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
 Channel = Annotated[int, Field(ge=0, le=255)]
 RGB = tuple[Channel, Channel, Channel]
@@ -91,17 +92,36 @@ class ScannedFace(BaseModel):
     hair_thickness: float = 0.4  # strand thickness of the 'thick' hair modes (scanface.HAIR_THICKNESS)
 
 
+TeamKey = Union[str, int]  # new team uid, or teamid of one of the game's teams (edited in the project or not)
+
+
+class TeamLink(BaseModel):
+    """One team of a player (a teamplayerlinks row): each team has its own shirt number and position."""
+    team: TeamKey
+    number: Optional[int] = None  # None: new team = the template's (original player: his own); game team = a free one
+    position: Optional[int] = None  # None: new team = the template's (original player: his own); game team = the
+    # player's position in his first team
+
+
+class OriginalPlayerSnapshot(BaseModel):
+    """What the app loaded from the game when the user started editing one of its players (fsmod.original_player):
+    the build only rewrites what changed."""
+    player: dict = {}  # the editable Player fields as loaded (JSON, original_player.EDITABLE_FIELDS)
+    images: dict[str, str] = {}  # SHA-1 of each image as loaded ('photo')
+
+
 class Player(Entity):
     uid: str
     first_name: str
     last_name: str
     player_id: Optional[int] = None  # playerid in the game (a new one, unused by the game); None = given by the build
-    team: Optional[str] = None  # team uid; None = free agent (kept only in the app)
-    generic: bool = True  # generic head (appearance codes); False = scanned face (face)
+    original_id: Optional[int] = None  # the game's own player this entry edits (same playerid); None = new player
+    loaded: Optional[OriginalPlayerSnapshot] = None  # original player: what was loaded from the game
+    teams: list[TeamLink] = []  # clubs and national teams; none = free agent (kept only in the app)
+    generic: bool = True  # generic head (appearance codes); False = scanned face (face; original player without
+    # face: the game's own scanned head)
     display_name: Optional[str] = None
     jersey_name: Optional[str] = None
-    number: Optional[int] = None
-    position: Optional[int] = None
     template: Optional[int] = None  # playerid whose record is cloned
     height: Optional[int] = None
     weight: Optional[int] = None
@@ -114,9 +134,33 @@ class Player(Entity):
     face: Optional[ScannedFace] = None  # used when generic is False
     hidden: bool = False  # left out of the patch (its id stays reserved), e.g. not ready yet
 
+    @model_validator(mode='before')
+    @classmethod
+    def _single_team(cls, data):
+        """Projects saved before players had several teams: team + number + position become the first link."""
+        if isinstance(data, dict) and 'teams' not in data and {'team', 'number', 'position'} & set(data):
+            data = dict(data)
+            team, number, position = data.pop('team', None), data.pop('number', None), data.pop('position', None)
+            data['teams'] = [{'team': team, 'number': number, 'position': position}] if team is not None else []
+        return data
+
     @property
     def shown_name(self):
         return self.display_name or f'{self.first_name} {self.last_name}'.strip()
+
+    def link(self, team):
+        """The TeamLink of team (TeamKey), or None."""
+        return next((lk for lk in self.teams if lk.team == team), None)
+
+    @property
+    def is_original(self):
+        return self.original_id is not None
+
+    @property
+    def ref(self):
+        """What a lineup, captain or taker names this player by: the uid of a new player, the playerid of an
+        original one (the game's players are named by playerid, edited or not)."""
+        return self.original_id if self.is_original else self.uid
 
 
 class Lineup(BaseModel):
@@ -127,7 +171,7 @@ class Lineup(BaseModel):
     tactic: int = 1  # fs4tactics id: 0 static, 1 dynamic, 2 street (only 5 and 6 players have 0 and 2)
     starters: list[Optional[PlayerRef]] = []  # player per slot (areas of fs4playersareas); None = filled by the build
     reserves: list[PlayerRef] = []  # bench order; players left out follow in roster order
-    # players: new team = project player uids; original team = playerids of the game's players
+    # players: Player.ref (new player uids and/or playerids of the game's players)
 
 
 class OriginalSnapshot(BaseModel):
@@ -156,9 +200,10 @@ class Team(Entity):
     street_kits: dict[KitKind, StreetKit] = {}  # street (FS4) clothes chosen piece by piece
     use_real_kits: bool = False  # team kits from real_kits (FIFA 14-16 packs) instead of solid color + crest
     real_kits: dict[RealKitSlot, RealKit] = {}  # kept when use_real_kits is off (switching back keeps them)
-    template: int = 112298  # generic FS4 team whose rows are cloned (default values: players, street kits)
-    captain: Optional[PlayerRef] = None  # new team: player uid, None = first player; original team: playerid,
-    # None = the game's
+    template: int = DEFAULT_TEMPLATE_TEAM  # generic FS4 team whose rows are cloned (default values: players, street
+    # kits)
+    captain: Optional[PlayerRef] = None  # Player.ref (new player uid or the game's playerid); None = new team: first
+    # player, original team: the game's
     takers: dict[TakerRole, PlayerRef] = {}  # set pieces; a role left out = the captain (original team: the game's)
     lineups: list[Lineup] = []  # starting lineup per game mode (fs4lineup); a mode without one = the game's pick
     hidden: bool = False  # left out of the patch (with its players), e.g. not ready yet
@@ -178,6 +223,11 @@ class Team(Entity):
     @property
     def is_original(self):
         return self.original_id is not None
+
+    @property
+    def key(self):
+        """What a TeamLink names this team by: the uid of a new team, the teamid of an original one."""
+        return self.original_id if self.is_original else self.uid
 
 
 class OriginalChanges(BaseModel):
@@ -201,8 +251,18 @@ class Project(Entity):
     originals: OriginalChanges = OriginalChanges()
     game_patches: GamePatches = GamePatches()
 
-    def roster(self, team_uid):
-        return [p for p in self.players if p.team == team_uid]
+    @property
+    def new_players(self):
+        return [p for p in self.players if not p.is_original]
+
+    @property
+    def original_players(self):
+        """Entries that edit the game's own players (Player.original_id)."""
+        return [p for p in self.players if p.is_original]
+
+    def roster(self, team):
+        """The project's players of a team (TeamKey: new team uid or the game's teamid), in project order."""
+        return [p for p in self.players if p.link(team)]
 
     @property
     def new_teams(self):
@@ -219,8 +279,13 @@ class Project(Entity):
         leagues = [lg for lg in self.leagues if not lg.hidden]
         hidden_leagues = {lg.uid for lg in self.leagues if lg.hidden}
         teams = [t for t in self.teams if not t.hidden and t.league not in hidden_leagues]
-        kept = {t.uid for t in teams}
-        players = [p for p in self.players if not p.hidden and (p.team is None or p.team in kept)]
+        left_out = {t.uid for t in self.teams if not t.is_original} - {t.uid for t in teams}
+        players = []
+        for p in self.players:
+            links = [lk for lk in p.teams if lk.team not in left_out]
+            if p.hidden or (p.teams and not links):  # every team of the player is hidden
+                continue
+            players.append(p if len(links) == len(p.teams) else p.model_copy(update={'teams': links}))
         return self.model_copy(update={'leagues': leagues, 'teams': teams, 'players': players})
 
     def to_json(self):
@@ -259,9 +324,9 @@ def from_v1(data):
             puid = f'jg_{player_n:02d}'
             player_uids.append(puid)
             players.append(Player(
-                uid=puid, team=uid, first_name=j['nome'], last_name=j['sobrenome'],
-                display_name=j.get('exibido'), jersey_name=j.get('camisa_nome'),
-                number=j.get('numero'), position=j.get('posicao'), template=j.get('molde'),
+                uid=puid, teams=[TeamLink(team=uid, number=j.get('numero'), position=j.get('posicao'))],
+                first_name=j['nome'], last_name=j['sobrenome'],
+                display_name=j.get('exibido'), jersey_name=j.get('camisa_nome'), template=j.get('molde'),
                 height=j.get('altura'), weight=j.get('peso'), birthdate=j.get('nascimento'),
                 foot={'canhoto': 'left', 'destro': 'right'}.get(j.get('pe')),
                 skills=dict(j.get('habilidades', {})), fields=dict(j.get('campos', {}))))

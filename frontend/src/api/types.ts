@@ -6,6 +6,7 @@ export type KitPart = 'jersey' | 'shorts' | 'socks'
 export type RealKitSlot = 'home' | 'away' | 'goalkeeper'
 export type TakerRole = 'penalty' | 'free_kick' | 'long_free_kick' | 'left_corner' | 'right_corner'
 export type PlayerRef = string | number // project player uid, or playerid of one of the game's own players
+export type TeamKey = string | number // new team uid, or teamid of one of the game's teams (edited or not)
 export type RealKitFile = 'thumbnail' | 'jersey' | 'shorts'
 
 /** Real kit of a FIFA 14-16 pack for one slot (fsmod.model.RealKit); a slot without jersey or shorts is not used. */
@@ -53,7 +54,7 @@ export interface Team {
   use_real_kits?: boolean // team kits from real_kits instead of solid color + crest
   real_kits?: Partial<Record<RealKitSlot, RealKit>>
   template: number
-  captain?: PlayerRef // new team: player uid (none = first player); original team: playerid (none = the game's)
+  captain?: PlayerRef // project player uid or the game's playerid; none = new team: first player, original: the game's
   takers?: Partial<Record<TakerRole, PlayerRef>> // set pieces; a role left out = the captain (original: the game's)
   lineups?: Lineup[] // starting lineup per game mode; a mode without one = the game's pick
   hidden?: boolean // left out of the patch (with its players)
@@ -66,7 +67,14 @@ export interface Lineup {
   tactic: number // 0 static, 1 dynamic, 2 street (only 5 and 6 players have 0 and 2)
   starters: (PlayerRef | null)[] // player per slot; null = filled by the build
   reserves: PlayerRef[] // bench order; players left out follow in roster order
-  // players: new team = project player uids; original team = playerids of the game's players
+  // players: project player uids and/or playerids of the game's players
+}
+
+/** One team of a player (a teamplayerlinks row), with its own number and position. */
+export interface TeamLink {
+  team: TeamKey
+  number?: number | null // unset: new team = the template's (game player: his own); game team = a free one
+  position?: number | null // unset: new team = the template's (game player: his own); game team = his first team's
 }
 
 /** A game mode a lineup can be set for: {tactic id: area per starter slot} (0 GK, 1 DEF, 2 ATT). */
@@ -93,12 +101,12 @@ export interface Player {
   first_name: string
   last_name: string
   player_id?: number | null // playerid in the game, given by the build
-  team?: string | null
-  generic: boolean
+  original_id?: number | null // the game's own player this entry edits (same playerid); null = new player
+  loaded?: { player: Record<string, unknown>; images: Record<string, string> } // what was loaded from the game
+  teams: TeamLink[] // clubs and national teams; none = free agent (kept only in the app)
+  generic: boolean // false + no face: an original player keeps the game's scanned head
   display_name?: string
   jersey_name?: string
-  number?: number
-  position?: number
   template?: number
   height?: number
   weight?: number
@@ -188,6 +196,7 @@ export interface Project {
 export interface PlayerDefaults {
   template: number
   template_name: string
+  team: string | null // the player's new team the number/position below are for (none: only game teams)
   number: number | null
   position: number | null
   height: number

@@ -72,9 +72,11 @@ export type PreviewOutfit =
 export type View = 'face' | 'body'
 export type Distance = 'near' | 'far'
 
-/** Converted real face: query of /api/preview/scanned/<file> (api/client scannedFaceQuery). */
+/** Converted real face: query of /api/preview/scanned/<file> (api/client scannedFaceQuery); base: another folder of
+ * the same files (/api/preview/game-head/<playerid>: one of the game's own scanned heads). */
 export interface PreviewScannedFace {
   query: string
+  base?: string
 }
 type Vec3 = [number, number, number]
 
@@ -229,7 +231,7 @@ function Head({ a }: { a: PreviewAppearance }) {
 }
 
 function ScannedHead({ face, distance }: { face: PreviewScannedFace; distance: Distance }) {
-  const file = (name: string) => `/api/preview/scanned/${name}?${face.query}`
+  const file = (name: string) => `${face.base ?? '/api/preview/scanned'}/${name}?${face.query}`
   return <HeadMesh glb={distance === 'far' ? '/api/preview/lodhead.glb' : file('head.glb')} face={file('face.png')} eyes={file('eyes.png')} />
 }
 
@@ -247,7 +249,7 @@ function Hair({ code, hairColor }: { code: number; hairColor: string }) {
 }
 
 function ScannedHair({ face, distance }: { face: PreviewScannedFace; distance: Distance }) {
-  const file = (name: string) => `/api/preview/scanned/${name}?${face.query}`
+  const file = (name: string) => `${face.base ?? '/api/preview/scanned'}/${name}?${face.query}`
   const urls = { glb: file(distance === 'far' ? 'hairlod.glb' : 'hair.glb'), color: file('hair.png'), cap: file('cap.png'), strands: file('strands.png') }
   return <HairMesh urls={urls} hairColor={SCANNED_HAIR_COLOR} />
 }

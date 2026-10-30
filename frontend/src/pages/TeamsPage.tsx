@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError, api, imageUrl } from '@/api/client'
-import type { OriginalTeam, Team } from '@/api/types'
+import type { OriginalTeam, Player, Team } from '@/api/types'
 import { EntityIssues, OriginalBadge, OriginalCrest, Swatch } from '@/components/common/form'
 import { GameHiddenBadge, HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import {
@@ -25,6 +25,8 @@ import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
 import { useOriginalChanges } from '@/lib/originals'
 import { defaultLeague, editedOriginals, useLeagueName, useLeagueTeams } from '@/lib/teams'
+import { useGamePlayers } from '@/lib/members'
+import { linkOf, rosterOf, teamKey } from '@/lib/players'
 import { newUid, useProject } from '@/state/project'
 import { useOriginalLeagues, useOriginalTeams } from '@/state/queries'
 
@@ -35,6 +37,16 @@ const leagueKey = (league: number | string | null) => (typeof league === 'string
 export function TeamsPage() {
   const { t } = useI18n()
   const { draft, addTeam, updateTeam } = useProject()
+  const games = useGamePlayers()
+  // players of a project team: new team = its roster; edited original = how many joined minus how many left
+  const joined = (team: Team) => {
+    const key = teamKey(team)
+    if (team.original_id == null) return rosterOf(draft, key).filter((p) => !p.hidden).length
+    const inGame = (p: Player) => p.original_id != null && !!games.get(p.original_id)?.teams.includes(team.original_id!)
+    const joiners = rosterOf(draft, key).filter((p) => !p.hidden && !inGame(p)).length
+    const leavers = draft.players.filter((p) => inGame(p) && !linkOf(p, key)).length
+    return joiners - leavers
+  }
   const originalLeagues = useOriginalLeagues().data ?? []
   const originals = useOriginalTeams().data ?? []
   const leagueName = useLeagueName()
@@ -184,7 +196,7 @@ export function TeamsPage() {
                 leagueHidden={typeof r.team.league === 'string' && hiddenLeagues.has(r.team.league)}
                 original={r.team.original_id != null ? originalById.get(r.team.original_id) : undefined}
                 originalHidden={r.team.original_id != null && isTeamHidden(r.team.original_id)}
-                players={draft.players.filter((p) => p.team === r.team.uid).length}
+                players={joined(r.team)}
                 leagueName={leagueName(r.team.league)}
                 onOpen={() => navigate(`/teams/${r.team.uid}`, from)}
                 onToggleHidden={() =>
@@ -266,7 +278,7 @@ function ProjectTeamRow({
   leagueHidden: boolean
   original?: OriginalTeam // the game's team this entry edits
   originalHidden: boolean
-  players: number
+  players: number // new team: its roster; original: how many join it without taking someone's place
   leagueName: string
   onOpen: () => void
   onToggleHidden: () => void
@@ -299,7 +311,7 @@ function ProjectTeamRow({
         )}
       </TableCell>
       <TableCell>{leagueName}</TableCell>
-      <TableCell className="tabular-nums">{original ? original.player_count : players}</TableCell>
+      <TableCell className="tabular-nums">{original ? original.player_count + players : players}</TableCell>
       <TableCell className="tabular-nums text-muted-foreground">
         {team.original_id ?? team.team_id ?? t('common.auto')}
       </TableCell>

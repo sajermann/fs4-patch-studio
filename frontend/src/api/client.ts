@@ -17,6 +17,7 @@ import type {
   OriginalPlayer,
   OriginalStadium,
   OriginalTeam,
+  Player,
   Team,
   PatchStatus,
   PlayerDefaults,
@@ -105,6 +106,9 @@ export const api = {
   /** Starts editing an original team: its crest and kits become project images; returns the filled Team. */
   editOriginalTeam: (teamid: number, uid: string) =>
     request<Team>(`/api/originals/teams/${teamid}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),
+  /** Starts editing one of the game's players: his photo becomes a project image; returns the filled Player. */
+  editOriginalPlayer: (playerid: number, uid: string) =>
+    request<Player>(`/api/originals/players/${playerid}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),
   catalog: () => request<Catalog>('/api/catalog'),
 
   /** Provisional path until the project is saved, when the image gets the fixed name of its entity. */

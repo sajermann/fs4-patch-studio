@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, bumpProjectImagesRevision } from '@/api/client'
 import { lineupsWithout, takersWithout } from '@/lib/lineup'
+import { linkOf, teamsWithout } from '@/lib/players'
 import type { Issue, League, Player, PlayerDefaults, Project, Team } from '@/api/types'
 
 const EMPTY: Project = { version: 2, leagues: [], teams: [], players: [] }
@@ -118,18 +119,21 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       addTeam: (team) => setDraft((p) => ({ ...p, teams: [...p.teams, team] })),
       addPlayer: (player) => setDraft((p) => ({ ...p, players: [...p.players, player] })),
       removeLeague: (uid) => setDraft((p) => ({ ...p, leagues: p.leagues.filter((l) => l.uid !== uid) })),
-      // removing a team turns its players into free agents (they are not deleted)
+      // removing a new team takes it out of its players' teams (they are not deleted); an edited original team stays
+      // in the game, so links to its teamid stay
       removeTeam: (uid) =>
         setDraft((p) => ({
           ...p,
           teams: p.teams.filter((t) => t.uid !== uid),
-          players: p.players.map((pl) => (pl.team === uid ? { ...pl, team: null } : pl)),
+          players: p.players.map((pl) => (linkOf(pl, uid) ? { ...pl, teams: teamsWithout(pl, uid) } : pl)),
         })),
+      // deleting a new player also takes him out of captaincies, set pieces and lineups; removing an original
+      // player's entry ("restore original") leaves him as the game has him (those places name him by playerid)
       removePlayer: (uid) =>
         setDraft((p) => ({
           ...p,
           players: p.players.filter((pl) => pl.uid !== uid),
-          teams: p.teams.map((t) => ({
+          teams: p.players.find((pl) => pl.uid === uid)?.original_id != null ? p.teams : p.teams.map((t) => ({
             ...t,
             captain: t.captain === uid ? undefined : t.captain,
             takers: takersWithout(t, uid),

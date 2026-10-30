@@ -19,7 +19,7 @@ from .faces import FaceError, FaceService
 from .original_images import OriginalImages
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
 from .project_store import BackupError, ProjectStore, migrate_folder
-from fsmod import builder, kit, kitprint, model, original_team, photo, preview, scanface, validation
+from fsmod import builder, kit, kitprint, model, original_player, original_team, photo, preview, scanface, validation
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
 
@@ -42,10 +42,10 @@ class AppState:
     def __init__(self, original_files=None, patch_dir=None, config_path=None):
         self.config_path = config_path
         self.config = settings.load_config(config_path)
-        self.upgrade_project()
+        self._lock = threading.Lock()
         self.patch_dir = patch_dir or default_patch_dir()
         self.load_game(original_files or default_original_files())
-        self._lock = threading.Lock()
+        self.upgrade_project()
         self.build_lock = threading.Lock()
         self.build_progress = {'running': False}  # last/current build, read by GET /api/patch/progress
 
@@ -66,7 +66,16 @@ class AppState:
             moved = migrate_folder(settings.LEGACY_PROJECT_DIR, self.config.project_dir)
             if moved and os.path.exists(self.config_path or settings.CONFIG_PATH):
                 settings.save_config(self.config, self.config_path)
-        self.store.upgrade()
+        self.store.upgrade(self.absorb_game_links)
+
+    def absorb_game_links(self, data):
+        """Projects from before the game's players had entries of their own (game players in a team, "replaces"):
+        entries for the game's players they mention (original_player.absorb_game_links). Needs the original files."""
+        def load_player(playerid):
+            uid = f'jg_{int(time.time() * 1000):x}{os.urandom(2).hex()}'
+            pl = original_player.load(self.game, self.catalog(), playerid, uid, self.store.save_image)
+            return pl.model_dump(mode='json', exclude_none=True)
+        return original_player.absorb_game_links(data, load_player)
 
     @property
     def store(self):
@@ -184,9 +193,13 @@ def create_app(state=None):
         return config.model_dump()
 
     # ---------------------------------------------------------------- project
+    def load_project():
+        """The saved project (older ones converted: AppState.absorb_game_links)."""
+        return state.store.load(state.absorb_game_links)
+
     @app.get('/api/project')
     def get_project():
-        project = state.store.load()
+        project = load_project()
         return {'project': project.to_json(), 'issues': issues_for(project),
                 'defaults': state.catalog().player_defaults(project)}
 
@@ -248,6 +261,16 @@ def create_app(state=None):
             raise HTTPException(404, {'code': 'original_team_not_found', 'message': f'Time {teamid} não existe.'})
         tm = original_team.load(state.game, c, teamid, uid, state.store.save_image)
         return tm.model_dump(mode='json', exclude_none=True)
+
+    @app.post('/api/originals/players/{playerid}/edit')
+    def edit_original_player(playerid: int, uid: str = Query(pattern=UID_PATTERN)):
+        """Starts editing one of the game's players: his photo goes into the project as a provisional image and the
+        Player comes back filled with what the game has (Player.original_id; the client adds it to the draft)."""
+        c = state.catalog()
+        if playerid not in c.players_by_id:
+            raise HTTPException(404, {'code': 'original_player_not_found', 'message': f'Jogador {playerid} não existe.'})
+        pl = original_player.load(state.game, c, playerid, uid, state.store.save_image)
+        return pl.model_dump(mode='json', exclude_none=True)
 
     @app.get('/api/originals/stadiums')
     def original_stadiums():
@@ -491,6 +514,22 @@ def create_app(state=None):
             c = state.faces.converted(key, files, haircolor, paint, hair, thick)
         except ValueError as e:
             raise HTTPException(422, {'code': 'face_conversion_failed', 'message': f'Não deu para converter esta face: {e}'})
+        return scanned_asset(asset, c)
+
+    @app.get('/api/preview/game-head/{playerid}/{asset}')
+    def game_head_preview(playerid: int, asset: str):
+        """One of the game's own scanned heads as it is (an original player who keeps it), same assets as
+        /api/preview/scanned."""
+        if asset not in SCANNED_ASSETS:
+            raise HTTPException(404)
+        state.catalog()
+        c = scanface.game_files(state.game, playerid)
+        if 'head' not in c or 'face' not in c:
+            raise HTTPException(404, {'code': 'face_not_found', 'message': f'O jogador {playerid} não tem cabeça escaneada.'})
+        return scanned_asset(asset, c)
+
+    def scanned_asset(asset, c):
+        """Response of one asset of a scanned head ({kind: RX3b bytes} in FIFA Street format)."""
         hair_parts = {'hair.glb': 'hair', 'hairlod.glb': 'hairlod'}
         if asset == 'head.glb':
             return Response(preview.head_glb_of(c['head']), media_type='model/gltf-binary', headers=PREVIEW_CACHE)
@@ -639,7 +678,7 @@ def create_app(state=None):
     # ---------------------------------------------------------------- patch
     @app.post('/api/patch/build')
     def build():
-        project = state.store.load()
+        project = load_project()
         issues = issues_for(project, raw=True)
         if validation.has_errors(issues):
             raise HTTPException(422, {'code': 'project_has_errors', 'issues': [issue_json(i) for i in issues],

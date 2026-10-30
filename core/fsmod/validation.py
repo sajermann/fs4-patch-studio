@@ -12,7 +12,7 @@ from typing import Optional
 
 from PIL import Image
 
-from . import builder, kit, original_team, scanface
+from . import builder, kit, original_player, original_team, scanface
 from .catalog import POSITIONS, SKILLS
 from .model import REAL_KIT_FILES
 
@@ -62,6 +62,7 @@ def validate(project, catalog, assets_dir):
             error('out_of_range', entity, field_name, min=low, max=high, value=value)
 
     modes = {(m['players'], m['goalkeeper']): m['tactics'] for m in catalog.lineup_modes}
+    number_range = catalog.field_range('teamplayerlinks', 'jerseynumber')
     defaults = {}
 
     def check_lineups(tm, in_roster, position_of, name_of):
@@ -94,10 +95,19 @@ def validate(project, catalog, assets_dir):
                     warning('lineup_goalkeeper_not_gk', tm.uid, f'{where}.starters', players=lu.players,
                             player=name_of(keeper))
 
-    def project_position(p):
-        if p.position is None and not defaults:
+    def link_position(p, team):
+        """Position of a project player in one of his teams (the template's when unset, see player_defaults)."""
+        lk = p.link(team)
+        if lk is not None and lk.position is not None:
+            return lk.position
+        if p.is_original:  # the game's player: his position in that team (else in his first one)
+            own = {link['team']: link['position'] for link in catalog.player_links(p.original_id)}
+            first = next(iter(own.values()), None)
+            return own.get(team, first)
+        if not defaults:
             defaults.update(catalog.player_defaults(project))
-        return p.position if p.position is not None else defaults.get(p.uid, {}).get('position')
+        d = defaults.get(p.uid, {})
+        return d.get('position') if d.get('team') == team else None
 
     def check_real_kits(tm, slots=('home', 'away', 'goalkeeper')):
         for slot in slots:
@@ -155,10 +165,33 @@ def validate(project, catalog, assets_dir):
         if not lg.image and not lg.wide_image:
             warning('league_image_missing', lg.uid, 'image')
 
+    # ---- squads of the game's teams: the game's players (minus the edited ones who left) + project players
+    # (new or edited game players) who joined; {player ref: (position, name)}
+    edited = {p.original_id: p for p in project.original_players}
+    joins = {}  # teamid -> [(entity uid, field, player ref, position, name)]
+    for p in project.players:
+        for i, lk in enumerate(p.teams):
+            if isinstance(lk.team, int) and lk.team in catalog.team_ids:
+                joins.setdefault(lk.team, []).append(
+                    (p.uid, f'teams.{i}', p.ref, link_position(p, lk.team), p.shown_name))
+    game_squads = {}
+    for tid in {*joins, *(tm.original_id for tm in project.original_teams)}:
+        squad = {p['id']: (p['position'], p['display_name']) for p in catalog.players
+                 if tid in p['teams'] and p['id'] not in edited}
+        joined = []
+        for entity, where, ref, position, name in joins.get(tid, []):
+            if ref not in catalog.player_ids_in(tid):
+                joined.append((entity, where))
+            squad[ref] = (position, name)
+        if len(squad) > builder.MAX_ROSTER:
+            for entity, where in joined:
+                error('team_full', entity, where, count=len(squad), max=builder.MAX_ROSTER)
+        game_squads[tid] = squad
+
     # ---- teams
     league_uids = {lg.uid for lg in project.leagues}
     original_leagues = {lg['id']: lg for lg in catalog.leagues}
-    team_uids = {t.uid for t in project.teams}
+    team_uids = {t.uid for t in project.new_teams}
     team_ids = {}
     edited_originals = {}
     for tm in project.teams:
@@ -188,8 +221,8 @@ def validate(project, catalog, assets_dir):
             elif tm.original_id in edited_originals:
                 error('original_team_edited_twice', tm.uid, 'original_id', id=tm.original_id)
             edited_originals.setdefault(tm.original_id, tm.uid)
-            squad = {p['id']: p for p in catalog.players if tm.original_id in p['teams']}
-            check_lineups(tm, squad, lambda pid: squad[pid]['position'], lambda pid: squad[pid]['display_name'])
+            squad = game_squads.get(tm.original_id, {})
+            check_lineups(tm, squad, lambda ref: squad[ref][0], lambda ref: squad[ref][1])
             for role, pid in (('captain', tm.captain), *((f'takers.{r}', p) for r, p in tm.takers.items())):
                 if pid is not None and pid not in squad:
                     error('captain_not_in_roster' if role == 'captain' else 'taker_not_in_roster', tm.uid, role,
@@ -225,24 +258,27 @@ def validate(project, catalog, assets_dir):
                 error('team_id_taken', tm.uid, 'team_id', value=tm.team_id)
             team_ids.setdefault(tm.team_id, tm.uid)
 
+        # roster: the project's players of the team, new or the game's own ({Player.ref: (position, name)})
         roster = project.roster(tm.uid)
-        if not roster:
-            error('roster_empty', tm.uid, 'players')
-        elif len(roster) > builder.MAX_ROSTER:
-            error('roster_too_large', tm.uid, 'players', max=builder.MAX_ROSTER, count=len(roster))
-        if tm.captain and tm.captain not in {p.uid for p in roster}:
-            error('captain_not_in_roster', tm.uid, 'captain', player=tm.captain)
-        for role, uid in tm.takers.items():
-            if uid not in {p.uid for p in roster}:
-                error('taker_not_in_roster', tm.uid, f'takers.{role}', player=uid)
-        members = {p.uid: p for p in roster}
-        check_lineups(tm, members, lambda uid: project_position(members[uid]), lambda uid: members[uid].shown_name)
+        members = {p.ref: (link_position(p, tm.uid), p.shown_name) for p in roster}
         numbers = {}
         for p in roster:
-            if p.number is not None:
-                if p.number in numbers:
-                    warning('duplicate_number', p.uid, 'number', number=p.number, other=numbers[p.number])
-                numbers.setdefault(p.number, p.uid)
+            k, lk = next((k, lk) for k, lk in enumerate(p.teams) if lk.team == tm.uid)
+            if lk.number is not None:
+                if lk.number in numbers:
+                    warning('duplicate_number', p.uid, f'teams.{k}.number', number=lk.number,
+                            other=numbers[lk.number])
+                numbers.setdefault(lk.number, p.uid)
+        if not members:
+            error('roster_empty', tm.uid, 'players')
+        elif len(members) > builder.MAX_ROSTER:
+            error('roster_too_large', tm.uid, 'players', max=builder.MAX_ROSTER, count=len(members))
+        if tm.captain is not None and tm.captain not in members:
+            error('captain_not_in_roster', tm.uid, 'captain', player=tm.captain)
+        for role, ref in tm.takers.items():
+            if ref not in members:
+                error('taker_not_in_roster', tm.uid, f'takers.{role}', player=ref)
+        check_lineups(tm, members, lambda ref: members[ref][0], lambda ref: members[ref][1])
 
     # ---- teams per league (new + the original ones still in it)
     hidden_teams = set(project.originals.hidden_teams)
@@ -265,7 +301,6 @@ def validate(project, catalog, assets_dir):
                       max=builder.MAX_LEAGUE_TEAMS)
 
     # ---- players
-    number_range = catalog.field_range('teamplayerlinks', 'jerseynumber')
     for p in project.players:
         chars = catalog.player_name_chars
         check_text(p.uid, 'first_name', p.first_name, chars, required=True)
@@ -274,19 +309,25 @@ def validate(project, catalog, assets_dir):
         check_text(p.uid, 'jersey_name', p.jersey_name, chars)
         if len(p.shown_name) > DISPLAY_NAME_LIMIT:
             warning('text_too_long', p.uid, 'display_name', limit=DISPLAY_NAME_LIMIT, length=len(p.shown_name))
-        if p.team is None:
-            warning('free_agent_not_exported', p.uid, 'team')
-        elif p.team not in team_uids:
-            error('team_not_found', p.uid, 'team', team=p.team)
+        if not p.teams and not p.is_original:  # a game player without teams stays in the game as a free agent
+            warning('free_agent_not_exported', p.uid, 'teams')
+        linked = set()
+        for i, lk in enumerate(p.teams):
+            where = f'teams.{i}'
+            if lk.team in linked:
+                error('player_team_repeated', p.uid, where)
+            linked.add(lk.team)
+            if lk.team not in (team_uids if isinstance(lk.team, str) else catalog.team_ids):
+                error('team_not_found', p.uid, where, team=lk.team)
+            check_range(p.uid, f'{where}.number', lk.number, *number_range)
+            if lk.position is not None and lk.position not in POSITIONS:
+                error('invalid_position', p.uid, f'{where}.position', value=lk.position)
         if p.template is not None:
             tpl = catalog.players_by_id.get(p.template)
             if tpl is None:
                 error('template_not_found', p.uid, 'template', id=p.template)
             elif not tpl['generic_head']:
                 warning('template_not_generic', p.uid, 'template', id=p.template)
-        check_range(p.uid, 'number', p.number, *number_range)
-        if p.position is not None and p.position not in POSITIONS:
-            error('invalid_position', p.uid, 'position', value=p.position)
         check_range(p.uid, 'height', p.height, *catalog.field_range('players', 'height'))
         check_range(p.uid, 'weight', p.weight, *catalog.field_range('players', 'weight'))
         if p.birthdate:
@@ -302,15 +343,27 @@ def validate(project, catalog, assets_dir):
                 error('unknown_skill', p.uid, f'skills.{skill}')
             else:
                 check_range(p.uid, f'skills.{skill}', value, *SKILLS[skill])
+        loaded_look = p.loaded.player.get('appearance', {}) if p.is_original and p.loaded else {}
         for code, value in p.appearance.items():
+            if loaded_look.get(code) == value:
+                continue  # the game's own code (scanned heads use codes no generic player has)
             options = catalog.appearance_options.get(code)
             if options is None:
                 error('unknown_field', p.uid, f'appearance.{code}')
             elif value not in options:
                 error('invalid_appearance', p.uid, f'appearance.{code}', value=value)
+        if p.is_original:
+            if p.original_id not in catalog.players_by_id:
+                error('original_player_not_found', p.uid, 'original_id', id=p.original_id)
+            elif p.original_id in edited and edited[p.original_id] is not p:
+                error('original_player_edited_twice', p.uid, 'original_id', id=p.original_id)
+            if not p.generic and p.face is not None and not original_player.can_take_face(p.original_id):
+                error('face_needs_six_digits', p.uid, 'face', id=p.original_id)
         if not p.generic:
             if p.face is None:
-                error('face_missing', p.uid, 'face')
+                # an original player without a real face keeps the game's scanned head (only if he had one)
+                if not (p.is_original and not catalog.players_by_id.get(p.original_id, {}).get('generic_head', True)):
+                    error('face_missing', p.uid, 'face')
             else:
                 files = scanface.read_files(scanface.project_face_dir(assets_dir, p.uid), p.face.source_id)
                 if any(k not in files for k in scanface.REQUIRED):
@@ -322,14 +375,14 @@ def validate(project, catalog, assets_dir):
                 check_range(p.uid, f'fields.{name}', value, *catalog.field_range('players', name))
 
     # ---- photos (loose files named by the playerid: any number of them)
-    for p in (p for tm in project.teams for p in project.roster(tm.uid)):
+    for p in (p for p in project.players if p.teams):
         if p.photo and not os.path.isfile(os.path.join(assets_dir, p.photo)):
             error('photo_missing', p.uid, 'photo', path=p.photo)
 
     # ---- playerids (given by the build when missing): one per player, in the range of new ids (every id the
     # game uses is below it, see builder.reserved_player_ids)
     seen = {}
-    for p in project.players:
+    for p in project.new_players:
         if p.player_id is None:
             continue
         if not builder.FIRST_NEW_PLAYERID <= p.player_id <= builder.LAST_NEW_PLAYERID:

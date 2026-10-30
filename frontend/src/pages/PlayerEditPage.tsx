@@ -1,11 +1,11 @@
-import { AlertTriangle, Copy, DatabaseZap, Dices, Eraser, LoaderCircle, Trash2, User } from 'lucide-react'
+import { AlertTriangle, Copy, DatabaseZap, Dices, Eraser, LoaderCircle, RotateCcw, Trash2, User } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { photoPreviewUrl, scannedFaceQuery, type FaceSource } from '@/api/client'
 import { HAIR_MODES, HAIR_THICKNESS, THICK_HAIR_MODES, type HairMode, type Player } from '@/api/types'
 import { BaseDataDialog } from '@/components/common/BaseDataDialog'
 import { FacePicker, type BrowsedFace } from '@/components/common/FacePicker'
-import { EntityIssues, Field, NumberInput, Stepper } from '@/components/common/form'
+import { EntityIssues, Field, NumberInput, OriginalBadge, Stepper } from '@/components/common/form'
 import { PhotoCard, PlayerAvatar } from '@/components/common/PlayerPhoto'
 import {
   AlertDialog,
@@ -32,6 +32,8 @@ import { useCopy } from '@/lib/copy'
 import { APPEARANCE_LABELS, FOOT_LABELS, SKILL_LABELS } from '@/lib/labels'
 import { computeOverall } from '@/lib/skills'
 import { GOALKEEPER_POSITION, backName, previewAppearance, teamPreviewKit } from '@/lib/preview'
+import { linkedTeam } from '@/lib/players'
+import { PlayerTeamsCard } from '@/components/common/PlayerTeams'
 import { cn } from '@/lib/utils'
 import { usePlayerDefaults, useProject } from '@/state/project'
 import { useCatalog, useLookups, useStatus } from '@/state/queries'
@@ -60,7 +62,7 @@ const inherited = (t: TFunction, value: string | number | null | undefined) =>
 
 function DataTab({ player }: { player: Player }) {
   const { t } = useI18n()
-  const { draft, updatePlayer } = useProject()
+  const { updatePlayer } = useProject()
   const catalog = useCatalog().data
   const lookups = useLookups()
   const defaults = usePlayerDefaults(player.uid)
@@ -68,9 +70,9 @@ function DataTab({ player }: { player: Player }) {
   const [hMin, hMax] = catalog?.ranges.height ?? [150, 277]
   const [wMin, wMax] = catalog?.ranges.weight ?? [40, 167]
   const nationality = player.fields.nationality
-  const positionAbbr = defaults?.position != null ? lookups.position.get(defaults.position) : undefined
 
   return (
+    <div className="space-y-4">
     <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
       <Card>
         <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
@@ -94,44 +96,6 @@ function DataTab({ player }: { player: Player }) {
               onChange={(e) => set({ jersey_name: e.target.value || undefined })}
             />
           </Field>
-          <Field label={t('players.colTeam')} entity={player.uid} field="team">
-            <Select value={player.team ?? NONE} onValueChange={(v) => set({ team: v === NONE ? null : v })}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>{t('playerEdit.noTeam')}</SelectItem>
-                {draft.teams.filter((tm) => tm.original_id == null).map((tm) => (
-                  <SelectItem key={tm.uid} value={tm.uid}>
-                    {tm.name || t('team.unnamed')}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label={t('teamEdit.number')} entity={player.uid} field="number">
-              <NumberInput value={player.number} onChange={(v) => set({ number: v })} min={1} max={99} placeholder={inherited(t, defaults?.number)} />
-            </Field>
-            <Field label={t('players.colPosition')} entity={player.uid} field="position">
-              <Select
-                value={player.position === undefined ? NONE : String(player.position)}
-                onValueChange={(v) => set({ position: v === NONE ? undefined : Number(v) })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>{inherited(t, positionAbbr)}</SelectItem>
-                  {(catalog?.positions ?? []).map((p) => (
-                    <SelectItem key={p.code} value={String(p.code)}>
-                      {p.abbr}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
           <div className="grid grid-cols-2 gap-4">
             <Field label={t('playerEdit.height')} entity={player.uid} field="height">
               <NumberInput value={player.height} onChange={(v) => set({ height: v })} min={hMin} max={hMax} placeholder={inherited(t, defaults?.height)} />
@@ -206,6 +170,8 @@ function DataTab({ player }: { player: Player }) {
       </Card>
       <PhotoCard player={player} />
     </div>
+    <PlayerTeamsCard player={player} />
+    </div>
   )
 }
 
@@ -237,7 +203,12 @@ function SkillsTab({ player }: { player: Player }) {
         <CardTitle>{t('base.skills')}</CardTitle>
         <CardDescription>{t('playerEdit.skillsDescription')}</CardDescription>
         <CardAction>
-          <Button variant="ghost" size="sm" onClick={() => updatePlayer(player.uid, { skills: withOverall({}) })}>
+          <Button variant="ghost" size="sm" onClick={() =>
+              updatePlayer(player.uid, {
+                // an original player goes back to the game's own bars; a new one to its template's
+                skills: player.original_id != null ? { ...(player.loaded?.player.skills as Record<string, number>) } : withOverall({}),
+              })
+            }>
             <Eraser /> {t('playerEdit.resetDefault')}
           </Button>
         </CardAction>
@@ -362,13 +333,21 @@ function AppearanceTab({ player }: { player: Player }) {
   const hairMode = player.face?.hair_mode ?? 'standard'
   const thickHair = THICK_HAIR_MODES.includes(hairMode)
   const hairThickness = player.face?.hair_thickness ?? HAIR_THICKNESS.default
+  // an original player who keeps the game's scanned head: that head as it is
+  const original = player.original_id != null
+  const gameHead = original && player.loaded?.player.generic === false
   const scanned = faceSource
     ? { query: scannedFaceQuery(faceSource, hairColorCode, paintScalp, hairMode, thickHair ? hairThickness : undefined) }
-    : null
+    : !generic && gameHead
+      ? { base: `/api/preview/game-head/${player.original_id}`, query: '' }
+      : null
+  const canTakeFace = !original || String(player.original_id).length === 6 // fsmod.original_player.can_take_face
   // Team Home kit of the player's team (the goalkeeper kit for a goalkeeper; neutral grey for free agents)
-  const team = player.team ? draft.teams.find((tm) => tm.uid === player.team) : undefined
-  const kit = teamPreviewKit(team, (player.position ?? defaults?.position) === GOALKEEPER_POSITION ? 'goalkeeper' : 'home', {
-    number: player.number ?? defaults?.number,
+  const link = player.teams.find((l) => linkedTeam(draft, l.team)) ?? player.teams[0]
+  const team = link && linkedTeam(draft, link.team)
+  const inherited = link && defaults?.team === link.team ? defaults : undefined
+  const kit = teamPreviewKit(team, (link?.position ?? inherited?.position) === GOALKEEPER_POSITION ? 'goalkeeper' : 'home', {
+    number: link?.number ?? inherited?.number,
     name: backName(player),
   })
   const set = (code: string, value: number | undefined) => {
@@ -415,14 +394,32 @@ function AppearanceTab({ player }: { player: Player }) {
                 <Dices /> {t('playerEdit.randomize')}
               </Button>
             )}
-            <Button variant="ghost" size="sm" onClick={() => updatePlayer(player.uid, { appearance: {} })}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => updatePlayer(player.uid, { appearance: original ? { ...(player.loaded?.player.appearance as Record<string, number>) } : {} })}
+            >
               <Eraser /> {t('playerEdit.resetDefault')}
             </Button>
           </div>
         </CardHeader>
         {!generic && (
           <CardContent>
-            <FacePicker key={player.uid} player={player} browsing={browsing} onBrowse={setBrowsing} />
+            {gameHead && (
+              <div className="mb-3 flex items-center justify-between gap-2 rounded-md border p-2 text-sm">
+                <span>{player.face ? t('playerEdit.gameHeadReplaced') : t('playerEdit.gameHead')}</span>
+                {player.face && (
+                  <Button variant="outline" size="sm" onClick={() => updatePlayer(player.uid, { face: undefined })}>
+                    {t('playerEdit.gameHeadBack')}
+                  </Button>
+                )}
+              </div>
+            )}
+            {canTakeFace ? (
+              <FacePicker key={player.uid} player={player} browsing={browsing} onBrowse={setBrowsing} />
+            ) : (
+              <p className="text-sm text-muted-foreground">{t('playerEdit.faceNeedsSixDigits')}</p>
+            )}
             {player.face && (
               <label className="mt-3 flex items-start gap-2 text-sm">
                 <Checkbox
@@ -540,7 +537,7 @@ export function PlayerEditPage() {
   const hasBase = !!useStatus().data?.config.players_base_file
   const { copyPlayer } = useCopy()
   const player = draft.players.find((p) => p.uid === uid)
-  const team = player?.team ? draft.teams.find((tm) => tm.uid === player.team) : undefined
+  const team = player?.teams.map((l) => linkedTeam(draft, l.team)).find((tm) => tm)
 
   const back = useBack(
     team ? { to: `/teams/${team.uid}`, label: team.name || t('players.colTeam') } : { to: '/players', label: t('nav.players') },
@@ -559,6 +556,7 @@ export function PlayerEditPage() {
   }
 
   const name = player.display_name || `${player.first_name} ${player.last_name}`.trim()
+  const original = player.original_id != null
   return (
     <div className="max-w-7xl space-y-4">
       <BackButton back={back} />
@@ -566,6 +564,7 @@ export function PlayerEditPage() {
         <div className="flex items-center gap-3">
           <PlayerAvatar player={player} className="size-10" />
           <h1 className="text-2xl font-semibold">{name || t('players.new')}</h1>
+          {original && <OriginalBadge edited />}
           <EntityIssues uid={player.uid} />
         </div>
         <div className="flex gap-2">
@@ -578,19 +577,26 @@ export function PlayerEditPage() {
           >
             <DatabaseZap /> {t('base.title')}
           </Button>
+          {!original && (
+            <Button
+              variant="outline"
+              size="sm"
+              title={t('playerEdit.copyHint')}
+              onClick={async () => {
+                const copied = await copyPlayer(player.uid)
+                if (copied) navigate(`/players/${copied}`, keepBack)
+              }}
+            >
+              <Copy /> {t('common.copy')}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
-            title={t('playerEdit.copyHint')}
-            onClick={async () => {
-              const copied = await copyPlayer(player.uid)
-              if (copied) navigate(`/players/${copied}`, keepBack)
-            }}
+            title={original ? t('playerEdit.restoreOriginalHint') : undefined}
+            onClick={() => setDeleteOpen(true)}
           >
-            <Copy /> {t('common.copy')}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
-            <Trash2 /> {t('playerEdit.delete')}
+            {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('playerEdit.delete')}
           </Button>
         </div>
       </div>
@@ -614,8 +620,12 @@ export function PlayerEditPage() {
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('teamEdit.deleteTitle', { name: name || t('playerEdit.thePlayer') })}</AlertDialogTitle>
-            <AlertDialogDescription>{t('playerEdit.deleteDescription')}</AlertDialogDescription>
+            <AlertDialogTitle>
+              {t(original ? 'teamEdit.restoreOriginalTitle' : 'teamEdit.deleteTitle', { name: name || t('playerEdit.thePlayer') })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {original ? t('playerEdit.restoreOriginalDescription') : t('playerEdit.deleteDescription')}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
@@ -625,7 +635,7 @@ export function PlayerEditPage() {
                 goBack(back)
               }}
             >
-              {t('common.delete')}
+              {original ? t('teamEdit.restoreOriginal') : t('common.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -898,6 +898,16 @@ def template_files(sources, template=TEMPLATE):
     return out
 
 
+def game_files(sources, playerid):
+    """{kind: RX3b bytes} of one of the game's own scanned heads (the kinds it has), e.g. for the preview."""
+    out = {}
+    for kind, name in FILES.items():
+        entry = sources.read_entry(ASSETS + name.format(playerid))
+        if entry is not None:
+            out[kind] = bytearray(chunk.decode(entry[2]))
+    return out
+
+
 def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_mode='standard',
             hair_thickness=HAIR_THICKNESS):
     """FIFA Street files {asset name relative to data/sceneassets: RX3b bytes} of a FIFA 14 face.

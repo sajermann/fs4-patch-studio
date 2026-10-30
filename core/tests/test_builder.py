@@ -218,7 +218,7 @@ def test_rejects_roster_over_13(game):
         project.players.append(model.Player(uid=f'x{i}', team=team.uid, first_name='Extra', last_name=str(i)))
     with pytest.raises(builder.BuildError, match='1 to 13'):
         builder.build(project, game, PALMEIRAS)
-    assert extra.team == team.uid
+    assert extra.teams[0].team == team.uid
 
 
 def test_league_team_limit_counts_new_and_original_teams(game):
@@ -297,7 +297,7 @@ def test_team_ids_are_new_stable_and_validated(game):
     first = project.teams[0]
     second = first.model_copy(update={'uid': 'tm_02', 'name': 'Outro', 'team_id': 200000})
     project.teams.append(second)
-    project.players.append(project.players[0].model_copy(update={'uid': 'x', 'team': 'tm_02'}))
+    project.players.append(project.players[0].model_copy(update={'uid': 'x', 'teams': [model.TeamLink(team='tm_02')]}))
     result = builder.build(project, game, PALMEIRAS)
     assert result.assigned_team_ids == {first.uid: builder.FIRST_NEW_TEAMID}
     catalog = Catalog(game)
@@ -506,7 +506,8 @@ def test_hidden_project_leagues_and_teams_are_left_out(game):
     other = team.model_copy(update={'uid': 'tm_02', 'name': 'Inacabado', 'crest': None, 'team_id': 150000,
                                     'hidden': True})
     project.teams.append(other)
-    project.players.append(project.players[0].model_copy(update={'uid': 'x', 'team': 'tm_02', 'player_id': 206656}))
+    project.players.append(project.players[0].model_copy(update={'uid': 'x', 'teams': [model.TeamLink(team='tm_02')],
+                                                                     'player_id': 206656}))
     result = builder.build(project, game, PALMEIRAS)
     db = builder.Db(result.database, game.meta)
     assert result.assigned_team_ids == {team.uid: 150001}  # 150000 stays with the hidden team

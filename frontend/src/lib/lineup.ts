@@ -50,12 +50,12 @@ export function suggestLineup(players: { key: string; position?: number | null }
 }
 
 /** Set-piece takers of a team without a player who left it (the role goes back to the captain). */
-export function takersWithout(team: Team, uid: string): Team['takers'] {
+export function takersWithout(team: Team, uid: PlayerRef): Team['takers'] {
   return team.takers && Object.fromEntries(Object.entries(team.takers).filter(([, p]) => p !== uid))
 }
 
 /** The team's lineups without a player (removed from the team or deleted): its slot goes back to automatic. */
-export function lineupsWithout(team: Team, uid: string): Lineup[] | undefined {
+export function lineupsWithout(team: Team, uid: PlayerRef): Lineup[] | undefined {
   return team.lineups?.map((l) => ({
     ...l,
     starters: l.starters.map((u) => (u === uid ? null : u)),

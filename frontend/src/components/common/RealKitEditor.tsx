@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useI18n, type MessageKey } from '@/i18n'
 import { NUMBER_COLORS, REAL_KIT_LABELS } from '@/lib/labels'
 import { GOALKEEPER_POSITION, backName, previewAppearance, teamPreviewKit } from '@/lib/preview'
+import { linkOf, rosterOf, teamKey } from '@/lib/players'
 import { cn } from '@/lib/utils'
 import { useIssues, usePlayerDefaults, useProject } from '@/state/project'
 import { useCatalog, useOriginalPlayers, useOriginalTeams } from '@/state/queries'
@@ -242,9 +243,10 @@ function RealKitPreview({ team, slot }: { team: Team; slot: RealKitSlot }) {
   const { t } = useI18n()
   const { draft } = useProject()
   const catalog = useCatalog().data
-  const roster = draft.players.filter((p) => p.team === team.uid)
+  const key = teamKey(team)
+  const roster = rosterOf(draft, key)
   const captain = roster.find((p) => p.uid === team.captain) ?? roster[0]
-  const model = (slot === 'goalkeeper' && roster.find((p) => p.position === GOALKEEPER_POSITION)) || captain
+  const model = (slot === 'goalkeeper' && roster.find((p) => linkOf(p, key)?.position === GOALKEEPER_POSITION)) || captain
   const defaults = usePlayerDefaults(model?.uid)
   // original team: its game players (the captain, or the goalkeeper for the goalkeeper kit)
   const squad = useOriginalPlayers({ team: team.original_id ?? undefined, limit: 100 }, team.original_id != null).data?.items ?? []
@@ -256,7 +258,10 @@ function RealKitPreview({ team, slot }: { team: Team; slot: RealKitSlot }) {
   const wearer =
     team.original_id != null
       ? gameModel && { number: gameModel.number, name: backName(gameModel) }
-      : model && { number: model.number ?? defaults?.number, name: backName(model) }
+      : model && {
+          number: linkOf(model, key)?.number ?? (defaults?.team === key ? defaults.number : undefined),
+          name: backName(model),
+        }
   return (
     <Card className="gap-2 overflow-hidden pb-0">
       <CardHeader>

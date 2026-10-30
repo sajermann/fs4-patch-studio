@@ -1,7 +1,7 @@
-import { Plus } from 'lucide-react'
-import { useMemo } from 'react'
+import { Loader2, Plus } from 'lucide-react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { OriginalPlayer, Player } from '@/api/types'
+import type { OriginalPlayer, Player, TeamKey } from '@/api/types'
 import { EntityIssues, OriginalBadge } from '@/components/common/form'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import {
@@ -17,10 +17,12 @@ import {
   usePage,
 } from '@/components/common/list'
 import { OriginalPlayerAvatar, PlayerAvatar } from '@/components/common/PlayerPhoto'
+import { useGamePlayerEntry, useTeamName } from '@/lib/members'
 import { Button } from '@/components/ui/button'
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
+import { linkOf } from '@/lib/players'
 import { newUid, useProject } from '@/state/project'
 import { useLookups, useOriginalPlayers, useOriginalTeams } from '@/state/queries'
 
@@ -31,7 +33,7 @@ const ALL_ORIGINALS = { limit: 5000 } // the whole list (2,213 players) once: fi
 
 export function PlayersPage() {
   const { t } = useI18n()
-  const { draft, addPlayer, updatePlayer } = useProject()
+  const { draft, addPlayer, updatePlayer, defaults } = useProject()
   const { position, originalTeam } = useLookups()
   const originalTeams = useOriginalTeams().data ?? []
   const originals = useOriginalPlayers(ALL_ORIGINALS).data?.items
@@ -39,13 +41,13 @@ export function PlayersPage() {
   const from = useFrom(t('nav.players'))
   const list = useListParams(['q', 'origin', 'team', 'status'] as const)
   const f = list.values
-  const teamName = useMemo(() => new Map(draft.teams.map((tm) => [tm.uid, tm.name || t('team.unnamed')])), [draft.teams, t])
+  const teamName = useTeamName()
 
   const create = () => {
     const uid = newUid('jg')
     addPlayer({
       uid,
-      team: f.team.startsWith('new:') ? f.team.slice(4) : null,
+      teams: f.team.startsWith('new:') ? [{ team: f.team.slice(4) }] : [],
       first_name: '',
       last_name: '',
       generic: true,
@@ -56,16 +58,30 @@ export function PlayersPage() {
     navigate(`/players/${uid}`, from)
   }
 
+  // the game's players edited in the project show once, as their entry ("was original")
+  const edited = new Map(draft.players.filter((p) => p.original_id != null).map((p) => [p.original_id!, p]))
+  const ensure = useGamePlayerEntry()
+  const [opening, setOpening] = useState<number>()
+  const openOriginal = async (id: number) => {
+    if (opening !== undefined) return
+    setOpening(id)
+    const entry = await ensure(id)
+    setOpening(undefined)
+    if (entry) navigate(`/players/${entry.uid}`, from)
+  }
+
+  // a team's players: the project's linked to it and the game's own (as the game has them)
+  const filterKey: TeamKey | null = f.team.startsWith('new:') ? f.team.slice(4) : f.team.startsWith('orig:') ? Number(f.team.slice(5)) : null
   const inTeam = (r: Row) =>
     f.team === ALL ||
     (r.kind === 'project'
       ? f.team === FREE
-        ? !r.player.team
-        : f.team === `new:${r.player.team}`
-      : f.team.startsWith('orig:') && r.player.teams.includes(Number(f.team.slice(5))))
+        ? r.player.teams.length === 0
+        : filterKey !== null && !!linkOf(r.player, filterKey)
+      : typeof filterKey === 'number' && r.player.teams.includes(filterKey))
   const rows: Row[] = [
     ...draft.players.map((player) => ({ kind: 'project' as const, player })),
-    ...(originals ?? []).map((player) => ({ kind: 'original' as const, player })),
+    ...(originals ?? []).filter((p) => !edited.has(p.id)).map((player) => ({ kind: 'original' as const, player })),
   ].filter(
     (r) =>
       matches(f.q, r.player.display_name, `${r.player.first_name} ${r.player.last_name}`, r.player.jersey_name) &&
@@ -146,12 +162,18 @@ export function PlayersPage() {
             if (r.kind === 'original') {
               const p = r.player
               return (
-                <TableRow key={p.id} className="text-muted-foreground">
+                <TableRow
+                  key={p.id}
+                  className="cursor-pointer text-muted-foreground"
+                  title={t('players.editOriginalHint')}
+                  onClick={() => void openOriginal(p.id)}
+                >
                   <TableCell data-grow>
                     <span className="flex items-center gap-2">
                       <OriginalPlayerAvatar player={p} />
                       <span className="text-foreground">{p.display_name}</span>
                       <OriginalBadge />
+                      {opening === p.id && <Loader2 className="size-4 animate-spin" />}
                     </span>
                   </TableCell>
                   <TableCell title={p.teams.map((id) => originalTeam.get(id)?.name ?? id).join(', ')}>
@@ -174,15 +196,21 @@ export function PlayersPage() {
                     {p.display_name || `${p.first_name} ${p.last_name}`.trim() || (
                       <span className="text-muted-foreground">{t('common.unnamed')}</span>
                     )}
+                    {p.original_id != null && <OriginalBadge edited />}
                     {p.hidden && <OutOfPatchBadge />}
                   </span>
                 </TableCell>
-                <TableCell className={p.team ? '' : 'text-muted-foreground'}>
-                  {p.team ? teamName.get(p.team) : t('players.freeAgent')}
+                <TableCell className={p.teams.length ? '' : 'text-muted-foreground'} title={p.teams.map((l) => teamName(l.team)).join(', ')}>
+                  {p.teams.length ? teamName(p.teams[0].team) : t('players.freeAgent')}
+                  {p.teams.length > 1 && <span className="ml-1 text-xs text-muted-foreground">+{p.teams.length - 1}</span>}
                 </TableCell>
-                <TableCell className="tabular-nums">{p.number ?? '—'}</TableCell>
-                <TableCell>{p.position !== undefined ? position.get(p.position) : '—'}</TableCell>
-                <TableCell className="tabular-nums text-muted-foreground">{p.player_id ?? t('common.auto')}</TableCell>
+                <TableCell className="tabular-nums">{p.teams[0]?.number ?? defaults[p.uid]?.number ?? '—'}</TableCell>
+                <TableCell>
+                  {(p.teams[0]?.position ?? defaults[p.uid]?.position) != null
+                    ? position.get((p.teams[0]?.position ?? defaults[p.uid]?.position)!)
+                    : '—'}
+                </TableCell>
+                <TableCell className="tabular-nums text-muted-foreground">{p.original_id ?? p.player_id ?? t('common.auto')}</TableCell>
                 <TableCell>
                   <span className="flex items-center gap-1">
                     <EntityIssues uid={p.uid} />

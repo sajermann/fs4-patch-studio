@@ -4,6 +4,7 @@ import type { Player, Project } from '@/api/types'
 import { translate, useI18n } from '@/i18n'
 import { useLeagueTeams } from '@/lib/teams'
 import { copyLineups } from '@/lib/lineup'
+import { firstFreeNumber, linkOf, numbersIn, rosterOf } from '@/lib/players'
 import { newUid, useProject } from '@/state/project'
 import { useCatalog } from '@/state/queries'
 
@@ -23,11 +24,6 @@ async function clonePlayer(player: Player, patch: Partial<Player>): Promise<Play
   return copy
 }
 
-const firstFreeNumber = (players: Player[]) => {
-  const used = new Set(players.map((p) => p.number))
-  return Array.from({ length: 99 }, (_, i) => i + 1).find((n) => !used.has(n))
-}
-
 /** "Copy" of leagues, teams and players: duplicates in the draft (new uids, game ids left to the build) and returns
  * the new uid, or null when the copy is not possible (limits). */
 export function useCopy() {
@@ -38,7 +34,7 @@ export function useCopy() {
   const leagueTeams = useLeagueTeams()
   const maxLeagues = catalog?.max_leagues ?? 39
   const maxRoster = catalog?.max_roster ?? 13
-  const activeRoster = (project: Project, team: string) => project.players.filter((p) => p.team === team && !p.hidden)
+  const activeRoster = (project: Project, team: string) => rosterOf(project, team).filter((p) => !p.hidden)
 
   const canCopyLeague = draft.leagues.filter((l) => !l.hidden).length < maxLeagues
   const copyLeague = (uid: string) => {
@@ -58,8 +54,10 @@ export function useCopy() {
     const team = draft.teams.find((t) => t.uid === uid)
     if (!team || !canCopyTeam(uid)) return null
     const teamUid = newUid('tm')
-    const roster = withRoster ? draft.players.filter((p) => p.team === uid) : []
-    const players = await Promise.all(roster.map((p) => clonePlayer(p, { team: teamUid })))
+    // the copies only play for the copied team (their other teams already have the originals); the game's players
+    // are not copied (they would be new players with the same face and name)
+    const roster = withRoster ? rosterOf(draft, uid).filter((p) => p.original_id == null) : []
+    const players = await Promise.all(roster.map((p) => clonePlayer(p, { teams: [{ ...linkOf(p, uid)!, team: teamUid }] })))
     const captain = team.captain && roster.findIndex((p) => p.uid === team.captain)
     const copy = {
       ...team,
@@ -79,16 +77,18 @@ export function useCopy() {
     return teamUid
   }
 
-  // same team when its roster has room (with a free shirt number), else a free agent
+  // same new teams whose roster has room (with a free shirt number); the game's teams are left out (a place there
+  // means replacing one of their players)
   const copyPlayer = async (uid: string) => {
     const player = draft.players.find((p) => p.uid === uid)
     if (!player) return null
-    const team = player.team && activeRoster(draft, player.team).length < maxRoster ? player.team : null
-    if (player.team && !team) toast.info(t('copy.rosterFull', { max: maxRoster }))
+    const teams = player.teams.filter(
+      (l) => typeof l.team === 'string' && activeRoster(draft, l.team).length < maxRoster,
+    )
+    if (teams.length < player.teams.length) toast.info(t('copy.rosterFull', { max: maxRoster }))
     const copy = await clonePlayer(player, {
-      team,
       // numbers of hidden players too: they may come back
-      number: team ? firstFreeNumber(draft.players.filter((p) => p.team === team)) : player.number,
+      teams: teams.map((l) => ({ ...l, number: firstFreeNumber(numbersIn(draft, l.team)) })),
     })
     setDraft((p) => ({ ...p, players: [...p.players, copy] }))
     return copy.uid
