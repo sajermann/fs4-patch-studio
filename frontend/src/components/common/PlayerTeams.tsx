@@ -1,17 +1,69 @@
-import { Trash2 } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { Player, TeamLink } from '@/api/types'
-import { FieldIssues, NumberInput } from '@/components/common/form'
-import { PositionSelect, TeamSelect } from '@/components/common/Roster'
+import type { Player, TeamKey, TeamLink } from '@/api/types'
+import { FieldIssues, NumberInput, OriginalCrest, TeamCrest } from '@/components/common/form'
+import { matches } from '@/components/common/list'
+import { PickerDialog, type PickerItem } from '@/components/common/PickerDialog'
+import { PositionSelect } from '@/components/common/Roster'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
 import { useJoinTeam, useTeamName } from '@/lib/members'
 import { leaveTeam, playerName, playerRef, teamPath } from '@/lib/players'
 import { useIssues, usePlayerDefaults, useProject } from '@/state/project'
-import { useCatalog, useLookups } from '@/state/queries'
+import { editedOriginals, useLeagueName } from '@/lib/teams'
+import { useCatalog, useLookups, useOriginalTeams } from '@/state/queries'
+
+/** Dialog: every team the player is not in (the project's new ones, then the game's, edited ones by their entry),
+ * with crests, their leagues and a search. Picking one closes it (a full team then asks who leaves). */
+function AddTeamDialog({ player, open, onOpenChange, onPick }: { player: Player; open: boolean; onOpenChange: (o: boolean) => void; onPick: (team: TeamKey) => void }) {
+  const { t } = useI18n()
+  const { draft } = useProject()
+  const originals = useOriginalTeams().data ?? []
+  const leagueName = useLeagueName()
+  const [q, setQ] = useState('')
+  const edited = editedOriginals(draft)
+  const mine = new Set(player.teams.map((l) => l.team))
+  const leaguesOf = (leagues: (number | string)[]) => (leagues.length ? leagues.map(leagueName).join(', ') : leagueName(null))
+  const byName = (a: { title: string }, b: { title: string }) => a.title.localeCompare(b.title)
+  const newTeams = draft.teams
+    .filter((tm) => tm.original_id == null && !mine.has(tm.uid) && matches(q, tm.name))
+    .map((tm) => ({ key: tm.uid as TeamKey, icon: <TeamCrest team={tm} />, title: tm.name || t('common.unnamed'), subtitle: leaguesOf(tm.leagues) }))
+    .sort(byName)
+  const gameTeams = originals
+    .filter((o) => !mine.has(o.id))
+    .map((o) => {
+      const entry = edited.get(o.id)
+      return entry
+        ? { key: o.id as TeamKey, icon: <TeamCrest team={entry} />, title: entry.name, subtitle: leaguesOf(entry.leagues) }
+        : { key: o.id as TeamKey, icon: <OriginalCrest team={o} />, title: o.name, subtitle: leaguesOf(o.league === null ? [] : [o.league]) }
+    })
+    .filter((c) => matches(q, c.title))
+    .sort(byName)
+  return (
+    <PickerDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={t('playerEdit.addTeamTitle')}
+      description={t('playerEdit.addTeamDescription')}
+      placeholder={t('teams.search')}
+      query={q}
+      onQuery={setQ}
+      groups={[
+        { label: t('players.newTeams'), items: newTeams as PickerItem<TeamKey>[] },
+        { label: t('players.originalTeams'), items: gameTeams as PickerItem<TeamKey>[] },
+      ]}
+      empty={t('leagueEdit.noTeamsFound')}
+      onPick={(team) => {
+        onOpenChange(false)
+        onPick(team)
+      }}
+    />
+  )
+}
 
 /** Issues of one link row (team, number, position). */
 function LinkIssues({ player, index }: { player: string; index: number }) {
@@ -32,6 +84,7 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
   const from = useFrom(playerName(player, t('nav.players')))
   const ref = playerRef(player)
   const teamsIssues = useIssues(player.uid, 'teams')
+  const [adding, setAdding] = useState(false)
 
   const setLink = (index: number, patch: Partial<TeamLink>) =>
     updatePlayer(player.uid, { teams: player.teams.map((l, k) => (k === index ? { ...l, ...patch } : l)) })
@@ -41,6 +94,11 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
       <CardHeader>
         <CardTitle>{t('playerEdit.teams')}</CardTitle>
         <CardDescription>{t('playerEdit.teamsDescription')}</CardDescription>
+        <CardAction>
+          <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+            <Plus /> {t('playerEdit.addTeam')}
+          </Button>
+        </CardAction>
       </CardHeader>
       <CardContent className="space-y-3">
         <FieldIssues issues={teamsIssues} />
@@ -92,7 +150,7 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
                     </TableCell>
                     <TableCell>
                       <Button variant="ghost" size="icon" title={t('roster.removeFromTeam')} onClick={() => setDraft((p) => leaveTeam(p, ref, l.team))}>
-                        <Trash2 />
+                        <X />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -102,14 +160,7 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
           </Table>
         )}
         {player.teams.length === 0 && <p className="text-sm text-muted-foreground">{t('playerEdit.noTeams')}</p>}
-        <div className="max-w-xs">
-          <TeamSelect
-            key={player.teams.length}
-            exclude={player.teams.map((l) => l.team)}
-            placeholder={t('playerEdit.addTeam')}
-            onChange={(team) => void join(ref, team)}
-          />
-        </div>
+        <AddTeamDialog player={player} open={adding} onOpenChange={setAdding} onPick={(team) => void join(ref, team)} />
         {dialog}
       </CardContent>
     </Card>

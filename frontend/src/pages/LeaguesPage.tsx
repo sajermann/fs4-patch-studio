@@ -21,7 +21,9 @@ import { GameHiddenBadge, HideButton, OutOfPatchBadge } from '@/components/commo
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
 import { useOriginalChanges } from '@/lib/originals'
-import { newUid, useProject } from '@/state/project'
+import { leagueKey, leaguePath } from '@/lib/players'
+import { newLeagues } from '@/lib/teams'
+import { newUid, useProject, useSameAsGame } from '@/state/project'
 import { useCatalog, useOriginalLeagues, useOriginalTeams } from '@/state/queries'
 
 type Row = { kind: 'project'; league: League } | { kind: 'original'; league: OriginalLeague }
@@ -36,31 +38,52 @@ export function LeaguesPage() {
   const { isLeagueHidden, toggleLeague } = useOriginalChanges()
   const maxLeagues = useCatalog().data?.max_leagues ?? 39
   // hidden leagues stay out of the patch: they do not take one of the game's free image numbers
-  const full = draft.leagues.filter((l) => !l.hidden).length >= maxLeagues
+  const full = newLeagues(draft).filter((l) => !l.hidden).length >= maxLeagues
 
   const create = () => {
     if (full) return
     const uid = newUid()
     addLeague({ uid, name: '', sort_order: 6 })
-    navigate(`/leagues/${uid}`, from)
+    navigate(leaguePath(uid), from)
   }
 
-  const teamCount = (uid: string) => draft.teams.filter((t) => t.league === uid).length
+  const teamCount = (uid: string) => draft.teams.filter((t) => t.leagues.includes(uid)).length
   const originalLeagueOf = new Map(originalTeams.map((t) => [t.id, t.league]))
-  const newInOriginal = (id: number) =>
-    draft.teams.filter((t) => t.league === id && (t.original_id == null || originalLeagueOf.get(t.original_id) !== id))
-      .length
+  // a game league's teams change: how many joined minus how many left (a team's leagues live in the team)
+  const teamsDelta = (id: number) =>
+    draft.teams.filter((t) => {
+      const inGame = t.original_id != null && originalLeagueOf.get(t.original_id) === id
+      return t.leagues.includes(id) !== inGame
+    }).reduce((n, t) => n + (t.leagues.includes(id) ? 1 : -1), 0)
+
+  const originalById = new Map(originals.map((l) => [l.id, l]))
+  // teams of a row: a new league's, or a game league's (its own + the ones the project adds - the ones it takes out)
+  const teamsOf = (l: League) =>
+    l.original_id == null ? teamCount(l.uid) : (originalById.get(l.original_id)?.team_count ?? 0) + teamsDelta(l.original_id)
+
+  // the game's leagues edited in the project show once, as their entry ("was original"); ones only opened (or
+  // changed back) list as the game's
+  const sameAsGame = useSameAsGame()
+  const mine = draft.leagues.filter((l) => !sameAsGame(l.uid))
+  const edited = new Set(mine.filter((l) => l.original_id != null).map((l) => l.original_id!))
 
   const list = useListParams(['q', 'origin', 'status'] as const)
   const f = list.values
-  const isHidden = (r: Row) => (r.kind === 'project' ? !!r.league.hidden : r.league.hidden || isLeagueHidden(r.league.id))
+  const isHidden = (r: Row) =>
+    r.kind === 'project'
+      ? r.league.original_id != null
+        ? isLeagueHidden(r.league.original_id)
+        : !!r.league.hidden
+      : r.league.hidden || isLeagueHidden(r.league.id)
   const rows: Row[] = [
-    ...draft.leagues.map((league) => ({ kind: 'project' as const, league })),
-    ...originals.map((league) => ({ kind: 'original' as const, league })),
+    ...mine.map((league) => ({ kind: 'project' as const, league })),
+    ...originals.filter((l) => !edited.has(l.id)).map((league) => ({ kind: 'original' as const, league })),
   ].filter(
     (r) =>
       matches(f.q, r.league.name, r.league.short_name) &&
-      (f.origin === ALL || f.origin === r.kind) &&
+      (f.origin === ALL ||
+        f.origin === r.kind ||
+        (f.origin === 'original' && r.kind === 'project' && r.league.original_id != null)) &&
       (f.status === ALL || (f.status === 'hidden') === isHidden(r)),
   )
   const page = usePage(rows, list.page, list.pageSize)
@@ -124,24 +147,42 @@ export function LeaguesPage() {
           {page.rows.map((r) => {
             if (r.kind === 'project') {
               const l = r.league
+              const oid = l.original_id
+              const hidden = isHidden(r)
               return (
-                <TableRow key={l.uid} className="cursor-pointer" onClick={() => navigate(`/leagues/${l.uid}`, from)}>
-                  <TableCell data-grow className={l.hidden ? 'font-medium text-muted-foreground' : 'font-medium'}>
-                    {l.name || <span className="text-muted-foreground">{t('common.unnamed')}</span>}
-                    {l.hidden && <OutOfPatchBadge />}
+                <TableRow key={l.uid} className="cursor-pointer" onClick={() => navigate(leaguePath(leagueKey(l)), from)}>
+                  <TableCell data-grow className={hidden ? 'font-medium text-muted-foreground' : 'font-medium'}>
+                    <span className="mr-2">{l.name || <span className="text-muted-foreground">{t('common.unnamed')}</span>}</span>
+                    {oid != null && <OriginalBadge entry={l.uid} league={oid} />}
+                    {oid != null && isLeagueHidden(oid) ? (
+                      <Badge variant="outline" className="ml-1 font-normal">
+                        {t('leagues.hiddenByProject')}
+                      </Badge>
+                    ) : (
+                      l.hidden && <OutOfPatchBadge />
+                    )}
                   </TableCell>
-                  <TableCell className="tabular-nums text-muted-foreground">{l.league_id ?? t('common.auto')}</TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">{oid ?? l.league_id ?? t('common.auto')}</TableCell>
                   <TableCell className="tabular-nums">{l.sort_order}</TableCell>
-                  <TableCell className="tabular-nums">{teamCount(l.uid)}</TableCell>
+                  <TableCell className="tabular-nums">{teamsOf(l)}</TableCell>
                   <TableCell>
                     <span className="flex items-center gap-1">
                       <EntityIssues uid={l.uid} />
-                      <HideButton
-                        hidden={!!l.hidden}
-                        onToggle={() => updateLeague(l.uid, { hidden: !l.hidden })}
-                        hideHint={t('leagues.hideHint')}
-                        showHint={t('leagues.showHint')}
-                      />
+                      {oid != null ? (
+                        <HideButton
+                          hidden={isLeagueHidden(oid)}
+                          onToggle={() => toggleLeague(oid)}
+                          hideHint={t('leagues.originalHideHint')}
+                          showHint={t('leagues.originalShowHint')}
+                        />
+                      ) : (
+                        <HideButton
+                          hidden={!!l.hidden}
+                          onToggle={() => updateLeague(l.uid, { hidden: !l.hidden })}
+                          hideHint={t('leagues.hideHint')}
+                          showHint={t('leagues.showHint')}
+                        />
+                      )}
                     </span>
                   </TableCell>
                 </TableRow>
@@ -149,10 +190,10 @@ export function LeaguesPage() {
             }
             const l = r.league
             return (
-              <TableRow key={l.id} className="cursor-pointer text-muted-foreground" onClick={() => navigate(`/leagues/${l.id}`, from)}>
+              <TableRow key={l.id} className="cursor-pointer text-muted-foreground" onClick={() => navigate(leaguePath(l.id), from)}>
                 <TableCell data-grow>
                   <span className="mr-2 text-foreground">{l.name}</span>
-                  <OriginalBadge />
+                  <OriginalBadge league={l.id} />
                   {l.hidden && <GameHiddenBadge />}
                   {isLeagueHidden(l.id) && (
                     <Badge variant="outline" className="ml-1 font-normal">
@@ -163,8 +204,7 @@ export function LeaguesPage() {
                 <TableCell className="tabular-nums">{l.id}</TableCell>
                 <TableCell className="tabular-nums">{l.sort_order}</TableCell>
                 <TableCell className="tabular-nums">
-                  {l.team_count}
-                  {newInOriginal(l.id) > 0 && <span className="text-foreground"> +{newInOriginal(l.id)}</span>}
+                  {l.team_count + teamsDelta(l.id)}
                 </TableCell>
                 <TableCell>
                   {!l.hidden && (

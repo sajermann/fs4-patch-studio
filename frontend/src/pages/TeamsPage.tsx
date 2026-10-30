@@ -1,8 +1,7 @@
-import { Eye, EyeOff, Lock, LockOpen, Pencil, Plus } from 'lucide-react'
+import { Eye, EyeOff, Lock, LockOpen, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { imageUrl } from '@/api/client'
 import type { OriginalTeam, Player, Team } from '@/api/types'
-import { EntityIssues, OriginalBadge, OriginalCrest, Swatch } from '@/components/common/form'
+import { EntityIssues, OriginalBadge, OriginalCrest, TeamCrest } from '@/components/common/form'
 import { GameHiddenBadge, HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import {
   ALL,
@@ -22,7 +21,7 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/compon
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
 import { useOriginalChanges } from '@/lib/originals'
-import { defaultLeague, editedOriginals, useLeagueName, useLeagueTeams } from '@/lib/teams'
+import { defaultLeague, editedOriginals, newLeagues, useLeagueName, useLeagueTeams } from '@/lib/teams'
 import { useGamePlayers } from '@/lib/members'
 import { linkOf, rosterOf, teamKey, teamPath } from '@/lib/players'
 import { newUid, useProject, useSameAsGame } from '@/state/project'
@@ -30,7 +29,8 @@ import { useOriginalLeagues, useOriginalTeams } from '@/state/queries'
 
 type Row = { kind: 'project'; team: Team } | { kind: 'original'; team: OriginalTeam }
 
-const leagueKey = (league: number | string | null) => (typeof league === 'string' ? `new:${league}` : `orig:${league}`)
+const NO_LEAGUE = 'none'
+const leagueKey = (league: number | string) => (typeof league === 'string' ? `new:${league}` : `orig:${league}`)
 
 export function TeamsPage() {
   const { t } = useI18n()
@@ -73,7 +73,7 @@ export function TeamsPage() {
     addTeam({
       uid,
       name: '',
-      league: firstFreeLeague,
+      leagues: [firstFreeLeague],
       primary_color: [20, 80, 160],
       secondary_color: [245, 245, 245],
       kits: {},
@@ -82,13 +82,14 @@ export function TeamsPage() {
     navigate(`/teams/${uid}`, from)
   }
 
-  // out of the game: hidden by the project (team or its league) or by the game itself
+  // a league that keeps its teams out of the game: a hidden new league or a game league the project hides
+  const leagueOut = (l: number | string) => (typeof l === 'string' ? hiddenLeagues.has(l) : isLeagueHidden(l))
+  // out of the game: hidden by the project (team, no league or every league of it) or by the game itself
   const isHidden = (r: Row) =>
     r.kind === 'project'
       ? !!r.team.hidden ||
-        (r.team.original_id != null && isTeamHidden(r.team.original_id)) ||
-        (typeof r.team.league === 'string' && hiddenLeagues.has(r.team.league)) ||
-        (typeof r.team.league === 'number' && isLeagueHidden(r.team.league))
+        r.team.leagues.every(leagueOut) ||
+        (r.team.original_id != null && isTeamHidden(r.team.original_id))
       : isTeamHidden(r.team.id) ||
         (r.team.league !== null && (isLeagueHidden(r.team.league) || gameHiddenLeagues.has(r.team.league)))
   const isLocked = (r: Row) => r.kind === 'original' && r.team.lockable && teamLocked(r.team)
@@ -102,7 +103,12 @@ export function TeamsPage() {
       (f.origin === ALL ||
         f.origin === r.kind ||
         (f.origin === 'original' && r.kind === 'project' && r.team.original_id != null)) &&
-      (f.league === ALL || f.league === leagueKey(r.team.league)) &&
+      (f.league === ALL ||
+        (r.kind === 'project'
+          ? f.league === NO_LEAGUE
+            ? r.team.leagues.length === 0
+            : r.team.leagues.some((l) => f.league === leagueKey(l))
+          : r.team.league !== null && f.league === leagueKey(r.team.league))) &&
       (f.status === ALL ||
         (f.status === 'visible' && !isHidden(r)) ||
         (f.status === 'hidden' && isHidden(r)) ||
@@ -112,8 +118,9 @@ export function TeamsPage() {
 
   const leagueOptions = [
     { value: ALL, label: t('teams.allLeagues') },
-    ...draft.leagues.map((l) => ({ value: leagueKey(l.uid), label: l.name || t('league.unnamed'), group: t('teams.newLeagues') })),
-    ...originalLeagues.map((l) => ({ value: leagueKey(l.id), label: l.name, group: t('teams.originalLeagues') })),
+    { value: NO_LEAGUE, label: t('teams.noLeague') },
+    ...newLeagues(draft).map((l) => ({ value: leagueKey(l.uid), label: l.name || t('league.unnamed'), group: t('teams.newLeagues') })),
+    ...originalLeagues.map((l) => ({ value: leagueKey(l.id), label: leagueName(l.id), group: t('teams.originalLeagues') })),
   ]
 
   return (
@@ -182,11 +189,11 @@ export function TeamsPage() {
               <ProjectTeamRow
                 key={r.team.uid}
                 team={r.team}
-                leagueHidden={typeof r.team.league === 'string' && hiddenLeagues.has(r.team.league)}
+                leagueHidden={r.team.leagues.length > 0 && r.team.leagues.every((l) => typeof l === 'string' && hiddenLeagues.has(l))}
                 original={r.team.original_id != null ? originalById.get(r.team.original_id) : undefined}
                 originalHidden={r.team.original_id != null && isTeamHidden(r.team.original_id)}
                 players={joined(r.team)}
-                leagueName={leagueName(r.team.league)}
+                leagueName={r.team.leagues.length ? r.team.leagues.map(leagueName).join(', ') : leagueName(null)}
                 onOpen={() => navigate(teamPath(teamKey(r.team)), from)}
                 onToggleHidden={() =>
                   r.team.original_id != null
@@ -224,14 +231,6 @@ export function TeamsPage() {
                 <TableCell className="tabular-nums">{r.team.id}</TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <span className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title={t('teams.editOriginalHint')}
-                      onClick={() => edit(r.team)}
-                    >
-                      <Pencil />
-                    </Button>
                     <OriginalTeamAction
                     team={r.team}
                     gameHidden={r.team.league !== null && gameHiddenLeagues.has(r.team.league)}
@@ -276,14 +275,7 @@ function ProjectTeamRow({
   return (
     <TableRow className="cursor-pointer" onClick={onOpen}>
       <TableCell>
-        {team.crest ? (
-          <img src={imageUrl(team.crest)} alt="" className="size-8 object-contain" />
-        ) : (
-          <span className="flex gap-0.5">
-            <Swatch rgb={team.primary_color} />
-            <Swatch rgb={team.secondary_color} />
-          </span>
-        )}
+        <TeamCrest team={team} />
       </TableCell>
       <TableCell data-grow className={hidden ? 'font-medium text-muted-foreground' : 'font-medium'}>
         <span className="mr-2">{team.name || <span className="text-muted-foreground">{t('common.unnamed')}</span>}</span>

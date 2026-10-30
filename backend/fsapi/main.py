@@ -19,11 +19,12 @@ from .faces import FaceError, FaceService
 from .original_images import OriginalImages
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
 from .project_store import BackupError, ProjectStore, migrate_folder
-from fsmod import builder, kit, kitprint, model, original_player, original_team, photo, preview, scanface, validation
+from fsmod import (builder, kit, kitprint, model, original_league, original_player, original_team, photo, preview,
+                   scanface, validation)
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
 
-UID_PATTERN = r'^[A-Za-z0-9_-]+$'  # project uids (lg_/tm_/jg_...): used as folder names
+UID_PATTERN = r'^[A-Za-z0-9_-]+$'  # project uids: used as folder names
 NO_CACHE = {'Cache-Control': 'no-cache'}  # project images keep their name when replaced: always revalidate
 
 INSTALL_ERROR_TEXT = {
@@ -102,10 +103,11 @@ def create_app(state=None):
         return issues if raw else [issue_json(i) for i in issues]
 
     def untouched_uids(project):
-        """Uids of the original team/player entries still exactly as loaded from the game (opened, nothing
+        """Uids of the original league/team/player entries still exactly as loaded from the game (opened, nothing
         changed): the UI shows them as originals and saving drops them."""
         c, folder = state.catalog(), state.store.folder
-        return ([t.uid for t in project.teams if t.is_original and original_team.untouched(t, folder, c)]
+        return ([lg.uid for lg in project.leagues if lg.is_original and original_league.untouched(lg, folder)]
+                + [t.uid for t in project.teams if t.is_original and original_team.untouched(t, folder, c)]
                 + [p.uid for p in project.players if p.is_original and original_player.untouched(p, folder, c)])
 
     def state_of(project, untouched=True):
@@ -114,7 +116,8 @@ def create_app(state=None):
         c = state.catalog()
         return {'issues': issues_for(project), 'defaults': c.player_defaults(project),
                 'untouched': untouched_uids(project) if untouched else [],
-                'changed_squads': original_player.changed_squads(project, c)}
+                'changed_squads': original_player.changed_squads(project, c),
+                'changed_leagues': original_league.changed_teams(project, c)}
 
     # ---------------------------------------------------------------- status / config
     def setup_state():
@@ -220,6 +223,7 @@ def create_app(state=None):
     @app.put('/api/project')
     def put_project(project: model.Project):
         drop = set(untouched_uids(project))  # opened originals with nothing changed stay the game's
+        project.leagues = [lg for lg in project.leagues if lg.uid not in drop]
         project.teams = [t for t in project.teams if t.uid not in drop]
         project.players = [p for p in project.players if p.uid not in drop]
         state.store.save(project)
@@ -267,6 +271,17 @@ def create_app(state=None):
         teams = state.catalog().teams
         images = state.original_images
         return [{**t, 'crest': images.has_crest(t['id'])} for t in teams if league is None or t['league'] == league]
+
+    @app.post('/api/originals/leagues/{leagueid}/edit')
+    def edit_original_league(leagueid: int, uid: str = Query(pattern=UID_PATTERN)):
+        """Starts editing an original league: its images (the flags of its country) go into the project as
+        provisional images and the League comes back filled with what the game has (League.original_id)."""
+        c = state.catalog()
+        if original_league.editable(c, leagueid) is None:
+            raise HTTPException(404, {'code': 'original_league_not_found',
+                                      'message': f'Liga {leagueid} não é uma liga original editável.'})
+        lg = original_league.load(state.game, c, leagueid, uid, state.store.save_image)
+        return lg.model_dump(mode='json', exclude_none=True)
 
     @app.post('/api/originals/teams/{teamid}/edit')
     def edit_original_team(teamid: int, uid: str):
@@ -322,6 +337,15 @@ def create_app(state=None):
         """Menu crest of an original team (128 px); 404 for the game's internal teams, which have none."""
         state.catalog()  # 409 when original files are missing
         data = state.original_images.crest(teamid)
+        if data is None:
+            raise HTTPException(404)
+        return Response(data, media_type='image/webp', headers=ORIGINAL_IMAGE_CACHE)
+
+    @app.get('/api/originals/league-images/{leagueid}.webp')
+    def original_league_image(leagueid: int):
+        """Image of an original league in the selector (the square flag of its country); 404 when it has none."""
+        league = next((lg for lg in state.catalog().leagues if lg['id'] == leagueid), None)
+        data = state.original_images.league_flag(league['country']) if league else None
         if data is None:
             raise HTTPException(404)
         return Response(data, media_type='image/webp', headers=ORIGINAL_IMAGE_CACHE)

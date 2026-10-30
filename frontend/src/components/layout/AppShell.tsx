@@ -69,7 +69,7 @@ export function AppShell() {
   const stadiums = useOriginalStadiums().data
   const ready = loaded && !!catalog && !!leagues && !!teams
   const counts: Record<string, number> = {
-    '/leagues': draft.leagues.length,
+    '/leagues': draft.leagues.filter((e) => !opened.has(e.uid)).length,
     '/teams': draft.teams.filter((e) => !opened.has(e.uid)).length, // originals only opened are not in the project
     '/players': draft.players.filter((e) => !opened.has(e.uid)).length,
     '/stadiums': stadiums?.length ?? 0,

@@ -3,13 +3,13 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError, api } from '@/api/client'
-import type { OriginalPlayer, Player, PlayerDefaults, PlayerRef, Project, Team, TeamKey, TeamLink } from '@/api/types'
+import type { League, LeagueKey, OriginalPlayer, Player, PlayerDefaults, PlayerRef, Project, Team, TeamKey, TeamLink } from '@/api/types'
 import { OriginalPlayerAvatar, PlayerAvatar } from '@/components/common/PlayerPhoto'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useI18n } from '@/i18n'
-import { firstFreeNumber, keyOfPath, leaveTeam, linkedTeam, linkOf, playerName, playerOf, playerRef, rosterOf, takePlace, teamKey } from '@/lib/players'
+import { firstFreeNumber, keyOfPath, leaveTeam, linkedLeague, linkedTeam, linkOf, playerName, playerOf, playerRef, rosterOf, takePlace, teamKey } from '@/lib/players'
 import { newUid, useProject } from '@/state/project'
 import { useCatalog, useLookups, useOriginalPlayers } from '@/state/queries'
 
@@ -135,28 +135,54 @@ export function useGameTeamEntry() {
   }
 }
 
-/** The team/player an edit page address names (teamPath/playerPath): a new one by uid, one of the game's by its id,
- * loaded from the game when the project does not have it yet (also after a reload, or a save that dropped it). An old
- * address of an original by uid moves to its game id. loading: still coming from the game. */
-export function useEntryOfPath<T extends Team | Player>(kind: 'team' | 'player', param: string | undefined) {
+/** The project entry of one of the game's leagues, created (loaded from the game) the first time. */
+export function useGameLeagueEntry() {
+  const { t } = useI18n()
+  const { draft, openOriginal } = useProject()
+  return async (leagueid: number): Promise<League | null> => {
+    const known = linkedLeague(draft, leagueid)
+    if (known) return known
+    try {
+      const entry = await api.editOriginalLeague(leagueid, newUid())
+      openOriginal({ league: entry })
+      return entry
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('leagues.editOriginalFailed'))
+      return null
+    }
+  }
+}
+
+type EntryKind = 'league' | 'team' | 'player'
+
+/** The league/team/player an edit page address names (leaguePath/teamPath/playerPath): a new one by uid, one of the
+ * game's by its id, loaded from the game when the project does not have it yet (also after a reload, or a save that
+ * dropped it; `load` false: never, e.g. a league the game does not let edit). An old address of an original by uid
+ * moves to its game id. loading: still coming from the game. */
+export function useEntryOfPath<T extends League | Team | Player>(kind: EntryKind, param: string | undefined, load = true) {
   const { loaded, draft } = useProject()
-  const ensureTeam = useGameTeamEntry()
-  const ensurePlayer = useGamePlayerEntry()
+  const ensure = { league: useGameLeagueEntry(), team: useGameTeamEntry(), player: useGamePlayerEntry() }[kind]
   const navigate = useNavigate()
   const location = useLocation()
   const [failed, setFailed] = useState<number>()
   const key = keyOfPath(param)
-  const entry = (key === undefined ? undefined : kind === 'team' ? linkedTeam(draft, key) : playerOf(draft, key)) as T | undefined
+  const entry = (key === undefined
+    ? undefined
+    : kind === 'league'
+      ? linkedLeague(draft, key)
+      : kind === 'team'
+        ? linkedTeam(draft, key)
+        : playerOf(draft, key)) as T | undefined
   const gameId = typeof key === 'number' ? key : undefined
   const legacy = typeof key === 'string' ? entry?.original_id : undefined
   useEffect(() => {
     if (legacy != null) navigate(`/${kind}s/${legacy}${location.search}`, { replace: true, state: location.state })
   }, [legacy, kind, navigate, location.search, location.state])
-  const absent = loaded && gameId !== undefined && !entry
+  const absent = load && loaded && gameId !== undefined && !entry
   useEffect(() => {
     if (!absent || gameId === undefined) return
     let live = true
-    void (kind === 'team' ? ensureTeam(gameId) : ensurePlayer(gameId)).then((e) => {
+    void ensure(gameId).then((e) => {
       if (live && !e) setFailed(gameId)
     })
     return () => {
@@ -165,6 +191,22 @@ export function useEntryOfPath<T extends Team | Player>(kind: 'team' | 'player',
     // once per absent id (the ensure functions are new on each render)
   }, [absent, gameId, kind])
   return { entry, loading: !entry && (!loaded || (absent && failed !== gameId)) }
+}
+
+/** A team (new team uid or the game's teamid) joining a league or leaving one; its other leagues stay (a team plays
+ * in several leagues, validated in game). One of the game's teams gets its entry first (applied by teamid). */
+export function useTeamLeagues() {
+  const { setDraft } = useProject()
+  const ensure = useGameTeamEntry()
+  const change = async (team: TeamKey, update: (leagues: LeagueKey[]) => LeagueKey[]) => {
+    if (typeof team === 'number' && !(await ensure(team))) return false
+    setDraft((p) => ({ ...p, teams: p.teams.map((t) => (teamKey(t) === team ? { ...t, leagues: update(t.leagues) } : t)) }))
+    return true
+  }
+  return {
+    join: (team: TeamKey, league: LeagueKey) => change(team, (ls) => (ls.includes(league) ? ls : [...ls, league])),
+    leave: (team: TeamKey, league: LeagueKey) => change(team, (ls) => ls.filter((l) => l !== league)),
+  }
 }
 
 const withLink = (project: Project, ref: PlayerRef, team: TeamKey, link: Omit<TeamLink, 'team'>): Project => {

@@ -46,7 +46,7 @@ def value(db, table, row, name):
 def test_load_fills_the_team_with_what_the_game_has(game, catalog, assets):
     tm = load(game, catalog, assets)
     assert tm.original_id == BARCELONA and tm.team_id is None
-    assert tm.league == SPAIN and tm.abbreviation == 'BAR'
+    assert tm.leagues == [SPAIN] and tm.abbreviation == 'BAR'
     assert tm.crest and tm.use_real_kits and set(tm.real_kits) == {'home', 'away', 'goalkeeper'}
     home = tm.real_kits['home']
     with Image.open(os.path.join(assets[0], home.jersey)) as im:
@@ -72,7 +72,7 @@ def test_edited_original_team_keeps_its_id_and_changes_only_what_changed(game, c
     tm = load(game, catalog, assets)
     tm.name, tm.abbreviation = 'Palmeiras', 'PAL'
     tm.primary_color = (0, 100, 0)
-    tm.league = MLS
+    tm.leagues = [MLS]
     buf = io.BytesIO()
     Image.new('RGBA', (300, 300), (0, 128, 0, 255)).save(buf, format='PNG')
     tm.crest = save_image('new-crest.png', buf.getvalue())
@@ -130,10 +130,10 @@ def test_validation_of_original_teams(game, catalog, assets):
 
 def test_moved_original_team_counts_in_its_new_league(game, catalog, assets):
     tm = load(game, catalog, assets, REAL_MADRID, 'tm_real')
-    tm.league = MLS
+    tm.leagues = [MLS]
     mls = [t['id'] for t in catalog.teams if t['league'] == MLS]
     project = model.Project(teams=[tm])
-    copies = [model.Team(uid=f'tm_{k}', name=f'T{k}', league=MLS, primary_color=(0, 0, 0),
+    copies = [model.Team(uid=f'tm_{k}', name=f'T{k}', leagues=[MLS], primary_color=(0, 0, 0),
                          secondary_color=(0, 0, 0)) for k in range(builder.MAX_LEAGUE_TEAMS - len(mls) - 1)]
     project.teams += copies
 
@@ -141,7 +141,7 @@ def test_moved_original_team_counts_in_its_new_league(game, catalog, assets):
         return {i.params['count'] for i in validation.validate(project, catalog, assets[0])
                 if i.code == 'league_too_many_teams'}
     assert too_many() == set()  # MLS + new teams + Real Madrid = the limit
-    project.teams.append(model.Team(uid='tm_extra', name='X', league=MLS, primary_color=(0, 0, 0),
+    project.teams.append(model.Team(uid='tm_extra', name='X', leagues=[MLS], primary_color=(0, 0, 0),
                                     secondary_color=(0, 0, 0)))
     assert too_many() == {builder.MAX_LEAGUE_TEAMS + 1}
 

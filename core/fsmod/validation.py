@@ -12,7 +12,7 @@ from typing import Optional
 
 from PIL import Image
 
-from . import builder, kit, original_team, scanface
+from . import builder, kit, original_league, original_team, scanface
 from .catalog import POSITIONS, SKILLS
 from .model import REAL_KIT_FILES
 
@@ -36,8 +36,10 @@ class Issue:
 
 
 def validate(project, catalog, assets_dir):
+    # teams taken out of their league (no league) are left out of the patch: said once, not validated
+    without_league = [tm.uid for tm in project.teams if not tm.leagues and not tm.hidden]
     project = project.visible()  # hidden leagues/teams are left out of the patch: not validated
-    issues = []
+    issues = [Issue('team_without_league', 'warning', uid, 'leagues', {}) for uid in without_league]
 
     def error(code, entity=None, field_name=None, **params):
         issues.append(Issue(code, 'error', entity, field_name, params))
@@ -150,11 +152,19 @@ def validate(project, catalog, assets_dir):
 
     # ---- leagues
     new_league_ids = {}
-    if len(project.leagues) > len(builder.IMAGE_COUNTRIES):
+    if len(project.new_leagues) > len(builder.IMAGE_COUNTRIES):
         error('too_many_leagues', None, None, max=len(builder.IMAGE_COUNTRIES))
+    edited_leagues = set()
     for lg in project.leagues:
         check_text(lg.uid, 'name', lg.name, catalog.locale_chars, required=True)
         check_text(lg.uid, 'short_name', lg.short_name, catalog.locale_chars, limit=LEAGUE_SHORT_LIMIT)
+        if lg.is_original:
+            if original_league.editable(catalog, lg.original_id) is None:
+                error('original_league_not_found', lg.uid, 'original_id', id=lg.original_id)
+            elif lg.original_id in edited_leagues:
+                error('original_league_edited_twice', lg.uid, 'original_id', id=lg.original_id)
+            edited_leagues.add(lg.original_id)
+            continue
         if lg.league_id is not None:  # given by the build when missing
             if not builder.FIRST_NEW_LEAGUEID <= lg.league_id <= builder.LAST_NEW_LEAGUEID:
                 error('league_id_out_of_range', lg.uid, 'league_id', value=lg.league_id,
@@ -189,7 +199,7 @@ def validate(project, catalog, assets_dir):
         game_squads[tid] = squad
 
     # ---- teams
-    league_uids = {lg.uid for lg in project.leagues}
+    league_uids = {lg.uid for lg in project.new_leagues}
     original_leagues = {lg['id']: lg for lg in catalog.leagues}
     team_uids = {t.uid for t in project.new_teams}
     team_ids = {}
@@ -208,13 +218,16 @@ def validate(project, catalog, assets_dir):
                           pattern=piece.pattern)
         for attr, limit in TEAM_TEXT_LIMITS.items():
             check_text(tm.uid, attr, getattr(tm, attr), catalog.locale_chars, limit=limit)
-        if isinstance(tm.league, str):
-            if tm.league not in league_uids:
-                error('league_not_found', tm.uid, 'league', league=tm.league)
-        elif tm.league not in original_leagues:
-            error('league_not_found', tm.uid, 'league', league=tm.league)
-        elif original_leagues[tm.league]['hidden']:
-            warning('league_hidden', tm.uid, 'league', league=tm.league)
+        if len(set(tm.leagues)) < len(tm.leagues):
+            error('league_twice', tm.uid, 'leagues')
+        for i, league in enumerate(tm.leagues):  # none: an original team is hidden in the game (team_without_league)
+            if isinstance(league, str):
+                if league not in league_uids:
+                    error('league_not_found', tm.uid, f'leagues.{i}', league=league)
+            elif league not in original_leagues:
+                error('league_not_found', tm.uid, f'leagues.{i}', league=league)
+            elif original_leagues[league]['hidden']:
+                warning('league_hidden', tm.uid, f'leagues.{i}', league=league)
         if tm.is_original:
             if tm.original_id not in catalog.team_ids:
                 error('original_team_not_found', tm.uid, 'original_id', id=tm.original_id)
@@ -282,13 +295,15 @@ def validate(project, catalog, assets_dir):
 
     # ---- teams per league (new + the original ones still in it)
     hidden_teams = set(project.originals.hidden_teams)
-    league_teams = Counter(tm.league for tm in project.new_teams)
-    moved = {tm.original_id: tm.league for tm in project.original_teams}
-    checked = set(league_teams) | set(moved.values())
+    league_teams = Counter(league for tm in project.new_teams for league in set(tm.leagues))
+    moved = {tm.original_id: set(tm.leagues) for tm in project.original_teams}
+    checked = set(league_teams).union(*moved.values())
     for t in catalog.teams:
-        league = moved.get(t['id'], t['league'])
-        if t['id'] not in hidden_teams and league in checked:
-            league_teams[league] += 1
+        if t['id'] in hidden_teams:
+            continue
+        for league in moved.get(t['id'], {t['league']}):
+            if league in checked:
+                league_teams[league] += 1
     for league, count in league_teams.items():
         if count <= builder.MAX_LEAGUE_TEAMS:
             continue
@@ -296,9 +311,9 @@ def validate(project, catalog, assets_dir):
         if isinstance(league, str):
             error('league_too_many_teams', league, None, league=name, count=count, max=builder.MAX_LEAGUE_TEAMS)
         for tm in project.teams:
-            if tm.league == league:
-                error('league_too_many_teams', tm.uid, 'league', league=name, count=count,
-                      max=builder.MAX_LEAGUE_TEAMS)
+            if league in tm.leagues:
+                error('league_too_many_teams', tm.uid, f'leagues.{tm.leagues.index(league)}', league=name,
+                      count=count, max=builder.MAX_LEAGUE_TEAMS)
 
     # ---- players
     for p in project.players:
@@ -406,8 +421,8 @@ def validate(project, catalog, assets_dir):
         if sid not in lockable_stadiums:
             error('stadium_not_lockable', None, 'originals.stadium_locks', id=sid)
     for tm in project.teams:
-        if isinstance(tm.league, int) and tm.league in changes.hidden_leagues:
-            warning('team_league_hidden', tm.uid, 'league')
+        if tm.leagues and all(isinstance(lg, int) and lg in changes.hidden_leagues for lg in tm.leagues):
+            warning('team_league_hidden', tm.uid, 'leagues')
     return issues
 
 

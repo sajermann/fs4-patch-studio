@@ -38,6 +38,18 @@ class League(Entity):
     wide_image: Optional[str] = None  # wide flag (shown once the league is chosen); None = image
     wide_image_fit: Literal['contain', 'cover'] = 'contain'  # whole image / fill the wide area (cropped)
     hidden: bool = False  # left out of the patch (with its teams), e.g. not ready yet
+    original_id: Optional[int] = None  # the game's own league this entry edits (same leagueid); None = new
+    # original league: what was loaded from the game (fsmod.original_league; its fields under `team`)
+    loaded: Optional['OriginalSnapshot'] = None
+
+    @property
+    def is_original(self):
+        return self.original_id is not None
+
+    @property
+    def key(self):
+        """What a team names its league by: the uid of a new league, the leagueid of an original one."""
+        return self.original_id if self.is_original else self.uid
 
 
 class StreetPart(BaseModel):
@@ -178,14 +190,16 @@ class OriginalSnapshot(BaseModel):
     """What the app loaded from the game when the user started editing one of its teams (fsmod.original_team): the
     build compares the team with it and only rewrites what changed, so untouched files and rows stay the game's
     own (no DXT re-compression, the street pieces the game picks at random kept)."""
-    team: dict = {}  # the editable Team fields as loaded (JSON, original_team.EDITABLE_FIELDS)
+    team: dict = {}  # the editable fields as loaded (JSON, original_team/original_league.EDITABLE_FIELDS)
     images: dict[str, str] = {}  # SHA-1 of each image as loaded, by field path ('crest', 'real_kits.home.jersey'...)
 
 
 class Team(Entity):
     uid: str
     name: str
-    league: Union[int, str]  # uid of a new league or id of an original league
+    # leagues the team plays in (validated in game: one leagueteamlinks row each): uid of a new league or id of an
+    # original league; empty = no league: left out of the patch (an original team is hidden in the game)
+    leagues: list[Union[int, str]] = []
     primary_color: RGB
     secondary_color: RGB
     team_id: Optional[int] = None  # teamid in the game (a new one, unused by the game); None = given by the build
@@ -207,6 +221,16 @@ class Team(Entity):
     takers: dict[TakerRole, PlayerRef] = {}  # set pieces; a role left out = the captain (original team: the game's)
     lineups: list[Lineup] = []  # starting lineup per game mode (fs4lineup); a mode without one = the game's pick
     hidden: bool = False  # left out of the patch (with its players), e.g. not ready yet
+
+    @model_validator(mode='before')
+    @classmethod
+    def _one_league(cls, data):
+        """Projects from before a team could be in several leagues: `league` (one, or None) becomes `leagues`."""
+        if isinstance(data, dict) and 'league' in data and 'leagues' not in data:
+            league = data['league']
+            data = {k: v for k, v in data.items() if k != 'league'}
+            data['leagues'] = [] if league is None else [league]
+        return data
 
     def kit(self, kind):
         """Full KitColors for 'home' / 'away' (defaults derived from the team colors)."""
@@ -269,6 +293,15 @@ class Project(Entity):
         return [t for t in self.teams if not t.is_original]
 
     @property
+    def new_leagues(self):
+        return [lg for lg in self.leagues if not lg.is_original]
+
+    @property
+    def original_leagues(self):
+        """Entries that edit the game's own leagues (League.original_id)."""
+        return [lg for lg in self.leagues if lg.is_original]
+
+    @property
     def original_teams(self):
         """Entries that edit the game's own teams (Team.original_id)."""
         return [t for t in self.teams if t.is_original]
@@ -278,7 +311,14 @@ class Project(Entity):
         players) and hidden players. This is what goes into the patch and what is validated."""
         leagues = [lg for lg in self.leagues if not lg.hidden]
         hidden_leagues = {lg.uid for lg in self.leagues if lg.hidden}
-        teams = [t for t in self.teams if not t.hidden and t.league not in hidden_leagues]
+        teams = []
+        for t in self.teams:
+            kept = [lg for lg in t.leagues if lg not in hidden_leagues]
+            # left out: hidden, every league hidden, or a new team without a league (an original one is hidden in
+            # the game by the build)
+            if t.hidden or (t.leagues and not kept) or (not kept and not t.is_original):
+                continue
+            teams.append(t if len(kept) == len(t.leagues) else t.model_copy(update={'leagues': kept}))
         left_out = {t.uid for t in self.teams if not t.is_original} - {t.uid for t in teams}
         players = []
         for p in self.players:
@@ -335,7 +375,7 @@ def from_v1(data):
                 for kind, parts in tm.get('uniformes', {}).items()}
         captain = int(tm.get('capitao', 0))
         teams.append(Team(
-            uid=uid, name=tm['nome'], league=league_uids.get(league, league),
+            uid=uid, name=tm['nome'], leagues=[league_uids.get(league, league)],
             primary_color=tuple(tm['cor_principal']), secondary_color=tuple(tm['cor_secundaria']),
             short_name=tm.get('nome_curto'), name_10=tm.get('nome_10'),
             name_7=tm.get('nome_7'), abbreviation=tm.get('sigla'), crest=tm.get('escudo'), kits=kits,

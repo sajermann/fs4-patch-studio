@@ -1,7 +1,7 @@
 import { AlertTriangle, ChevronLeft, ChevronRight, CircleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { originalCrestUrl } from '@/api/client'
-import type { Issue, OriginalTeam, RGB } from '@/api/types'
+import { imageUrl, originalCrestUrl } from '@/api/client'
+import type { Issue, OriginalTeam, RGB, Team } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -135,10 +135,10 @@ export function Stepper({
 
 /** "original", or "era original" for an entry that edits one of the game's teams/players (entry = its uid; an entry
  * opened without changing anything still reads "original") and for a game team whose squad the project changes
- * (team = its teamid, with or without an entry). */
-export function OriginalBadge({ entry, team }: { entry?: string; team?: number | null }) {
+ * (team = its teamid, with or without an entry) or a game league whose teams the project changes (league). */
+export function OriginalBadge({ entry, team, league }: { entry?: string; team?: number | null; league?: number | null }) {
   const { t } = useI18n()
-  const edited = useWasEdited(entry, team)
+  const edited = useWasEdited(entry, team, league)
   return (
     <Badge variant="secondary" className="font-normal" title={edited ? t('common.wasOriginalHint') : undefined}>
       {edited ? t('common.wasOriginal') : t('common.original')}
@@ -171,6 +171,18 @@ export function EntityIssues({ uid }: { uid: string }) {
 export function OriginalCrest({ team, className }: { team: OriginalTeam; className?: string }) {
   return team.crest ? (
     <img src={originalCrestUrl(team.id)} alt="" loading="lazy" className={cn('size-8 object-contain', className)} />
+  ) : (
+    <span className="flex gap-0.5">
+      <Swatch rgb={team.primary_color} />
+      <Swatch rgb={team.secondary_color} />
+    </span>
+  )
+}
+
+/** A project team's crest, or its two colors when it has none. */
+export function TeamCrest({ team, className }: { team: Team; className?: string }) {
+  return team.crest ? (
+    <img src={imageUrl(team.crest)} alt="" className={cn('size-8 object-contain', className)} />
   ) : (
     <span className="flex gap-0.5">
       <Swatch rgb={team.primary_color} />

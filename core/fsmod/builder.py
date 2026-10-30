@@ -13,6 +13,8 @@ what is installed.
   - Original leagues/teams/stadiums (project.originals): hidden leagues leave `leagues` and their teams go to
     HIDDEN_TEAMS_LEAGUE; hidden teams too; locks are fs4unlockables_defs.is_locked of the rows the game already has
     (the game ignores new rows).
+  - Original leagues edited in place (League.original_id): texts, selector order and the flags of their country
+    (original_league); original teams without a league go to HIDDEN_TEAMS_LEAGUE.
   - New players: cloned from generic players (headclasscode 1), new nameids and a playerid the game does not
     use anywhere (Player.player_id, given once by the build). Photo and real face (headclasscode 0, files named
     by the playerid) are loose files: the game opens d:/<name> from disk when no archive has it.
@@ -29,8 +31,8 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from . import (big, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, original_player, original_team,
-               photo, preview, rx3tex, scanface, t3db)
+from . import (big, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, original_league,
+               original_player, original_team, photo, preview, rx3tex, scanface, t3db)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
 HIDDEN_LEAGUES = {382, 76, 2092, 2095, 2097}  # ids the league selector never shows
@@ -219,9 +221,9 @@ def reserved_league_ids(original_ids, locale_keys):
 
 def assign_league_ids(project, reserved):
     """{league uid: leagueid} for the leagues without league_id: the smallest free ids from FIRST_NEW_LEAGUEID."""
-    used = set(reserved) | {lg.league_id for lg in project.leagues if lg.league_id is not None}
+    used = set(reserved) | {lg.league_id for lg in project.new_leagues if lg.league_id is not None}
     out, lid = {}, FIRST_NEW_LEAGUEID
-    for lg in project.leagues:
+    for lg in project.new_leagues:
         if lg.league_id is not None:
             continue
         while lid in used:
@@ -423,7 +425,68 @@ def _game_team_squad(db, tid, leave, update, join, entity):
             db.put(teams, team_row, f, heir)
 
 
-def _build_original_team(db, game, tm, assets_dir, league_id, texts, say, player_ids):
+def _team_league_ids(tm, league_ids, existing):
+    """The leagueids of a team's leagues (a new league by uid: the id this build gave it)."""
+    out = []
+    for lg in tm.leagues:
+        lid = league_ids.get(lg) if isinstance(lg, str) else int(lg)
+        if lid is None or lid not in existing:
+            raise BuildError(f'{tm.name}: league {lg} does not exist', tm.uid)
+        out.append(lid)
+    return out
+
+
+def _set_team_leagues(db, tid, lids, model):
+    """Replaces the leagueteamlinks rows of team tid by one per leagueid in lids, each last in its league (a team in
+    several leagues shows in each one, validated in game: test LT1). model = (row, raw) the rows are copied from."""
+    t = db.table('leagueteamlinks')
+    for k in sorted(db.rows('leagueteamlinks', 'teamid', tid), reverse=True):
+        del t.records[k]
+        del t.raw_records[k]
+    for lid in lids:
+        r = list(model[0])
+        db.put(t, r, 'teamid', tid)
+        db.put(t, r, 'leagueid', lid)
+        db.put(t, r, 'tableposition', len(db.rows('leagueteamlinks', 'leagueid', lid)) + 1)
+        db.put(t, r, 'artificialkey', db.max_value('leagueteamlinks', 'artificialkey') + 1)
+        db.append('leagueteamlinks', r, model[1])
+
+
+def _build_original_league(db, game, lg, assets_dir, texts, entries, result, say):
+    """Applies an original league entry (League.original_id) to the game's own record, texts and flags, only where it
+    differs from what was loaded (original_league.changes). A changed image replaces the flag of the league's
+    country where the game has it (data1), otherwise it goes as a loose file (fsmod.leaguelogo)."""
+    lid = lg.original_id
+    ch = original_league.changes(lg, assets_dir)
+    leagues = db.table('leagues')
+    rows = db.rows('leagues', 'leagueid', lid)
+    if not rows:
+        raise BuildError(f'{lg.name}: original league {lid} does not exist', lg.uid)
+    row = leagues.records[rows[0]]
+    say(f'original league {lid} "{lg.name}"' + ('' if ch.any else ' (unchanged)'))
+    if 'name' in ch.texts:
+        texts[f'LeagueName_{lid}'] = lg.name
+    if 'short_name' in ch.texts:
+        texts[f'LeagueName_Abbr15_{lid}'] = lg.short_name or lg.name
+    if ch.sort_order:
+        db.put(leagues, row, 'defaultsortorder', lg.sort_order)
+    square_path = lg.image or lg.wide_image
+    if ch.images and square_path:
+        img = Image.open(os.path.join(assets_dir, square_path)).convert('RGBA')
+        wide = Image.open(os.path.join(assets_dir, lg.wide_image)).convert('RGBA') if lg.wide_image else None
+        country = db.get(leagues, row, 'countryid')
+        changed = {leaguelogo.asset_name(asset, country) for attr, asset in original_league.IMAGES if attr in ch.images}
+        for name, data in leaguelogo.flag_files(game, country, img, wide, lg.wide_image_fit).items():
+            if name not in changed:
+                continue
+            loc = game.locate(name)
+            if loc:
+                entries[f'data{loc[0]}.big', name] = data
+            else:
+                result.loose[name] = data
+
+
+def _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids):
     """Applies an original team entry (Team.original_id) to the game's own rows, texts and files, only where it
     differs from what was loaded (original_team.changes). player_ids: {new player uid: playerid}. Returns the jobs
     that make its image files (() -> ({internal name: bytes}, log lines)), run in the image pool."""
@@ -455,11 +518,10 @@ def _build_original_team(db, game, tm, assets_dir, league_id, texts, say, player
         for n, rgb in (('1', tm.primary_color), ('2', tm.secondary_color)):
             for c, v in zip('rgb', _rgb(rgb, f'teamcolor{n}', tm.uid)):
                 db.put(teams, row, f'teamcolor{n}{c}', v)
-    if ch.league:
-        links = db.table('leagueteamlinks')
-        for k in db.rows('leagueteamlinks', 'teamid', tid):
-            db.put(links, links.records[k], 'leagueid', league_id)
-            db.put(links, links.records[k], 'tableposition', len(db.rows('leagueteamlinks', 'leagueid', league_id)))
+    if ch.league:  # no league: hidden in the game (the league that holds hidden teams), like a hidden team
+        league_links = db.table('leagueteamlinks')
+        k = db.rows('leagueteamlinks', 'teamid', tid)[0]
+        _set_team_leagues(db, tid, lids or [HIDDEN_TEAMS_LEAGUE], (league_links.records[k], league_links.raw_records[k]))
 
     team_kits = db.table('teamkits')
     kit_rows = {db.get(team_kits, r, 'teamkittypetechid'): r for r in team_kits.records
@@ -635,11 +697,12 @@ def build(project, game, assets_dir, log=None, progress=None):
     referee_links = db.table('leaguerefereelinks')
     template_referees = db.rows('leaguerefereelinks', 'leagueid', TEMPLATE_LEAGUE)
     reserved_leagues = reserved_league_ids(existing, locale_keys)
-    result.assigned_league_ids = assign_league_ids(project, reserved_leagues | {lg.league_id for lg in every.leagues})
+    result.assigned_league_ids = assign_league_ids(
+        project, reserved_leagues | {lg.league_id for lg in every.new_leagues})
     league_ids = {}
-    if len(project.leagues) > len(IMAGE_COUNTRIES):
-        raise BuildError(f'{len(project.leagues)} new leagues: at most {len(IMAGE_COUNTRIES)} (one image each)')
-    for k, lg in enumerate(project.leagues):
+    if len(project.new_leagues) > len(IMAGE_COUNTRIES):
+        raise BuildError(f'{len(project.new_leagues)} new leagues: at most {len(IMAGE_COUNTRIES)} (one image each)')
+    for k, lg in enumerate(project.new_leagues):
         step('leagues', k, len(project.leagues))
         country = IMAGE_COUNTRIES[k]
         lid = lg.league_id if lg.league_id is not None else result.assigned_league_ids[lg.uid]
@@ -665,6 +728,11 @@ def build(project, game, assets_dir, log=None, progress=None):
             img = Image.open(os.path.join(assets_dir, lg.image or lg.wide_image)).convert('RGBA')
             wide = Image.open(os.path.join(assets_dir, lg.wide_image)).convert('RGBA') if lg.wide_image else None
             result.loose.update(leaguelogo.flag_files(game, country, img, wide, lg.wide_image_fit))  # no country: loose
+    hidden_originals = set(every.originals.hidden_leagues)
+    for k, lg in enumerate(project.original_leagues):
+        step('leagues', len(project.new_leagues) + k, len(project.leagues))
+        if lg.original_id not in hidden_originals:  # a hidden one leaves the selector: nothing to edit
+            _build_original_league(db, game, lg, assets_dir, texts, entries, result, say)
 
     # ---- teams
     teams = db.table('teams')
@@ -768,9 +836,7 @@ def build(project, game, assets_dir, log=None, progress=None):
     step('leagues', len(project.leagues), len(project.leagues))
     for k, tm in enumerate(project.new_teams):
         step('teams', k, len(project.teams))
-        league_id = league_ids.get(tm.league) if isinstance(tm.league, str) else int(tm.league)
-        if league_id is None or league_id not in existing:
-            raise BuildError(f'{tm.name}: league {tm.league} does not exist', tm.uid)
+        lids = _team_league_ids(tm, league_ids, existing)
         if not tm.crest:
             raise BuildError(f'{tm.name}: a crest is required', tm.uid)
         try:
@@ -781,7 +847,7 @@ def build(project, game, assets_dir, log=None, progress=None):
         if (tid in reserved_teams or tid in bank_teams or not FIRST_NEW_TEAMID <= tid <= LAST_NEW_TEAMID
                 or not team_id_is_free(game, tid)):
             raise BuildError(f'{tm.name}: teamid {tid} is not free', tm.uid)
-        say(f'team "{tm.name}" -> teamid {tid} (league {league_id})')
+        say(f'team "{tm.name}" -> teamid {tid} (leagues {lids})')
         primary = _rgb(tm.primary_color, 'primary_color', tm.uid)
         secondary = _rgb(tm.secondary_color, 'secondary_color', tm.uid)
         kits = {}
@@ -838,16 +904,14 @@ def build(project, game, assets_dir, log=None, progress=None):
         db.insert_sorted('teams', 'teamid', row, raw)
         bank_teams.add(tid)
         _lineup_rows(db, tid, tm.lineups, pids, [ref for ref, _ in members])
-        for table_name in ('teamstadiumlinks', 'leagueteamlinks'):
-            t = db.table(table_name)
-            for k in db.rows(table_name, 'teamid', tm.template):
-                r = list(t.records[k])
-                db.put(t, r, 'teamid', tid)
-                if table_name == 'leagueteamlinks':
-                    db.put(t, r, 'leagueid', league_id)
-                    db.put(t, r, 'tableposition', len(db.rows(table_name, 'leagueid', league_id)) + 1)
-                    db.put(t, r, 'artificialkey', db.max_value(table_name, 'artificialkey') + 1)
-                db.append(table_name, r, t.raw_records[k])
+        stadiums = db.table('teamstadiumlinks')
+        for k in db.rows('teamstadiumlinks', 'teamid', tm.template):
+            r = list(stadiums.records[k])
+            db.put(stadiums, r, 'teamid', tid)
+            db.append('teamstadiumlinks', r, stadiums.raw_records[k])
+        league_links = db.table('leagueteamlinks')
+        k = db.rows('leagueteamlinks', 'teamid', tm.template)[0]
+        _set_team_leagues(db, tid, lids, (league_links.records[k], league_links.raw_records[k]))
         team_kits = db.table('teamkits')
         kit_id = db.max_value('teamkits', 'teamkitid') + 1
         home_row = None
@@ -943,10 +1007,8 @@ def build(project, game, assets_dir, log=None, progress=None):
     # ---- original teams edited in place (same teamid): only what changed since they were loaded
     for k, tm in enumerate(project.original_teams):
         step('teams', len(project.new_teams) + k, len(project.teams))
-        league_id = league_ids.get(tm.league) if isinstance(tm.league, str) else int(tm.league)
-        if league_id is None or league_id not in existing:
-            raise BuildError(f'{tm.name}: league {tm.league} does not exist', tm.uid)
-        for job in _build_original_team(db, game, tm, assets_dir, league_id, texts, say, player_ids):
+        lids = _team_league_ids(tm, league_ids, existing)
+        for job in _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids):
             future = pool.submit(job)
             jobs.append(future)
             original_jobs.add(future)

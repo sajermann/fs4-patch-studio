@@ -645,7 +645,7 @@ def test_editing_an_original_team_starts_from_the_game_and_survives_saving(env):
     r = c.post('/api/originals/teams/241/edit', params={'uid': 'tm_barca'})
     assert r.status_code == 200
     team = r.json()
-    assert team['original_id'] == 241 and team['league'] == 53 and team['crest'].startswith('images/upload-')
+    assert team['original_id'] == 241 and team['leagues'] == [53] and team['crest'].startswith('images/upload-')
     assert set(team['real_kits']) == {'home', 'away', 'goalkeeper'} and team['loaded']['images']['crest']
     assert c.post('/api/originals/teams/999999/edit', params={'uid': 'x'}).status_code == 404
 
@@ -678,6 +678,25 @@ def test_an_original_player_opened_without_changes_is_dropped_by_saving(env):
     assert c.post('/api/project/validate', json={'version': 2, 'players': [renumbered]}).json()['changed_squads'] == [
         messi['teams'][0]['team']]
     assert len(c.put('/api/project', json={'version': 2, 'players': [moved]}).json()['project']['players']) == 1
+
+
+def test_an_original_league_is_edited_in_place_and_dropped_when_unchanged(env):
+    c = env['client']
+    assert c.post('/api/originals/leagues/76/edit', params={'uid': 'world'}).status_code == 404  # hidden by the game
+    premier = c.post('/api/originals/leagues/13/edit', params={'uid': 'premier'}).json()
+    assert premier['original_id'] == 13 and premier['short_name'] == 'Barclays PL' and premier['image']
+    assert c.post('/api/project/validate', json={'version': 2, 'leagues': [premier]}).json()['untouched'] == ['premier']
+    assert c.put('/api/project', json={'version': 2, 'leagues': [premier]}).json()['project']['leagues'] == []
+    renamed = {**premier, 'short_name': 'PL'}
+    saved = c.put('/api/project', json={'version': 2, 'leagues': [renamed]}).json()
+    assert saved['untouched'] == [] and [lg['short_name'] for lg in saved['project']['leagues']] == ['PL']
+    assert c.get('/api/originals/league-images/13.webp').status_code == 200  # the flag of its country
+    # a team joining or leaving a game league makes that league edited too
+    barca = c.post('/api/originals/teams/241/edit', params={'uid': 'barca'}).json()
+    r = c.post('/api/project/validate', json={'version': 2, 'teams': [{**barca, 'leagues': [53, 13]}]}).json()
+    assert r['changed_leagues'] == [13]
+    r = c.post('/api/project/validate', json={'version': 2, 'teams': [{**barca, 'leagues': [39]}]}).json()
+    assert r['changed_leagues'] == [39, 53]
 
 
 def test_real_kit_preview_prints_name_and_numbers(env):

@@ -1,4 +1,4 @@
-import type { Player, PlayerRef, Project, Team, TeamKey, TeamLink } from '@/api/types'
+import type { League, LeagueKey, Player, PlayerRef, Project, Team, TeamKey, TeamLink } from '@/api/types'
 import { lineupsWithout, takersWithout } from '@/lib/lineup'
 
 /** What a TeamLink names a team by: the uid of a new team, the teamid of an original one (fsmod.model.Team.key). */
@@ -19,6 +19,12 @@ export const teamsWith = (player: Player, team: TeamKey, patch: Partial<TeamLink
 /** Edit page addresses: an original team/player by its game id (opened from the game when not in the project yet),
  * a new one by its uid. Stable, so a reload or a copied link finds it again. */
 export const teamPath = (team: TeamKey) => `/teams/${team}`
+export const leaguePath = (league: LeagueKey) => `/leagues/${league}`
+/** What a team names a league by: the uid of a new league, the leagueid of an original one. */
+export const leagueKey = (league: League): LeagueKey => league.original_id ?? league.uid
+/** The project League a team's league points to: a new league by uid, an edited original by leagueid. */
+export const linkedLeague = (project: Project, league: LeagueKey) =>
+  project.leagues.find((l) => (typeof league === 'string' ? l.uid === league : l.original_id === league))
 export const playerPath = (player: PlayerRef) => `/players/${player}`
 /** The TeamKey/PlayerRef an edit page address names (digits = the game's id). */
 export const keyOfPath = (param: string | undefined): string | number | undefined =>

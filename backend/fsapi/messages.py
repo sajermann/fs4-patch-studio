@@ -13,6 +13,9 @@ ISSUE_TEXT = {
     'original_league_not_hideable': 'A liga {id} não é uma liga original visível do jogo.',
     'original_team_not_found': 'O time {id} não é um time original do jogo.',
     'original_team_edited_twice': 'O time original {id} já está sendo editado por outra entrada do projeto.',
+    'original_league_not_found': 'A liga {id} não é uma liga original editável do jogo.',
+    'original_league_edited_twice': 'A liga original {id} já está sendo editada por outra entrada do projeto.',
+    'team_without_league': 'Sem liga: o time fica fora do patch (um time original some do jogo) até entrar numa liga.',
     'original_team_not_lockable': 'O time {id} não pode ser trancado (o jogo só tranca os times especiais).',
     'stadium_not_lockable': 'O estádio {id} não pode ser trancado.',
     'team_league_hidden': 'A liga deste time está oculta: o time também fica oculto no jogo.',
@@ -20,6 +23,7 @@ ISSUE_TEXT = {
     'too_many_leagues': 'No máximo {max} ligas novas (cada uma usa um número de imagem livre do jogo).',
     'league_too_many_teams': 'A liga {league} tem {count} times; o máximo é {max} (com mais, a tela de escolha de '
                              'times do jogo não carrega todos os escudos).',
+    'league_twice': 'O time está duas vezes na mesma liga.',
     'league_not_found': 'Liga não encontrada.',
     'league_hidden': 'Essa liga original não aparece no seletor do jogo.',
     'template_not_found': 'Molde {id} não existe no banco do jogo.',

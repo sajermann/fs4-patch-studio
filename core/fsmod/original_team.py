@@ -24,7 +24,7 @@ KIT_SLOTS = (('home', 0), ('away', 1), ('goalkeeper', 2))  # Team.real_kits slot
 STREET_KINDS = (('home', 0), ('away', 1))
 STREET_PARTS = (('top', 'top'), ('bottom', 'bottom'), ('socks', 'sock'))  # StreetKit part -> teamkits column prefix
 TEXT_FIELDS = ('name', 'short_name', 'name_10', 'name_7', 'abbreviation')
-EDITABLE_FIELDS = (*TEXT_FIELDS, 'league', 'primary_color', 'secondary_color', 'use_real_kits', 'kits',
+EDITABLE_FIELDS = (*TEXT_FIELDS, 'leagues', 'primary_color', 'secondary_color', 'use_real_kits', 'kits',
                    'street_kits', 'real_kits')
 REAL_KIT_SETTINGS = ('name_color', 'number_color', 'shorts_number_color', 'collar', 'front_number', 'shorts_number')
 TAKER_ROLES = {'penalty': 'penaltytakerid', 'free_kick': 'freekicktakerid', 'long_free_kick': 'longkicktakerid',
@@ -120,7 +120,7 @@ def load(game, catalog, teamid, uid, save_image):
     texts = catalog.texts
     name = info['name']
     tm = Team(
-        uid=uid, original_id=teamid, name=name, league=info['league'],
+        uid=uid, original_id=teamid, name=name, leagues=[info['league']],
         short_name=texts.get(f'TeamName_Abbr15_{teamid}') or name,
         name_10=texts.get(f'TeamName_Abbr10_{teamid}') or name[:10],
         name_7=texts.get(f'TeamName_Abbr7_{teamid}') or name[:7],
@@ -137,7 +137,7 @@ class Changes:
     """What an original team entry changes compared with what was loaded from the game."""
     texts: set = field(default_factory=set)  # TEXT_FIELDS that changed
     colors: bool = False
-    league: bool = False
+    league: bool = False  # the set of leagues changed
     crest: bool = False
     kits_mode: bool = False  # use_real_kits switched (off: generic kits from the colors)
     kit_colors: bool = False  # Team.kits overrides (generic kits)
@@ -160,6 +160,13 @@ def image_sha1(assets_dir, path):
         return None
 
 
+def snapshot_leagues(fields):
+    """Leagues of a snapshot (one taken before a team could be in several leagues has `league`)."""
+    if 'leagues' in fields:
+        return fields['leagues']
+    return [] if fields.get('league') is None else [fields['league']]
+
+
 def changes(tm, assets_dir):
     """Changes of an original team entry (everything counts as changed when there is no snapshot)."""
     loaded = tm.loaded or OriginalSnapshot()
@@ -167,7 +174,7 @@ def changes(tm, assets_dir):
     out = Changes()
     out.texts = {f for f in TEXT_FIELDS if now.get(f) != before.get(f)}
     out.colors = any(now.get(f) != before.get(f) for f in ('primary_color', 'secondary_color'))
-    out.league = now.get('league') != before.get('league')
+    out.league = set(tm.leagues) != set(snapshot_leagues(before))
     out.crest = image_sha1(assets_dir, tm.crest) != loaded.images.get('crest')
     out.kits_mode = now.get('use_real_kits') != before.get('use_real_kits')
     out.kit_colors = now.get('kits') != before.get('kits')

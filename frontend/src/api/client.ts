@@ -1,6 +1,7 @@
 import type { PreviewKit } from '@/components/common/PlayerPreview'
 import type {
   BasePlayer,
+  League,
   BuildProgress,
   BuildResponse,
   GameCheck,
@@ -78,23 +79,23 @@ export const api = {
   config: () => request<Config>('/api/config'),
   saveConfig: (config: Config) => request<Config>('/api/config', json('PUT', config)),
 
-  project: () => request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[] }>('/api/project'),
+  project: () => request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; changed_leagues: number[] }>('/api/project'),
   /** Replaces the project with a backup zip (database.json + images + faces). */
   restoreBackup: (file: File) => {
     const form = new FormData()
     form.append('file', file)
-    return request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[] }>('/api/project/restore', {
+    return request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; changed_leagues: number[] }>('/api/project/restore', {
       method: 'POST',
       body: form,
     })
   },
   saveProject: (project: Project) =>
-    request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; patch: PatchStatus }>(
+    request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; changed_leagues: number[]; patch: PatchStatus }>(
       '/api/project',
       json('PUT', project),
     ),
   validate: (project: Project) =>
-    request<{ issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[] }>('/api/project/validate', json('POST', project)),
+    request<{ issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; changed_leagues: number[] }>('/api/project/validate', json('POST', project)),
 
   originalLeagues: () => request<OriginalLeague[]>('/api/originals/leagues'),
   originalTeams: () => request<OriginalTeam[]>('/api/originals/teams'),
@@ -105,6 +106,8 @@ export const api = {
     return request<{ total: number; items: OriginalPlayer[] }>(`/api/originals/players?${qs}`)
   },
   /** Starts editing an original team: its crest and kits become project images; returns the filled Team. */
+  editOriginalLeague: (leagueid: number, uid: string) =>
+    request<League>(`/api/originals/leagues/${leagueid}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),
   editOriginalTeam: (teamid: number, uid: string) =>
     request<Team>(`/api/originals/teams/${teamid}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),
   /** The game's own squad of an original team (restoring it puts this squad back). */
@@ -170,6 +173,7 @@ export const imageUrl = (path: string) => withRevision(`/api/${path}`)
 
 /** Menu crest / photo of an original team / player (read from the originals, 128 px). */
 export const originalCrestUrl = (teamid: number) => `/api/originals/crests/${teamid}.webp`
+export const originalLeagueImageUrl = (leagueid: number) => `/api/originals/league-images/${leagueid}.webp`
 export const originalPhotoUrl = (playerid: number) => `/api/originals/photos/${playerid}.webp`
 
 /** Player photo as the game shows it (square crop). */

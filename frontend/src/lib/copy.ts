@@ -5,6 +5,7 @@ import { translate, useI18n } from '@/i18n'
 import { useLeagueTeams } from '@/lib/teams'
 import { copyLineups } from '@/lib/lineup'
 import { firstFreeNumber, linkOf, numbersIn, rosterOf } from '@/lib/players'
+import { newLeagues } from '@/lib/teams'
 import { newUid, useProject } from '@/state/project'
 import { useCatalog } from '@/state/queries'
 
@@ -36,7 +37,7 @@ export function useCopy() {
   const maxRoster = catalog?.max_roster ?? 13
   const activeRoster = (project: Project, team: string) => rosterOf(project, team).filter((p) => !p.hidden)
 
-  const canCopyLeague = draft.leagues.filter((l) => !l.hidden).length < maxLeagues
+  const canCopyLeague = newLeagues(draft).filter((l) => !l.hidden).length < maxLeagues
   const copyLeague = (uid: string) => {
     const league = draft.leagues.find((l) => l.uid === uid)
     if (!league || !canCopyLeague) return null
@@ -45,10 +46,10 @@ export function useCopy() {
     return copy.uid
   }
 
-  // the copy goes to the same league: it must have room for one more team
+  // the copy goes to the same leagues: each must have room for one more team
   const canCopyTeam = (uid: string) => {
     const team = draft.teams.find((t) => t.uid === uid)
-    return !!team && !leagueTeams.isFull(team.league)
+    return !!team && team.leagues.every((l) => !leagueTeams.isFull(l))
   }
   const copyTeam = async (uid: string, withRoster: boolean) => {
     const team = draft.teams.find((t) => t.uid === uid)

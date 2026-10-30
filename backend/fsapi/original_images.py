@@ -11,7 +11,7 @@ import shutil
 import uuid
 from functools import cached_property
 
-from fsmod import crest, photo
+from fsmod import crest, leaguelogo, photo
 from fsmod.game import GAME_DATA, PHOTOS_FILE
 
 SOURCES = ('data1.big', PHOTOS_FILE)  # menu crests, player photos
@@ -50,6 +50,13 @@ class OriginalImages:
     def photo(self, playerid):
         """WebP bytes of the player's menu photo, or None (most generic-head players have none)."""
         return self._cached('photos', playerid, lambda: photo.original_photo(self.game, playerid))
+
+    def league_flag(self, countryid):
+        """WebP bytes of the square flag of a league's country (the league image in the selector), or None."""
+        def load():
+            entry = self.game.read_entry(leaguelogo.asset_name('flag_small', countryid))
+            return leaguelogo.read_image(entry[2])[0] if entry else None
+        return self._cached('flags', countryid, load)
 
     def _cached(self, kind, item_id, load):
         path = os.path.join(self.folder, kind, f'{item_id}.webp')

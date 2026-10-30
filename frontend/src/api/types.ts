@@ -33,12 +33,17 @@ export interface League {
   wide_image?: string
   wide_image_fit?: 'contain' | 'cover'
   hidden?: boolean // left out of the patch (with its teams)
+  original_id?: number | null // the game's own league this entry edits (same leagueid); none = new
+  loaded?: unknown // original league: what was loaded from the game (compared by the backend)
 }
+
+/** What a team names its league by: a new league's uid or an original league's id. */
+export type LeagueKey = number | string
 
 export interface Team {
   uid: string
   name: string
-  league: number | string // new league uid or original league id
+  leagues: LeagueKey[] // new league uids / original league ids it plays in; none = left out of the patch
   primary_color: RGB
   secondary_color: RGB
   team_id?: number | null // teamid in the game, given by the build

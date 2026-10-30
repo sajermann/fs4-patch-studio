@@ -7,6 +7,7 @@ import type { KitKind, KitPart, RGB, Team } from '@/api/types'
 import { ColorInput, EntityIssues, Field, FieldIssues, OriginalBadge } from '@/components/common/form'
 import { LineupEditor, type LineupPlayer } from '@/components/common/LineupEditor'
 import { RosterCard } from '@/components/common/Roster'
+import { TeamLeagues } from '@/components/common/TeamLeagues'
 import { useEntryOfPath, useTeamMembers } from '@/lib/members'
 import { RealKitEditor } from '@/components/common/RealKitEditor'
 import { StreetKitEditor } from '@/components/common/StreetKitEditor'
@@ -24,57 +25,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { BackButton, useBack, useGoBack, useKeepBack, useTabParam } from '@/lib/back'
 import { useI18n } from '@/i18n'
 import { useCopy } from '@/lib/copy'
 import { KIT_LABELS, KIT_PART_LABELS } from '@/lib/labels'
-import { fullKit, useLeagueTeams } from '@/lib/teams'
+import { fullKit } from '@/lib/teams'
 import { cn } from '@/lib/utils'
 import { useIssues, useProject, useWasEdited } from '@/state/project'
-import { useOriginalLeagues } from '@/state/queries'
-
-/** League dropdown: the project's new leagues + the original leagues the selector shows. */
-export function LeagueSelect({ value, onChange }: { value: number | string; onChange: (v: number | string) => void }) {
-  const { t } = useI18n()
-  const { draft } = useProject()
-  const originals = (useOriginalLeagues().data ?? []).filter((l) => !l.hidden || l.id === value)
-  const leagueTeams = useLeagueTeams()
-  // a full league can't take one more team (its current one stays selectable)
-  const full = (league: number | string) => league !== value && leagueTeams.isFull(league)
-  const fullHint = ` ${t('teamEdit.leagueFull', { max: leagueTeams.max })}`
-  const encode = (v: number | string) => (typeof v === 'string' ? `new:${v}` : `orig:${v}`)
-  return (
-    <Select value={encode(value)} onValueChange={(v) => onChange(v.startsWith('new:') ? v.slice(4) : Number(v.slice(5)))}>
-      <SelectTrigger className="w-full">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {draft.leagues.length > 0 && (
-          <SelectGroup>
-            <SelectLabel>{t('teams.newLeagues')}</SelectLabel>
-            {draft.leagues.map((l) => (
-              <SelectItem key={l.uid} value={encode(l.uid)} disabled={full(l.uid)}>
-                {l.name || t('league.unnamed')}
-                {full(l.uid) && fullHint}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        )}
-        <SelectGroup>
-          <SelectLabel>{t('teams.originalLeagues')}</SelectLabel>
-          {originals.map((l) => (
-            <SelectItem key={l.id} value={encode(l.id)} disabled={full(l.id)}>
-              {l.name}
-              {full(l.id) && fullHint}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
-  )
-}
 
 function DataTab({ team }: { team: Team }) {
   const { t } = useI18n()
@@ -95,9 +53,6 @@ function DataTab({ team }: { team: Team }) {
         {text('name_10', t('teamEdit.name10'), team.name.slice(0, 10))}
         {text('name_7', t('teamEdit.name7'), team.name.slice(0, 7))}
         {text('abbreviation', t('teamEdit.abbreviation'), team.name.slice(0, 3).toUpperCase())}
-        <Field label={t('teams.colLeague')} entity={team.uid} field="league" className="sm:col-span-2" hint={t('teamEdit.leagueHint')}>
-          <LeagueSelect value={team.league} onChange={(league) => set({ league })} />
-        </Field>
       </CardContent>
     </Card>
   )
@@ -346,8 +301,9 @@ export function TeamEditPage() {
           <TabsTrigger value="roster">{t('teamEdit.roster')}</TabsTrigger>
           <TabsTrigger value="lineup">{t('lineup.tab')}</TabsTrigger>
         </TabsList>
-        <TabsContent value="data">
+        <TabsContent value="data" className="space-y-4">
           <DataTab team={team} />
+          <TeamLeagues team={team} />
         </TabsContent>
         <TabsContent value="crest">
           <CrestTab team={team} />

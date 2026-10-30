@@ -196,7 +196,7 @@ def test_v1_conversion():
     project = load_palmeiras()
     assert [lg.name for lg in project.leagues] == ['Brasileirão']
     team = project.teams[0]
-    assert team.league == project.leagues[0].uid
+    assert team.leagues == [project.leagues[0].uid]
     assert len(project.roster(team.uid)) == 10
     assert team.captain == project.roster(team.uid)[0].uid
     assert team.kit('away').jersey == (245, 245, 245)
@@ -226,7 +226,7 @@ def test_league_team_limit_counts_new_and_original_teams(game):
     from fsmod.catalog import Catalog
     catalog = Catalog(game)
     project = load_palmeiras()
-    new_league = project.teams[0].league
+    new_league = project.teams[0].leagues[0]
     copies = [project.teams[0].model_copy(update={'uid': f'tm_{k}', 'team_id': None})
               for k in range(builder.MAX_LEAGUE_TEAMS)]
     project.teams += copies
@@ -240,7 +240,7 @@ def test_league_team_limit_counts_new_and_original_teams(game):
     # original league (MLS, 18 teams): the project teams add up; teams the project hides do not count
     mls = [t['id'] for t in catalog.teams if t['league'] == 39]
     for t in copies[:13]:
-        t.league = 39
+        t.leagues = [39]
     assert ('tm_0', len(mls) + 13) in codes()
     project.originals.hidden_teams = mls[:1]
     assert codes() == []

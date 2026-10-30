@@ -23,7 +23,9 @@ interface ProjectContextValue {
   untouched: Set<string>
   /** the game's teams whose squad the project changes (a player left/joined/changed number or position): edited too */
   changedSquads: Set<number>
-  /** uids of original teams/players opened from the game but not changed: in `draft` for the pages, out of the
+  /** the game's leagues whose teams the project changes (a team joined or left): edited too */
+  changedLeagues: Set<number>
+  /** uids of original leagues/teams/players opened from the game but not changed: in `draft` for the pages, out of the
    * project (not saved, not validated, not "unsaved changes") until something of theirs changes */
   opened: Set<string>
   saving: boolean
@@ -34,8 +36,8 @@ interface ProjectContextValue {
   addLeague: (league: League) => void
   addTeam: (team: Team) => void
   addPlayer: (player: Player) => void
-  /** an original team/player loaded from the game, shown as it is until something changes (see `opened`) */
-  openOriginal: (entry: { team: Team } | { player: Player }) => void
+  /** an original league/team/player loaded from the game, shown as it is until something changes (see `opened`) */
+  openOriginal: (entry: { league: League } | { team: Team } | { player: Player }) => void
   removeLeague: (uid: string) => void
   removeTeam: (uid: string, squad?: OriginalSquadLink[]) => void
   removePlayer: (uid: string) => void
@@ -49,14 +51,20 @@ const replace = <T extends { uid: string }>(list: T[], uid: string, patch: Parti
   list.map((e) => (e.uid === uid ? { ...e, ...patch } : e))
 
 interface Opened {
+  leagues: League[]
   teams: Team[]
   players: Player[]
 }
-const NONE: Opened = { teams: [], players: [] }
+const NONE: Opened = { leagues: [], teams: [], players: [] }
 
 const withOpened = (draft: Project, opened: Opened): Project =>
-  opened.teams.length || opened.players.length
-    ? { ...draft, teams: [...draft.teams, ...opened.teams], players: [...draft.players, ...opened.players] }
+  opened.leagues.length || opened.teams.length || opened.players.length
+    ? {
+        ...draft,
+        leagues: [...draft.leagues, ...opened.leagues],
+        teams: [...draft.teams, ...opened.teams],
+        players: [...draft.players, ...opened.players],
+      }
     : draft
 
 /** Splits an updated view (project + opened originals) back: an opened entry the update left as it was (same
@@ -66,9 +74,13 @@ function splitOpened(next: Project, opened: Opened): { draft: Project; opened: O
     const same = new Set(mine.filter((e) => list.includes(e)))
     return { project: list.filter((e) => !same.has(e)), opened: mine.filter((e) => same.has(e)) }
   }
+  const leagues = split(next.leagues, opened.leagues)
   const teams = split(next.teams, opened.teams)
   const players = split(next.players, opened.players)
-  return { draft: { ...next, teams: teams.project, players: players.project }, opened: { teams: teams.opened, players: players.opened } }
+  return {
+    draft: { ...next, leagues: leagues.project, teams: teams.project, players: players.project },
+    opened: { leagues: leagues.opened, teams: teams.opened, players: players.opened },
+  }
 }
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
@@ -79,7 +91,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const setDraftState = useCallback((d: Project) => setState((s) => ({ ...s, draft: d })), [])
   const view = useMemo(() => withOpened(state.draft, state.opened), [state])
   const openedUids = useMemo(
-    () => new Set([...state.opened.teams, ...state.opened.players].map((e) => e.uid)),
+    () => new Set([...state.opened.leagues, ...state.opened.teams, ...state.opened.players].map((e) => e.uid)),
     [state.opened],
   )
   const [saved, setSaved] = useState<string>(JSON.stringify(EMPTY))
@@ -87,6 +99,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [defaults, setDefaults] = useState<Record<string, PlayerDefaults>>({})
   const [untouched, setUntouched] = useState<Set<string>>(new Set())
   const [changedSquads, setChangedSquads] = useState<Set<number>>(new Set())
+  const [changedLeagues, setChangedLeagues] = useState<Set<number>>(new Set())
   const [saving, setSaving] = useState(false)
   const validateSeq = useRef(0)
 
@@ -100,6 +113,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setDefaults(query.data.defaults)
     setUntouched(new Set(query.data.untouched))
     setChangedSquads(new Set(query.data.changed_squads))
+    setChangedLeagues(new Set(query.data.changed_leagues))
   }, [query.data])
 
   const dirty = useMemo(() => JSON.stringify(draft) !== saved, [draft, saved])
@@ -117,6 +131,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           setDefaults(r.defaults)
           setUntouched(new Set(r.untouched))
           setChangedSquads(new Set(r.changed_squads))
+      setChangedLeagues(new Set(r.changed_leagues))
+          setChangedLeagues(new Set(r.changed_leagues))
         })
         .catch(() => undefined)
     }, VALIDATE_DELAY_MS)
@@ -148,12 +164,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setDefaults(r.defaults)
       setUntouched(new Set(r.untouched))
       setChangedSquads(new Set(r.changed_squads))
+      setChangedLeagues(new Set(r.changed_leagues))
       queryClient.setQueryData(['project'], {
         project: r.project,
         issues: r.issues,
         defaults: r.defaults,
         untouched: r.untouched,
         changed_squads: r.changed_squads,
+        changed_leagues: r.changed_leagues,
       })
       await queryClient.invalidateQueries({ queryKey: ['status'] })
     } finally {
@@ -170,6 +188,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       defaults,
       untouched,
       changedSquads,
+      changedLeagues,
       opened: openedUids,
       saving,
       setDraft,
@@ -183,6 +202,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       openOriginal: (entry) =>
         setState((s) => {
           const view = withOpened(s.draft, s.opened)
+          if ('league' in entry)
+            return view.leagues.some((l) => l.original_id === entry.league.original_id)
+              ? s
+              : { ...s, opened: { ...s.opened, leagues: [...s.opened.leagues, entry.league] } }
           if ('team' in entry)
             return view.teams.some((t) => t.original_id === entry.team.original_id)
               ? s
@@ -235,10 +258,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           setDefaults(query.data.defaults)
           setUntouched(new Set(query.data.untouched))
           setChangedSquads(new Set(query.data.changed_squads))
+          setChangedLeagues(new Set(query.data.changed_leagues))
+    setChangedLeagues(new Set(query.data.changed_leagues))
         }
       },
     }),
-    [query.data, view, dirty, issues, defaults, untouched, changedSquads, openedUids, saving, setDraft, setDraftState, save, saved],
+    [query.data, view, dirty, issues, defaults, untouched, changedSquads, changedLeagues, openedUids, saving, setDraft, setDraftState, save, saved],
   )
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
@@ -250,10 +275,15 @@ export function useProject() {
   return ctx
 }
 
-/** Whether an original entry (entry = its uid) differs from the game, or a game team's squad (team = its teamid) does. */
-export function useWasEdited(entry?: string, team?: number | null) {
-  const { untouched, opened, changedSquads } = useProject()
-  return (entry !== undefined && !opened.has(entry) && !untouched.has(entry)) || (team != null && changedSquads.has(team))
+/** Whether an original entry (entry = its uid) differs from the game, or a game team's squad (team = its teamid)
+ * or a game league's teams (league = its leagueid) do. */
+export function useWasEdited(entry?: string, team?: number | null, league?: number | null) {
+  const { untouched, opened, changedSquads, changedLeagues } = useProject()
+  return (
+    (entry !== undefined && !opened.has(entry) && !untouched.has(entry)) ||
+    (team != null && changedSquads.has(team)) ||
+    (league != null && changedLeagues.has(league))
+  )
 }
 
 /** Whether a project entry is one of the game's teams/players exactly as the game has it (only opened, or changed back):

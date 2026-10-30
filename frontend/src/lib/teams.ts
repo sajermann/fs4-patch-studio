@@ -1,4 +1,4 @@
-import type { KitKind, KitPart, PlayerRef, Project, RGB, TakerRole, Team } from '@/api/types'
+import type { KitKind, KitPart, League, LeagueKey, PlayerRef, Project, RGB, TakerRole, Team } from '@/api/types'
 import { useI18n } from '@/i18n'
 import { useProject } from '@/state/project'
 import { useCatalog, useLookups, useOriginalTeams } from '@/state/queries'
@@ -14,15 +14,22 @@ export function fullKit(team: Team, kind: KitKind): Record<KitPart, RGB> {
   return { ...defaultKit(team, kind), ...team.kits[kind] }
 }
 
+/** Name of a team's league: a new league, one of the game's (its edited name when edited) or "no league". */
 export function useLeagueName() {
   const { t } = useI18n()
   const { draft } = useProject()
   const { originalLeague } = useLookups()
-  return (league: number | string) =>
-    typeof league === 'string'
-      ? draft.leagues.find((l) => l.uid === league)?.name || t('league.unnamed')
-      : originalLeague.get(league)?.name ?? t('league.byId', { id: league })
+  return (league: LeagueKey | null) =>
+    league === null
+      ? t('teams.noLeague')
+      : typeof league === 'string'
+        ? draft.leagues.find((l) => l.uid === league)?.name || t('league.unnamed')
+        : draft.leagues.find((l) => l.original_id === league)?.name ||
+          (originalLeague.get(league)?.name ?? t('league.byId', { id: league }))
 }
+
+/** The project's new leagues (entries that edit one of the game's leagues left out). */
+export const newLeagues = (project: Project): League[] => project.leagues.filter((l) => l.original_id == null)
 
 /** Teams of a league as the game's team selector shows them: the project's (not hidden) + the original ones the
  * project does not hide. Same count as fsmod.validation (league_too_many_teams). */
@@ -34,7 +41,7 @@ export function useLeagueTeams() {
   const edited = editedOriginals(draft)
   const count = (league: number | string) =>
     draft.teams.filter(
-      (t) => t.league === league && !t.hidden && !(t.original_id != null && hidden.has(t.original_id)),
+      (t) => t.leagues.includes(league) && !t.hidden && !(t.original_id != null && hidden.has(t.original_id)),
     ).length +
     (typeof league === 'number'
       ? originals.filter((t) => t.league === league && !hidden.has(t.id) && !edited.has(t.id)).length
@@ -57,7 +64,7 @@ export function defaultLeague(
   isFull: (league: number | string) => boolean,
 ) {
   const visible = originals.filter((l) => !l.hidden).sort((a, b) => a.sort_order - b.sort_order)
-  const leagues: (number | string)[] = [...project.leagues.map((l) => l.uid), ...visible.map((l) => l.id)]
+  const leagues: LeagueKey[] = [...newLeagues(project).map((l) => l.uid), ...visible.map((l) => l.id)]
   return leagues.find((l) => !isFull(l)) ?? null
 }
 
