@@ -35,7 +35,8 @@ export function PlayersPage() {
   const { draft, addPlayer, updatePlayer, defaults } = useProject()
   const { position, originalTeam } = useLookups()
   const originalTeams = useOriginalTeams().data ?? []
-  const originals = useOriginalPlayers(ALL_ORIGINALS).data?.items
+  const originalsQuery = useOriginalPlayers(ALL_ORIGINALS)
+  const originals = originalsQuery.data?.items
   const navigate = useNavigate()
   const from = useFrom(t('nav.players'))
   const list = useListParams(['q', 'origin', 'team', 'status'] as const)
@@ -147,7 +148,11 @@ export function PlayersPage() {
           {page.total === 0 && (
             <TableRow>
               <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                {originals === undefined ? t('common.loading') : t('players.noneFiltered')}
+                {originalsQuery.error
+                  ? t('players.originalsFailed', { error: originalsQuery.error.message })
+                  : originals === undefined
+                    ? t('common.loading')
+                    : t('players.noneFiltered')}
               </TableCell>
             </TableRow>
           )}

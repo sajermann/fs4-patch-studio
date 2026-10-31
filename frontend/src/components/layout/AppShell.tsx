@@ -1,10 +1,12 @@
 import { AlertTriangle, Landmark, Loader2, Puzzle, Settings, Shield, Trophy, Users } from 'lucide-react'
 import { APP_NAME, APP_VERSION, AUTHOR_GITHUB, AUTHOR_NAME, REPO_URL } from '@/lib/about'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useI18n, type MessageKey } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useProject } from '@/state/project'
 import { useCatalog, useOriginalLeagues, useOriginalStadiums, useOriginalTeams, useStatus } from '@/state/queries'
+import { ErrorBoundary } from './ErrorBoundary'
+import { LoadError } from './LoadError'
 import { PreferencesMenu } from './PreferencesMenu'
 import { ProjectActions } from './ProjectActions'
 
@@ -63,11 +65,16 @@ export function AppShell() {
   const { t } = useI18n()
   const { draft, loaded, opened } = useProject()
   // pages assume the project and the original game data are available
-  const catalog = useCatalog().data
-  const leagues = useOriginalLeagues().data
-  const teams = useOriginalTeams().data
-  const stadiums = useOriginalStadiums().data
+  const queries = [useCatalog(), useOriginalLeagues(), useOriginalTeams(), useOriginalStadiums()] as const
+  const [catalog, leagues, teams, stadiums] = queries.map((q) => q.data) as [
+    (typeof queries)[0]['data'],
+    (typeof queries)[1]['data'],
+    (typeof queries)[2]['data'],
+    (typeof queries)[3]['data'],
+  ]
+  const failed = queries.find((q) => q.error)?.error
   const ready = loaded && !!catalog && !!leagues && !!teams
+  const { pathname } = useLocation()
   const counts: Record<string, number> = {
     '/leagues': draft.leagues.filter((e) => !opened.has(e.uid)).length,
     '/teams': draft.teams.filter((e) => !opened.has(e.uid)).length, // originals only opened are not in the project
@@ -122,8 +129,16 @@ export function AppShell() {
         </header>
         <GameWarnings />
         <main className="min-h-0 flex-1 overflow-auto p-6">
-          {ready ? (
-            <Outlet />
+          {failed ? (
+            <LoadError
+              error={failed}
+              title={t('shell.loadGameFailed')}
+              onRetry={() => queries.forEach((q) => q.error && void q.refetch())}
+            />
+          ) : ready ? (
+            <ErrorBoundary resetKey={pathname}>
+              <Outlet />
+            </ErrorBoundary>
           ) : (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader2 className="animate-spin" /> {t('shell.loadingGame')}

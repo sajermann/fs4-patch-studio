@@ -1,10 +1,14 @@
 """Paths and the local user configuration (backend/config.json, not in git)."""
 import json
+import logging
 import os
 import sys
+import time
 from typing import Optional
 
 from pydantic import BaseModel
+
+log = logging.getLogger('fsapi')
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.dirname(BACKEND_DIR)
@@ -19,6 +23,9 @@ DATA_DIR = os.environ.get('FSMOD_DATA_DIR') or (
 if FROZEN:
     os.environ['FSMOD_DATA_DIR'] = DATA_DIR  # fsmod.game derives original_files/patch from it
 CONFIG_PATH = os.environ.get('FSMOD_CONFIG', os.path.join(DATA_DIR, 'config.json'))
+# written by the desktop app (backend.log = the backend's output, backend.prev.log = the run before, desktop.log);
+# in development the backend logs to the console only
+LOG_DIR = os.path.join(DATA_DIR, 'logs')
 DEFAULT_PROJECT_DIR = os.path.join(DATA_DIR, 'project')
 LEGACY_PROJECT_DIR = os.path.join(REPO_DIR, 'projeto')  # default before 24/10/2026; moved on start
 
@@ -37,10 +44,20 @@ class Config(BaseModel):
 
 
 def load_config(path=None):
+    """The saved settings; a file that cannot be read (broken JSON, unknown shape) is kept aside as
+    config.broken-<time>.json and the app starts with the defaults (the setup screen asks again) instead of not
+    starting at all."""
     path = path or CONFIG_PATH
     if os.path.exists(path):
-        with open(path, encoding='utf-8') as f:
-            config = Config.model_validate(json.load(f))
+        try:
+            with open(path, encoding='utf-8') as f:
+                config = Config.model_validate(json.load(f))
+        except (ValueError, UnicodeError) as e:  # json.JSONDecodeError and pydantic.ValidationError are ValueErrors
+            kept = f'{os.path.splitext(path)[0]}.broken-{time.strftime("%Y%m%d-%H%M%S")}.json'
+            os.replace(path, kept)
+            log.error('settings file %s could not be read (%s: %s); kept as %s, starting with the defaults',
+                      path, type(e).__name__, e, kept)
+            return Config()
         if os.path.normcase(os.path.abspath(config.project_dir)) == os.path.normcase(LEGACY_PROJECT_DIR):
             config.project_dir = DEFAULT_PROJECT_DIR  # old default: the project moves with it (AppState)
         return config

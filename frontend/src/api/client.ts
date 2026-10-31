@@ -34,28 +34,48 @@ import { hasMessage, translate } from '@/i18n'
  * backend's own (pt-BR) message. */
 function errorText(status: number, detail: unknown, d: Record<string, unknown>) {
   const key = `apiError.${d.code}${typeof d.reason === 'string' ? '.' + d.reason : ''}`
-  if (typeof d.code === 'string' && hasMessage(key)) return translate(key)
+  if (typeof d.code === 'string' && hasMessage(key)) return translate(key, d)
   if (typeof d.message === 'string') return d.message
   return typeof detail === 'string' ? detail : translate('apiError.status', { status })
 }
 
-/** Error returned by the backend; `message` is in the interface language when the app knows the error code. */
+/** Error returned by the backend; `message` is in the interface language when the app knows the error code, followed
+ * by the technical text (`error`) when there is one. Status 0: the backend did not answer. */
 export class ApiError extends Error {
   status: number
   code?: string
   issues?: Issue[]
+  /** the message without the technical text */
+  summary: string
+  /** unexpected errors (`internal_error`, files, project file): the exception text, the file it was about and the
+   * backend log file (desktop app) */
+  error?: string
+  path?: string
+  logFile?: string
 
   constructor(status: number, detail: unknown) {
     const d = typeof detail === 'object' && detail !== null ? (detail as Record<string, unknown>) : {}
-    super(errorText(status, detail, d))
+    const summary = errorText(status, detail, d)
+    const error = typeof d.error === 'string' ? d.error : undefined
+    super(error && !summary.includes(error) ? `${summary} (${error})` : summary)
+    this.summary = summary
     this.status = status
     this.code = typeof d.code === 'string' ? d.code : undefined
     this.issues = Array.isArray(d.issues) ? (d.issues as Issue[]) : undefined
+    this.error = error
+    this.path = typeof d.path === 'string' ? d.path : undefined
+    this.logFile = typeof d.log_file === 'string' ? d.log_file : undefined
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init)
+async function send(path: string, init?: RequestInit) {
+  let res: Response
+  try {
+    res = await fetch(path, init)
+  } catch (e) {
+    // the backend is not running (closed, crashed) or the connection dropped
+    throw new ApiError(0, { code: 'backend_unreachable', error: e instanceof Error ? e.message : String(e) })
+  }
   if (!res.ok) {
     let detail: unknown = null
     try {
@@ -65,7 +85,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(res.status, detail)
   }
-  return res.json() as Promise<T>
+  return res
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await send(path, init)).json() as Promise<T>
 }
 
 const json = (method: string, body: unknown): RequestInit => ({
@@ -140,6 +164,11 @@ export const api = {
   /** Opens the Windows "save as" dialog on this machine; path null when cancelled. */
   exportPatch: () => request<{ path: string | null; files?: number }>('/api/patch/export', { method: 'POST' }),
   deleteSave: () => request<{ removed: number }>('/api/save/delete', { method: 'POST' }),
+
+  /** Plain-text support report: machine, settings, project, patch and the end of the log files. */
+  logsReport: async () => (await send('/api/logs/report')).text(),
+  /** Opens the log folder in the Windows Explorer (404 `logs_not_found` in development, which logs to the console). */
+  openLogs: () => request<{ folder: string }>('/api/logs/open', { method: 'POST' }),
 
   setupCheck: (gameDir: string) => request<GameCheck>('/api/setup/check', json('POST', { game_dir: gameDir })),
   setupApply: (setup: { game_dir: string; save_dir: string; face_pack_dir: string | null; terms_version: number }) =>

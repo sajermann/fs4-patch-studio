@@ -62,10 +62,16 @@ fn start_backend(app: &AppHandle, port: u16) -> std::io::Result<Child> {
     let data = data_dir(app);
     let logs = data.join("logs");
     fs::create_dir_all(&logs)?;
-    let log = File::create(logs.join("backend.log"))?;
+    // the run before stays as backend.prev.log: reopening the app after an error does not erase it
+    let current = logs.join("backend.log");
+    if current.exists() {
+        let _ = fs::rename(&current, logs.join("backend.prev.log"));
+    }
+    let log = File::create(current)?;
     Command::new(backend_exe(app))
         .args(["--port", &port.to_string(), "--no-browser", "--parent-pid", &std::process::id().to_string()])
         .env("FSMOD_DATA_DIR", &data)
+        .env("FSMOD_APP_VERSION", app.package_info().version.to_string())
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)

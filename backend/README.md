@@ -94,6 +94,15 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `POST /api/patch/uninstall` | originals back over what the patch changed, what it added removed (manifest), save deleted |
 | `POST /api/patch/export` | zip of `patch/Game` saved where the user picks (Windows dialog); `{path}` or null |
 | `POST /api/save/delete` | deletes the save (only a `…\4541097B` profile folder is ever touched) |
+| `POST /api/log` `{level, message, detail, page}` | errors of the interface (React, browser exceptions, requests the backend never saw) into the backend log |
+| `GET /api/logs/report` | plain-text support report: machine, settings, setup, project, patch and the end of `backend.log` / `backend.prev.log` / `desktop.log` ("Copy report") |
+| `GET /api/logs`, `POST /api/logs/open` | log folder of the desktop app and its files / opens it in the Explorer (`logs_not_found` in development, which logs to the console) |
+
+Errors: every error comes back as `{"detail": {"code", ...}}`. Unexpected ones are `internal_error` (or `no_disk_space`,
+`file_access_denied` for disk/permission errors) with `error` (exception text), `path` and `log_file`; a
+`database.json` that cannot be opened is a 409 `project_unreadable` / `project_too_new` / `project_invalid` (the file
+is never touched). Errors with a code are logged (with the time) as well as the tracebacks; a broken `config.json` is
+kept aside as `config.broken-<time>.json` and the app starts with the defaults.
 
 Both folders below mirror the root folder of a ReStreet 2.x install, so it is always clear where each
 file comes from or goes to: `Game/` here = `Game/` in the game (ReStreet 1.x called it `GameData`).

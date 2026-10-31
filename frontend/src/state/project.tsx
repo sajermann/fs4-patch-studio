@@ -1,11 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, bumpProjectImagesRevision } from '@/api/client'
+import { LoadError } from '@/components/layout/LoadError'
+import { useI18n } from '@/i18n'
 import { lineupsWithout, takersWithout } from '@/lib/lineup'
 import { linkOf, teamsWithout } from '@/lib/players'
 import type { Issue, League, OriginalSquadLink, Player, PlayerDefaults, Project, Team } from '@/api/types'
 
-const EMPTY: Project = { version: 2, leagues: [], teams: [], players: [] }
+const EMPTY: Project = { version: 3, leagues: [], teams: [], players: [] }
 const VALIDATE_DELAY_MS = 400
 
 /** A new entry's uid: starts with a letter (never all digits, the addresses of the game's teams/players). */
@@ -84,8 +86,10 @@ function splitOpened(next: Project, opened: Opened): { draft: Project; opened: O
 }
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n()
   const queryClient = useQueryClient()
-  const query = useQuery({ queryKey: ['project'], queryFn: api.project, staleTime: Infinity, retry: false })
+  // its error is the LoadError page below
+  const query = useQuery({ queryKey: ['project'], queryFn: api.project, staleTime: Infinity, retry: false, meta: { errorShown: true } })
   const [state, setState] = useState<{ draft: Project; opened: Opened }>({ draft: EMPTY, opened: NONE })
   const draft = state.draft // the project itself (saved, validated, compared for "unsaved changes")
   const setDraftState = useCallback((d: Project) => setState((s) => ({ ...s, draft: d })), [])
@@ -266,6 +270,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     [query.data, view, dirty, issues, defaults, untouched, changedSquads, changedLeagues, openedUids, saving, setDraft, setDraftState, save, saved],
   )
 
+  if (query.error) {
+    return <LoadError page error={query.error} title={t('app.loadFailed')} onRetry={() => void query.refetch()} />
+  }
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
 }
 

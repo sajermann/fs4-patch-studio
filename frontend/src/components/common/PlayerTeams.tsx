@@ -121,7 +121,7 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
                       <Link
                         to={teamPath(l.team)}
                         state={from.state}
-                        className="block max-w-full truncate py-1.5 text-sm font-medium underline-offset-4 hover:underline"
+                        className="inline-block max-w-full truncate py-1.5 align-top text-sm font-medium underline-offset-4 hover:underline"
                       >
                         {teamName(l.team)}
                       </Link>

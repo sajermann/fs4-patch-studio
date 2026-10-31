@@ -1,21 +1,27 @@
 """python -m fsapi [--port 8765] [--no-browser] [--parent-pid PID]"""
 import argparse
 import ctypes
+import logging
 import os
 import threading
 import webbrowser
 
 import uvicorn
 
-from .main import app
+from . import diagnostics
+
+log = logging.getLogger('fsapi')
 
 
-def warm_up():
+def warm_up(app):
     """Loads the catalog (original database, slots...) in the background so the first page is fast."""
+    from fastapi import HTTPException
     try:
         app.state.fsmod.catalog()
-    except Exception:  # missing original files: the UI shows the setup screen
+    except HTTPException:  # missing original files: the UI shows the setup screen
         pass
+    except Exception:  # the UI shows it too (GET /api/catalog), but the cause goes to the log right away
+        log.exception('loading the original game data failed')
 
 
 def exit_with_parent(pid):
@@ -38,13 +44,21 @@ def main():
     ap.add_argument('--no-browser', action='store_true')
     ap.add_argument('--parent-pid', type=int)
     args = ap.parse_args()
+    diagnostics.setup_logging()
+    for line in diagnostics.environment_lines():  # first lines of the log: the user's machine
+        log.info('ENV: %s', line)
     if args.parent_pid:
         exit_with_parent(args.parent_pid)
+    try:
+        from .main import app  # creating it reads the settings and upgrades the project: errors go to the log
+    except Exception:
+        log.exception('the backend could not start')
+        raise
     url = f'http://localhost:{args.port}'
-    threading.Thread(target=warm_up, daemon=True).start()
+    threading.Thread(target=warm_up, args=(app,), daemon=True).start()
     if not args.no_browser:
         threading.Timer(1.5, webbrowser.open, (url,)).start()
-    uvicorn.run(app, host='127.0.0.1', port=args.port)
+    uvicorn.run(app, host='127.0.0.1', port=args.port, log_config=diagnostics.LOG_CONFIG)
 
 
 if __name__ == '__main__':

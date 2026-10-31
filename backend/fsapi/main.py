@@ -1,28 +1,34 @@
 """FastAPI app of the modding tool. Run: python -m fsapi (from backend) or start.bat."""
 import datetime
+import errno
 import io
+import logging
 import os
 import threading
 import time
 
 from fastapi import FastAPI, File, HTTPException, Path, Query, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
 from . import settings  # noqa: F401  (puts core on sys.path)
 from .messages import issue_json
-from . import ea_players, game_setup
+from . import diagnostics, ea_players, game_setup
 from .dialogs import browse_folder, open_file, save_file
 from .faces import FaceError, FaceService
 from .original_images import OriginalImages
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
-from .project_store import BackupError, ProjectStore, migrate_folder
+from .project_store import BackupError, ProjectFileError, ProjectStore, migrate_folder
 from fsmod import (builder, kit, kitprint, model, original_league, original_player, original_team, photo, preview,
                    scanface, validation)
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
+
+log = logging.getLogger('fsapi')
 
 UID_PATTERN = r'^[A-Za-z0-9_-]+$'  # project uids: used as folder names
 NO_CACHE = {'Cache-Control': 'no-cache'}  # project images keep their name when replaced: always revalidate
@@ -67,7 +73,12 @@ class AppState:
             moved = migrate_folder(settings.LEGACY_PROJECT_DIR, self.config.project_dir)
             if moved and os.path.exists(self.config_path or settings.CONFIG_PATH):
                 settings.save_config(self.config, self.config_path)
-        self.store.upgrade(self.absorb_game_links)
+        try:
+            self.store.upgrade(self.absorb_game_links)
+        except ProjectFileError as e:  # the app still opens: loading the project shows the error (GET /api/project)
+            log.error('project not upgraded: %s', e)
+        except Exception:
+            log.exception('project not upgraded')
 
     def absorb_game_links(self, data):
         """Projects from before the game's players had entries of their own (game players in a team, "replaces"):
@@ -97,6 +108,44 @@ def create_app(state=None):
     state = state or AppState()
     app = FastAPI(title='FS4 Patch Studio')
     app.state.fsmod = state
+
+    def log_file():
+        path = os.path.join(settings.LOG_DIR, 'backend.log')
+        return path if os.path.isfile(path) else None
+
+    @app.exception_handler(Exception)
+    def unexpected_error(request, exc):
+        """Any error the routes do not handle: JSON the UI can show (the traceback still goes to the log). Disk full
+        and files the app may not write (open in another program, blocked by an antivirus) get a code of their own."""
+        code = 'internal_error'
+        if isinstance(exc, OSError):
+            if exc.errno == errno.ENOSPC:
+                code = 'no_disk_space'
+            elif exc.errno in (errno.EACCES, errno.EPERM) or getattr(exc, 'winerror', None) in (5, 32, 33):
+                code = 'file_access_denied'
+        return JSONResponse(status_code=500, content={'detail': {
+            'code': code, 'error': f'{type(exc).__name__}: {exc}', 'path': getattr(exc, 'filename', None),
+            'log_file': log_file()}})
+
+    @app.exception_handler(ProjectFileError)
+    def project_file_error(request, exc):
+        """database.json that cannot be opened: the reason, the file and the log (the file is left as it is)."""
+        log.error('%s %s: %s', request.method, request.url.path, exc)
+        return JSONResponse(status_code=409, content={'detail': {
+            'code': exc.code, 'error': exc.detail, 'path': exc.path, 'log_file': log_file()}})
+
+    @app.exception_handler(HTTPException)
+    async def expected_error(request, exc):
+        """Errors the routes raise on purpose: the ones with a code go to the log too (what the user saw)."""
+        if isinstance(exc.detail, dict) and exc.detail.get('code'):
+            log.warning('%s %s -> %s %s', request.method, request.url.path, exc.status_code,
+                        {k: v for k, v in exc.detail.items() if k != 'issues'})
+        return await http_exception_handler(request, exc)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request, exc):
+        log.warning('%s %s -> 422 invalid request: %s', request.method, request.url.path, str(exc.errors())[:2000])
+        return await request_validation_exception_handler(request, exc)
 
     def issues_for(project, raw=False):
         issues = validation.validate(project, state.catalog(), state.store.folder)
@@ -810,6 +859,71 @@ def create_app(state=None):
             return {'removed': game_setup.delete_save(state.config.save_dir)}
         except game_setup.SetupError as e:
             raise HTTPException(409, {'code': str(e), 'message': INSTALL_ERROR_TEXT.get(str(e), str(e))})
+
+    # ---------------------------------------------------------------- logs and support
+    class ClientLog(BaseModel):
+        level: str = Field('error', pattern='^(error|warning|info)$')
+        message: str = Field(max_length=4000)
+        detail: str | None = Field(None, max_length=20000)
+        page: str | None = Field(None, max_length=500)
+
+    @app.post('/api/log')
+    def client_log(entry: ClientLog):
+        """Errors of the interface (React, failed requests, browser exceptions) into the backend log."""
+        text = f'interface: {entry.message}' + (f' [{entry.page}]' if entry.page else '')
+        if entry.detail:
+            text += '\n' + entry.detail
+        log.log(logging.getLevelName(entry.level.upper()), text)
+        return {'ok': True}
+
+    def report_sections():
+        """The app's side of the support report; each part on its own, so a broken one does not hide the rest."""
+        def part(fn):
+            try:
+                return fn()
+            except Exception as e:  # noqa: BLE001 (the report says what failed)
+                return [f'(failed: {type(e).__name__}: {e})']
+
+        def setup():
+            st = setup_state()
+            return [f'setup required: {st["required"]} {st["reasons"]}',
+                    f'originals: verified={st["originals"].get("verified")} folder={state.game.folder}',
+                    f'missing original files: {state.game.missing_files()}',
+                    f'ReStreet: {st["game"]["version"]} (tested: {st["game"]["tested"]})']
+
+        def project():
+            store = state.store
+            lines = [f'file: {store.path} (exists: {store.exists()})']
+            if store.exists():
+                lines.append(f'size: {os.path.getsize(store.path)} bytes')
+                p = store.load()
+                lines.append(f'leagues {len(p.leagues)} | teams {len(p.teams)} | players {len(p.players)}')
+            return lines
+
+        def patch():
+            last = {k: v for k, v in state.build_progress.items() if k != 'steps'}
+            return [f'folder: {state.patch_dir}', f'status: {patch_status(state.store, state.patch_dir)}',
+                    f'last build: {last}']
+
+        return {'settings': part(lambda: [f'{k}: {v}' for k, v in state.config.model_dump().items()]),
+                'setup': part(setup), 'project': part(project), 'patch': part(patch)}
+
+    @app.get('/api/logs/report')
+    def logs_report():
+        """Plain-text report for support: machine, settings, setup, project, patch and the end of the log files."""
+        return PlainTextResponse(diagnostics.report(report_sections()))
+
+    @app.get('/api/logs')
+    def logs_info():
+        return {'folder': settings.LOG_DIR, 'files': diagnostics.log_files()}
+
+    @app.post('/api/logs/open')
+    def logs_open():
+        """Opens the log folder in the Windows Explorer (desktop app; development logs to the console)."""
+        if not diagnostics.log_files():
+            raise HTTPException(404, {'code': 'logs_not_found', 'message': 'Ainda não há arquivos de log.'})
+        os.startfile(settings.LOG_DIR)
+        return {'folder': settings.LOG_DIR}
 
     # ---------------------------------------------------------------- frontend (built files)
     # single-page app: real files are served as-is, any other non-API path gets index.html

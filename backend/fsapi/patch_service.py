@@ -9,6 +9,7 @@ the modded database; uninstalling puts the original files back.
 import datetime
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -18,6 +19,9 @@ from fsmod import builder
 from fsmod.game import GAME_DATA
 
 from . import game_setup
+from .project_store import ProjectFileError
+
+log = logging.getLogger('fsapi')
 
 PATCH_INFO = 'patch.json'
 GAME_MANIFEST = '.fsmod_manifest.json'
@@ -61,13 +65,24 @@ def patch_files(patch_dir):
 
 
 def patch_status(store, patch_dir):
+    """Whether a patch was built and from the saved project. Never fails (the status screen depends on it): a broken
+    build record or a project that cannot be opened count as "not up to date" and go to the log."""
     path = os.path.join(patch_dir, PATCH_INFO)
     if not os.path.exists(path):
         return {'built': False, 'up_to_date': False}
-    with open(path, encoding='utf-8') as f:
-        info = json.load(f)
-    return {'built': True, 'built_at': info['built_at'], 'files': info['files'],
-            'up_to_date': info['project_hash'] == store.content_hash()}
+    try:
+        with open(path, encoding='utf-8') as f:
+            info = json.load(f)
+        status = {'built': True, 'built_at': info['built_at'], 'files': info['files']}
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        log.warning('patch record %s could not be read (%s: %s): build the patch again', path, type(e).__name__, e)
+        return {'built': False, 'up_to_date': False}
+    try:
+        current = store.content_hash()
+    except ProjectFileError as e:
+        log.warning('patch status: %s', e)
+        current = None
+    return {**status, 'up_to_date': current is not None and info.get('project_hash') == current}
 
 
 def game_running():

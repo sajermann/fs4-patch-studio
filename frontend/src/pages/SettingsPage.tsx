@@ -8,6 +8,7 @@ import type { Config, Status } from '@/api/types'
 import { Field } from '@/components/common/form'
 import { PlayersBaseCard } from '@/components/common/PlayersBaseCard'
 import { ProjectJsonCard } from '@/components/common/ProjectJsonCard'
+import { SupportActions } from '@/components/common/SupportActions'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -230,6 +231,15 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
           {status.patch.built ? t('settings.lastPatch', { date: status.patch.built_at }) : t('settings.noPatch')}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('support.title')}</CardTitle>
+          <CardDescription>{t('support.description')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SupportActions />
         </CardContent>
       </Card>
     </div>

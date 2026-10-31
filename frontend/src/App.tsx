@@ -1,10 +1,14 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { toast } from 'sonner'
 import { AppShell } from '@/components/layout/AppShell'
+import { ErrorBoundary } from '@/components/layout/ErrorBoundary'
+import { LoadError } from '@/components/layout/LoadError'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { I18nProvider, useI18n } from '@/i18n'
+import { I18nProvider, translate, useI18n } from '@/i18n'
+import { logClientError } from '@/lib/clientLog'
 import { ThemeProvider } from '@/lib/theme'
 import { LeagueEditPage } from '@/pages/LeagueEditPage'
 import { LeaguesPage } from '@/pages/LeaguesPage'
@@ -19,12 +23,23 @@ import { TeamsPage } from '@/pages/TeamsPage'
 import { ProjectProvider } from '@/state/project'
 import { useStatus } from '@/state/queries'
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false } } })
+/** Queries whose screen shows their error itself (meta.errorShown): the others say it in a toast, so nothing fails
+ * silently. Every failure goes to the log (clientLog skips the ones the backend logged already). */
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { refetchOnWindowFocus: false } },
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      logClientError(`query ${JSON.stringify(query.queryKey)}`, error)
+      if (!query.meta?.errorShown) toast.error(error.message || translate('app.unexpectedError'), { id: query.queryHash })
+    },
+  }),
+  mutationCache: new MutationCache({ onError: (error) => logClientError('mutation', error) }),
+})
 
 function Gate() {
   const { t } = useI18n()
-  const { data: status, error } = useStatus()
-  if (error) return <div className="p-8 text-destructive">{t('app.serverDown')}</div>
+  const { data: status, error, refetch } = useStatus()
+  if (error && !status) return <LoadError page error={error} title={t('app.startFailed')} onRetry={() => void refetch()} />
   if (!status) {
     return (
       <div className="flex min-h-svh items-center justify-center gap-2 text-muted-foreground">
@@ -63,7 +78,9 @@ export default function App() {
         <QueryClientProvider client={queryClient}>
           <TooltipProvider>
             <BrowserRouter>
-              <Gate />
+              <ErrorBoundary page>
+                <Gate />
+              </ErrorBoundary>
             </BrowserRouter>
             <Toaster richColors position="bottom-right" />
           </TooltipProvider>

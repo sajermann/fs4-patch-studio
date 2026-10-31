@@ -23,6 +23,16 @@ UPLOAD_PREFIX = 'upload-'  # provisional name of an upload until the project is 
 BACKUP_MAX_BYTES = 2 * 1024 ** 3  # uncompressed size accepted when restoring a backup zip
 
 
+class ProjectFileError(ValueError):
+    """database.json exists but cannot be opened; `code` names the reason (texts in the API): project_unreadable
+    (not JSON / not UTF-8 / no permission), project_too_new (saved by a newer version of the app),
+    project_invalid (JSON that is not a project)."""
+
+    def __init__(self, code, path, detail):
+        super().__init__(f'{code}: {path}: {detail}')
+        self.code, self.path, self.detail = code, path, detail
+
+
 class BackupError(ValueError):
     """A backup zip that cannot be restored; `code` names the reason (texts in the API)."""
 
@@ -95,13 +105,12 @@ class ProjectStore:
             if not os.path.isfile(legacy):
                 return False
             os.replace(legacy, self.path)
-        with open(self.path, encoding='utf-8') as f:
-            data = json.load(f)
+        data = self._read_json()
         try:
             converted = bool(migrate and migrate(data))
         except Exception:  # noqa: BLE001 (converted later, when the project is opened)
             return False
-        project = model.load(data)
+        project = self._model(data)
         settled = all(not path or path == f'{IMAGES_DIR}/{stem}{os.path.splitext(path)[1].lower()}'
                       for path, stem in ((getattr(e, f), stem) for e, f, stem in image_fields(project)))
         if settled and not self._loose_images() and not converted:
@@ -121,11 +130,30 @@ class ProjectStore:
         may change the JSON before it is read (fsapi.main: original_player.absorb_game_links)."""
         if not self.exists():
             return model.Project()
-        with open(self.path, encoding='utf-8') as f:
-            data = json.load(f)
+        data = self._read_json()
         if migrate:
             migrate(data)
-        return model.load(data)
+        return self._model(data)
+
+    def _read_json(self):
+        try:
+            with open(self.path, encoding='utf-8') as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:  # json.JSONDecodeError and UnicodeDecodeError are ValueErrors
+            raise ProjectFileError('project_unreadable', self.path, f'{type(e).__name__}: {e}') from e
+        if not isinstance(data, dict):
+            raise ProjectFileError('project_invalid', self.path, 'not a JSON object')
+        version = data.get('version')
+        if isinstance(version, int) and version > model.CONTRACT_VERSION:
+            raise ProjectFileError('project_too_new', self.path,
+                                   f'contract v{version}, this version of the app reads up to v{model.CONTRACT_VERSION}')
+        return data
+
+    def _model(self, data):
+        try:
+            return model.load(data)
+        except ValueError as e:  # pydantic.ValidationError
+            raise ProjectFileError('project_invalid', self.path, str(e)) from e
 
     def save(self, project):
         """Writes the project, renaming its images to their fixed names (the project passed in is updated) and then

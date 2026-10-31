@@ -30,14 +30,35 @@ def _xmem_frames(data):
     return bytes(out)
 
 
+# Windows status codes a process can end with before its own code runs (no stderr then)
+_WINDOWS_EXIT_CODES = {
+    0xC0000135: 'a DLL it needs is missing (Universal C Runtime: Windows 10+ or the KB2999226 update)',
+    0xC0000139: 'a function it needs is missing from a DLL (Windows too old?)',
+    0xC0000142: 'it could not initialize (DLL init failed)',
+    0xC0000005: 'it crashed (access violation)',
+    0xC0000409: 'it crashed (stack buffer overrun)',
+    0xC0000022: 'access denied (blocked by an antivirus or a security policy?)',
+}
+
+
+def _exit_code_text(code):
+    code &= 0xFFFFFFFF
+    known = _WINDOWS_EXIT_CODES.get(code)
+    return f'exit code {code} (0x{code:08X})' + (f': {known}' if known else '')
+
+
 def _lzx(data, outlen, window_bits=17):
     with tempfile.TemporaryDirectory() as d:
         src, dst = os.path.join(d, 'in'), os.path.join(d, 'out')
         with open(src, 'wb') as f:
             f.write(_xmem_frames(data))
-        r = subprocess.run([LZXDEC, src, dst, str(window_bits), str(outlen)], capture_output=True, text=True)
+        try:
+            r = subprocess.run([LZXDEC, src, dst, str(window_bits), str(outlen)], capture_output=True, text=True)
+        except OSError as e:  # missing (e.g. quarantined by an antivirus) or not allowed to run
+            raise RuntimeError(f'lzxdec could not start ({LZXDEC}): {e}') from e
         if r.returncode:
-            raise RuntimeError('lzxdec: ' + r.stderr.strip())
+            raise RuntimeError(f'lzxdec failed: {_exit_code_text(r.returncode)}; '
+                               f'stderr: {r.stderr.strip() or "(empty)"}')
         with open(dst, 'rb') as f:
             return f.read()
 

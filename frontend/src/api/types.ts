@@ -189,7 +189,7 @@ export interface GamePatches {
 }
 
 export interface Project {
-  version: 2
+  version: 3
   leagues: League[]
   teams: Team[]
   players: Player[]

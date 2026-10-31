@@ -7,9 +7,12 @@ from_v1() converts the older v1 contract (Portuguese keys, players nested inside
 """
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-CONTRACT_VERSION = 2
+# project file format: bump it whenever the layout changes (older files are converted when read, and an app that
+# predates the new number refuses the file instead of dropping what it does not know). 3 = teams in several leagues,
+# players in several teams and the game's own entries (original_id)
+CONTRACT_VERSION = 3
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
 Channel = Annotated[int, Field(ge=0, le=255)]
@@ -268,12 +271,17 @@ class GamePatches(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2] = CONTRACT_VERSION
+    version: Literal[2, 3] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []
     originals: OriginalChanges = OriginalChanges()
     game_patches: GamePatches = GamePatches()
+
+    @field_validator('version')
+    @classmethod
+    def _current_version(cls, _version):
+        return CONTRACT_VERSION  # older layouts are converted by the entities' validators: saved as the current one
 
     @property
     def new_players(self):

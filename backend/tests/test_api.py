@@ -140,7 +140,7 @@ def test_build_then_install_into_a_fake_game(env):
     save = env['state'].config.save_dir
     assert report['save_removed'] == 2 and os.listdir(save) == ['Headers']  # the save is deleted, no copy
     assert c.get('/api/status').json()['setup']['game'] == {
-        'version': '2.0.8', 'tested': True, 'tested_versions': ['2.0.4', '2.0.8', '2.1.3'], 'installed': True, 'changed': []}
+        'version': '2.0.8', 'tested': True, 'tested_versions': ['2.0.4', '2.0.8', '2.1.3', '2.1.4'], 'installed': True, 'changed': []}
     (game / 'data8.bh').write_bytes(b'changed outside the app')
     assert c.get('/api/status').json()['setup']['game']['changed'] == ['data8.bh']
 
@@ -750,3 +750,71 @@ def test_editing_an_original_player_and_converting_old_game_links(env):
     assert 241 not in [lk['team'] for lk in entries[10535]['teams']]
     assert project['players'][0]['teams'] == [{'team': 241}]
     assert project['teams'][1]['takers'] == {'penalty': 'jg_x'}  # the set piece went to the player who joined
+
+
+def test_broken_project_file_is_reported_not_hidden(env):
+    from fsapi.patch_service import PATCH_INFO
+    client, state = env['client'], env['state']
+    os.makedirs(state.store.folder, exist_ok=True)
+    with open(state.store.path, 'w', encoding='utf-8') as f:
+        f.write('{"leagues": [')  # cut in the middle
+    patch_dir = state.patch_dir
+    os.makedirs(patch_dir, exist_ok=True)
+    with open(os.path.join(patch_dir, PATCH_INFO), 'w', encoding='utf-8') as f:
+        json.dump({'built_at': 'x', 'files': [], 'project_hash': 'abc'}, f)
+    r = client.get('/api/project')
+    assert r.status_code == 409
+    detail = r.json()['detail']
+    assert detail['code'] == 'project_unreadable' and detail['path'] == state.store.path
+    status = client.get('/api/status')  # the app still opens: the status screen does not depend on the project
+    assert status.status_code == 200 and status.json()['patch']['up_to_date'] is False
+    assert 'failed' in client.get('/api/logs/report').text  # the report says the project part failed
+
+    with open(state.store.path, 'w', encoding='utf-8') as f:
+        json.dump({'version': 99, 'leagues': []}, f)
+    assert client.get('/api/project').json()['detail']['code'] == 'project_too_new'
+    with open(state.store.path, 'w', encoding='utf-8') as f:
+        json.dump({'leagues': 'nope'}, f)
+    assert client.get('/api/project').json()['detail']['code'] == 'project_invalid'
+    with open(state.store.path, encoding='utf-8') as f:
+        assert json.load(f) == {'leagues': 'nope'}  # never overwritten
+
+
+def test_broken_settings_file_is_kept_aside(tmp_path):
+    path = tmp_path / 'config.json'
+    path.write_text('{"game_dir": ', encoding='utf-8')
+    assert settings.load_config(str(path)) == settings.Config()
+    assert not path.exists()
+    kept = [p.name for p in tmp_path.iterdir()]
+    assert len(kept) == 1 and kept[0].startswith('config.broken-')
+
+
+def test_interface_errors_reach_the_log_and_the_report(env, caplog):
+    client = env['client']
+    with caplog.at_level('ERROR', logger='fsapi'):
+        r = client.post('/api/log', json={'message': 'TypeError: x is undefined', 'detail': 'at Foo', 'page': '/teams'})
+    assert r.status_code == 200
+    assert 'interface: TypeError: x is undefined [/teams]' in caplog.text
+    assert client.post('/api/log', json={'level': 'fatal', 'message': 'x'}).status_code == 422
+    report = client.get('/api/logs/report')
+    assert report.status_code == 200 and report.headers['content-type'].startswith('text/plain')
+    assert '== environment' in report.text and '== settings' in report.text and 'leagues 0' not in report.text
+
+
+def test_unexpected_errors_come_back_with_a_code(env, monkeypatch):
+    from fastapi.testclient import TestClient
+    from fsapi.project_store import ProjectStore
+    client = TestClient(env['client'].app, raise_server_exceptions=False)
+
+    def locked(self, project):
+        raise PermissionError(13, 'Permission denied', os.path.join(self.folder, 'database.json'))
+    monkeypatch.setattr(ProjectStore, 'save', locked)
+    r = client.put('/api/project', json={'version': 3, 'leagues': [], 'teams': [], 'players': []})
+    assert r.status_code == 500
+    detail = r.json()['detail']
+    assert detail['code'] == 'file_access_denied' and detail['path'].endswith('database.json')
+
+    def full(self, project):
+        raise OSError(28, 'No space left on device')
+    monkeypatch.setattr(ProjectStore, 'save', full)
+    assert client.put('/api/project', json={'version': 3}).json()['detail']['code'] == 'no_disk_space'

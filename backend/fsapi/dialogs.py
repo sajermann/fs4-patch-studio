@@ -1,6 +1,6 @@
 """Windows dialogs opened by the backend, which runs on the user's machine: the browser cannot see folder paths
 nor save a 2 GB file where the user wants. tkinter ships with Python; each dialog lives and dies in its own thread,
-topmost so it does not open behind the browser. None when cancelled."""
+topmost so it does not open behind the browser. None when cancelled; a dialog that fails raises."""
 import os
 import threading
 
@@ -17,9 +17,17 @@ def _run(ask):
             result['path'] = ask(root)
         finally:
             root.destroy()
-    thread = threading.Thread(target=run)
+
+    def guarded():
+        try:
+            run()
+        except Exception as e:  # noqa: BLE001 (raised again in the request: the UI shows it, not "cancelled")
+            result['error'] = e
+    thread = threading.Thread(target=guarded)
     thread.start()
     thread.join()
+    if 'error' in result:
+        raise result['error']
     path = result.get('path')
     return os.path.normpath(path) if path else None
 
