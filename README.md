@@ -7,8 +7,8 @@ by: Bruno Sajermann
 Desktop-style web app to create leagues, teams and players for **FIFA Street (2012)** running on the
 [ReStreet](https://github.com/samuelit0davila/fifa-street-pc-port) PC port (2.x). It builds a patch from the game's own files: new leagues with their
 flag, teams with crest and kits (generated or real FIFA 14-16 kits), players with photo, attributes, skills,
-appearance and real scanned faces from FIFA 14 face packs, starting lineups per game mode, hiding or locking the
-game's original leagues and teams, and optional patches to the game itself (e.g. keeping the close-up face at any
+appearance and real scanned faces from FIFA 14 face packs, starting lineups per game mode, editing the game's
+original leagues, teams and players, hiding or locking its original leagues and teams, and optional patches to the game itself (e.g. keeping the close-up face at any
 camera distance). A 3D preview shows each player as the game will draw them.
 
 The interface is available in Portuguese (Brazil) and English, with light and dark themes.
@@ -23,33 +23,44 @@ The interface is available in Portuguese (Brazil) and English, with light and da
   save** (the game only seeds a new save from the database).
 - Everything is rebuilt from the untouched originals on every build, so the output never depends on what is
   installed.
-- The app never writes to the game folder: it builds `backend/patch/Game/`, and you copy it over the game's `Game/`
-  folder (keep a backup of the originals to remove the mod).
+- **Install in game** copies the patch into the game's `Game/` folder and **Uninstall** puts the original files back.
+  Both delete the current save, so the game creates a new one (with or without the mod). You can also export the
+  patch as a zip and copy its `Game` folder over the game's by hand.
 
 ## Requirements
 
-- Windows
-- FIFA Street (2012) with ReStreet 2.x
+- Windows 10 or 11 (64-bit)
+- FIFA Street (2012) with ReStreet 2.x (tested with 2.0.4, 2.0.8, 2.1.3 and 2.1.4), on a clean install: the first-run
+  screen checks the game files and copies the originals the app works from
+
+## Download
+
+Get the latest version on the [Releases](../../releases) page: the **installer** (`…_x64-setup.exe`) or the
+**portable** zip (unzip and run `fs4-patch-studio.exe`; the app keeps its data in the `data` folder beside it).
+Back up your project before updating (Settings → Download backup).
 
 ## What the studio can do
 
 ### Leagues editor
 
 - Create new leagues.
-- Set the league's wide image and its thumbnail.
-- Add teams you created to a league, or take them out.
+- Set the league's logo and its wide image.
+- Add teams to a league or take them out: your own teams and the game's original ones. A team can play in several
+  leagues at once.
+- Edit the game's original leagues: name, short name, order in the selector, images and teams. Restoring a league
+  brings back the game's own values and teams.
 - Hide or show the game's original leagues.
 
 ### Teams editor
 
 - Create new teams with their own crest.
-- Choose the team's league and its colors.
+- Choose the team's leagues (one, several or none) and its colors.
 - Kits: generic ones made in the studio's own kit editor, or real kits by uploading their PNG.
 - Street kits, made in the studio's own editor.
 - Build the roster with the players you created and the game's own players (they keep their other teams).
 - Choose the team captain and who takes each set piece (penalty, free kicks, corners).
 - Set the formation for each game mode.
-- Edit the game's original teams: name, crest, colors, kits, street kits and league. The editor opens with what
+- Edit the game's original teams: name, crest, colors, kits, street kits and leagues. The editor opens with what
   the game has, and only what you change is written into the patch.
 - Put players into the game's original teams or take them out: when a team is full you pick who leaves, and the
   player who joins takes his number, position, captaincy and set pieces.
@@ -62,6 +73,8 @@ The interface is available in Portuguese (Brazil) and English, with light and da
 - Put them in several teams at once (e.g. a club and a national team), with a number and position in each.
 - Set their skills.
 - Faces: generic ones made in the studio's own face editor, or real faces from a face pack.
+- Hair converter for real faces: *Standard*, *Original volume*, *Cap + strands* (for curls and afros) and sharper or
+  fuller variants, with a strand thickness setting, for faces whose hair does not look right.
 - See the player in 3D, the way the game will draw them.
 - Edit the game's original players: name, details, skills, teams, photo and look (generic head, a real face from
   a pack, or the game's own scanned head). Only what you change is written into the patch.
@@ -74,6 +87,14 @@ The interface is available in Portuguese (Brazil) and English, with light and da
 ### Patches
 
 - Turn optional, ready-made changes to the game on or off, e.g. the camera one (close-up face at any distance).
+
+### Settings
+
+- Back up the whole project (leagues, teams, players, images and faces) as a zip and import it back.
+- See or edit the project as JSON.
+- **Help and logs:** "Copy report" gathers your system, settings, project state and the end of the logs, ready to
+  paste when asking for help; "Open logs folder" shows the log files. If something fails, the app shows the error on
+  screen instead of loading forever.
 
 ### Then just...
 
