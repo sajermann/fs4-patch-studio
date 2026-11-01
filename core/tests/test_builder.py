@@ -389,8 +389,13 @@ def test_street_kit_pieces_fill_every_teamkits_slot(game):
     from fsmod import t3db
     project = load_palmeiras()
     team = project.teams[0]
-    team.street_kits = {'away': model.StreetKit(top=model.StreetPart(style=24, pattern=3,
-                                                                     colors=[(1, 2, 3), (4, 5, 6), (7, 8, 9)]))}
+    colors = [(1, 2, 3), (4, 5, 6), (7, 8, 9)]
+    team.street_kits = {
+        'away': model.StreetKit(top=model.StreetPart(pieces=[{'style': 24, 'pattern': 3}], colors=colors),
+                                bottom=model.StreetPart(style=12, pattern=0, colors=colors)),  # the older layout
+        'home': model.StreetKit(top=model.StreetPart(
+            pieces=[{'style': 0, 'pattern': 1}, {'style': 10, 'pattern': 4}, {'style': 24, 'pattern': 2}],
+            colors=colors))}
     result = builder.build(project, game, PALMEIRAS)
     db = t3db.Database(result.database, game.meta)
     kits = db.by_name('teamkits')
@@ -401,7 +406,10 @@ def test_street_kit_pieces_fill_every_teamkits_slot(game):
     assert [get(away, f'top_geo_type_{n}') for n in range(1, 6)] == [24] * 5
     assert [get(away, f'top_texture_pattern_{n}') for n in range(1, 6)] == [3] * 5
     assert [get(away, f'top_color_tertiary_{c}') for c in 'rgb'] == [7, 8, 9]
-    assert get(away, 'bottom_geo_type_1') == 0 and get(home, 'top_geo_type_1') == 20  # template pieces kept
+    assert [get(home, f'top_geo_type_{n}') for n in range(1, 6)] == [0, 10, 24, 0, 10]  # a shorter list repeats
+    assert [get(home, f'top_texture_pattern_{n}') for n in range(1, 6)] == [1, 4, 2, 1, 4]
+    assert [get(away, f'bottom_geo_type_{n}') for n in (1, 2)] == [12, 12]
+    assert get(away, 'sock_geo_type_1') == 14 and get(home, 'sock_geo_type_1') == 3  # template pieces kept
 
 
 def test_write_patch_takes_data7_entries_and_reuses_the_archive(game, palmeiras_result, tmp_path, monkeypatch):

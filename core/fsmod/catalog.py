@@ -10,6 +10,7 @@ from functools import cached_property
 
 from . import builder, locale, preview
 from .game import LOCALE_ENTRIES, LOCALE_FILES
+from .original_team import STREET_PARTS
 
 # teamplayerlinks.position (FIFA's codes; the game's own players use all of them but 1)
 POSITIONS = {0: 'GK', 1: 'SW', 2: 'RWB', 3: 'RB', 4: 'RCB', 5: 'CB', 6: 'LCB', 7: 'LB', 8: 'LWB', 9: 'RDM', 10: 'CDM',
@@ -283,17 +284,18 @@ class Catalog:
         return preview.street_options(self.game)
 
     def template_street(self, teamid):
-        """{'home'|'away': {part: {'style', 'pattern'}}}: the first street piece of each part in a template team's
-        teamkits (what the editor starts from when the user customizes a piece)."""
+        """{'home'|'away': {part: [{'style', 'pattern'}]}}: the street pieces of each part in a template team's
+        teamkits (what the game picks from, and what the editor starts from when the user customizes a part)."""
         t = self.db.table('teamkits')
         out = {}
         for k in self.db.rows('teamkits', 'teamtechid', teamid):
             r = t.records[k]
             kind = {0: 'home', 1: 'away'}.get(self.db.get(t, r, 'teamkittypetechid'))
             if kind:
-                out[kind] = {part: {'style': self.db.get(t, r, f'{col}_geo_type_1'),
-                                    'pattern': self.db.get(t, r, f'{col}_texture_pattern_1')}
-                             for part, col in (('top', 'top'), ('bottom', 'bottom'), ('socks', 'sock'))}
+                out[kind] = {part: [{'style': self.db.get(t, r, f'{col}_geo_type_{n}'),
+                                     'pattern': self.db.get(t, r, f'{col}_texture_pattern_{n}')}
+                                    for n in range(1, slots + 1)]
+                             for part, col, slots in STREET_PARTS}
         return out
 
     @cached_property

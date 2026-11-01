@@ -98,8 +98,20 @@ export interface StreetPiece {
   colors: [RGB, RGB, RGB]
 }
 
+/** A piece the game can pick: mesh type and texture variation (socks: style -1 = no socks). */
+export interface StreetSlot {
+  style: number
+  pattern: number
+}
+
+/** One part of a street kit: the pieces the game picks from (per player, per match) and their 3 colors. */
+export interface StreetPart {
+  pieces: StreetSlot[]
+  colors: [RGB, RGB, RGB]
+}
+
 /** Street Home/Away; a missing part keeps the template's pieces. */
-export type StreetKit = Partial<Record<StreetPartName, StreetPiece>>
+export type StreetKit = Partial<Record<StreetPartName, StreetPart>>
 
 export interface Player {
   uid: string
@@ -350,7 +362,7 @@ export interface Catalog {
   street_options: Record<StreetPartName, Record<string, number[]>> // {part: {style: [patterns]}}
   street_arms: Record<string, number> // top style -> arms mesh (long/short sleeves, tank top)
   street_full_length_bottoms: number[] // trousers: legs and socks are hidden under them
-  template_street: Record<string, Partial<Record<KitKind, Record<StreetPartName, { style: number; pattern: number }>>>>
+  template_street: Record<string, Partial<Record<KitKind, Record<StreetPartName, StreetSlot[]>>>>
   ranges: Record<'height' | 'weight' | 'number', [number, number]>
 }
 

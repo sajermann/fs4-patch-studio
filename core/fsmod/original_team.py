@@ -3,7 +3,7 @@
 load() fills a Team with what the game has, so the editor opens like the edit of a new team: texts (locale), colors
 and league (teams / leagueteamlinks), the menu crest (licensed_large/l<id>.dds), the 3D kits as real kits
 (jersey_cm / shorts_cm of kit_<id>_<n>_0.rx3, the same textures the app writes, plus the kit-screen thumbnail and the
-teamkits fields) and the street kits (first piece of each part in teamkits). The images are written into the project
+teamkits fields) and the street kits (every piece slot of each part in teamkits). The images are written into the project
 and a snapshot (Team.loaded) keeps what was loaded.
 
 changes() says what differs from that snapshot; the build (builder._build_original_team) only rewrites that, so an
@@ -18,11 +18,11 @@ from dataclasses import dataclass, field
 from PIL import Image
 
 from . import chunk, crest, kit, rx3tex
-from .model import REAL_KIT_FILES, OriginalSnapshot, RealKit, StreetKit, StreetPart, Team
+from .model import REAL_KIT_FILES, OriginalSnapshot, RealKit, StreetKit, StreetPart, StreetPiece, Team
 
 KIT_SLOTS = (('home', 0), ('away', 1), ('goalkeeper', 2))  # Team.real_kits slot -> teamkittypetechid / kit file
 STREET_KINDS = (('home', 0), ('away', 1))
-STREET_PARTS = (('top', 'top'), ('bottom', 'bottom'), ('socks', 'sock'))  # StreetKit part -> teamkits column prefix
+STREET_PARTS = (('top', 'top', 5), ('bottom', 'bottom', 2), ('socks', 'sock', 2))  # part, teamkits column, slots
 TEXT_FIELDS = ('name', 'short_name', 'name_10', 'name_7', 'abbreviation')
 EDITABLE_FIELDS = (*TEXT_FIELDS, 'leagues', 'primary_color', 'secondary_color', 'use_real_kits', 'kits',
                    'street_kits', 'real_kits')
@@ -110,10 +110,11 @@ def load(game, catalog, teamid, uid, save_image):
         if row is None:
             continue
         street_kits[kind] = StreetKit(**{part: StreetPart(
-            style=db.get(kits_t, row, f'{col}_geo_type_1'),
-            pattern=db.get(kits_t, row, f'{col}_texture_pattern_1'),
+            pieces=[StreetPiece(style=db.get(kits_t, row, f'{col}_geo_type_{n}'),
+                                pattern=db.get(kits_t, row, f'{col}_texture_pattern_{n}'))
+                    for n in range(1, slots + 1)],
             colors=tuple(tuple(db.get(kits_t, row, f'{col}_color_{which}_{ch}') for ch in 'rgb')
-                         for which in ('primary', 'secondary', 'tertiary'))) for part, col in STREET_PARTS})
+                         for which in ('primary', 'secondary', 'tertiary'))) for part, col, slots in STREET_PARTS})
 
     captain, takers = game_leaders(db, teamid)
 
@@ -188,9 +189,38 @@ def changes(tm, assets_dir):
         if any(now['real_kits'][slot].get(k) != old.get(k) for k in REAL_KIT_SETTINGS):
             parts.add('settings')
         out.real_kits[slot] = parts
-    out.street_kits = {kind for kind, _ in STREET_KINDS
-                       if now.get('street_kits', {}).get(kind) != before.get('street_kits', {}).get(kind)}
+    # StreetKit reads a snapshot saved before the list of pieces in the current layout
+    old_street = {kind: StreetKit(**kit).model_dump(mode='json') for kind, kit in before.get('street_kits', {}).items()}
+    out.street_kits = {kind for kind, _ in STREET_KINDS if now.get('street_kits', {}).get(kind) != old_street.get(kind)}
     return out
+
+
+def restore_street_slots(data, db):
+    """Projects saved when only the first street piece of the game's teams was loaded: their snapshot gets every piece
+    slot and an untouched part gets them too, so the editor lists what the game really picks from. data: the project
+    JSON (changed in place). Returns True when something changed."""
+    kits_t = db.table('teamkits')
+    changed = False
+    for team in data.get('teams', []):
+        snapshot = (team.get('loaded') or {}).get('team', {}).get('street_kits')
+        if team.get('original_id') is None or not snapshot:
+            continue
+        rows = {db.get(kits_t, r, 'teamkittypetechid'): r for r in kits_t.records
+                if db.get(kits_t, r, 'teamtechid') == team['original_id']}
+        for kind, n in STREET_KINDS:
+            for part, col, slots in STREET_PARTS:
+                old = snapshot.get(kind, {}).get(part)
+                if not old or 'style' not in old or n not in rows:
+                    continue
+                new = {'pieces': [{'style': db.get(kits_t, rows[n], f'{col}_geo_type_{k}'),
+                                   'pattern': db.get(kits_t, rows[n], f'{col}_texture_pattern_{k}')}
+                                  for k in range(1, slots + 1)], 'colors': old['colors']}
+                current = team.get('street_kits', {}).get(kind, {})
+                if current.get(part) == old:
+                    current[part] = new
+                snapshot[kind][part] = new
+                changed = True
+    return changed
 
 
 def untouched(tm, assets_dir, catalog):

@@ -212,10 +212,13 @@ def validate(project, catalog, assets_dir):
                 continue  # the game's own pieces, untouched
 
             for part in ('top', 'bottom', 'socks'):
-                piece = getattr(street, part)
-                if piece and piece.pattern not in catalog.street_options[part].get(piece.style, []):
-                    error('invalid_street_piece', tm.uid, f'street_kits.{kind}.{part}', style=piece.style,
-                          pattern=piece.pattern)
+                street_part = getattr(street, part)
+                for piece in street_part.pieces if street_part else []:
+                    if part == 'socks' and piece.style == -1:
+                        continue  # no socks (the game's own pieces have it, mostly under long trousers)
+                    if piece.pattern not in catalog.street_options[part].get(piece.style, []):
+                        error('invalid_street_piece', tm.uid, f'street_kits.{kind}.{part}', style=piece.style,
+                              pattern=piece.pattern)
         for attr, limit in TEAM_TEXT_LIMITS.items():
             check_text(tm.uid, attr, getattr(tm, attr), catalog.locale_chars, limit=limit)
         if len(set(tm.leagues)) < len(tm.leagues):

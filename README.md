@@ -103,7 +103,6 @@ Make your creations, build the patch, install it and have fun!
 ## What it can't do (yet)
 
 - Delete the game's original teams or players (hiding a team works).
-- Give a real face from a pack to a game player whose id has fewer than 6 digits.
 
 ## Known issues
 
@@ -125,8 +124,6 @@ Other:
   about 1024 px look the same in game and build much faster.
 - The 3D preview does not show the **body type**, nor the extra colored artwork some street tops get in game (sponsor
   logos and drawings; the kit brand symbol is shown).
-- **Real kits** built from the Kits tab are not confirmed in game through the app yet (the kit files themselves were
-  validated with test patches).
 
 ## Contributing
 

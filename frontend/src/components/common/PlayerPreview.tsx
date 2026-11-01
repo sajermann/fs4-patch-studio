@@ -387,9 +387,9 @@ function Body({ a, outfit }: { a: PreviewAppearance; outfit: PreviewOutfit }) {
         {/* trousers cover legs and socks (the reference-pose legs would poke through at the knees) */}
         {!outfit.fullLength && (
           <>
-            <StreetPart part="socks" mesh="streetsocks" piece={outfit.socks} crest={outfit.crest} />
+            {outfit.socks.style >= 0 && <StreetPart part="socks" mesh="streetsocks" piece={outfit.socks} crest={outfit.crest} />}
             {/* player.lua: leglength = socklength % 10 */}
-            <BodyPart part="legs" code={outfit.socks.style % 10} texture={skin} roughness={0.7} />
+            <BodyPart part="legs" code={Math.max(outfit.socks.style, 0) % 10} texture={skin} roughness={0.7} />
           </>
         )}
       </>

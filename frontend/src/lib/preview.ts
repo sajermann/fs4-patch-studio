@@ -1,8 +1,10 @@
-import type { Catalog, KitKind, Player, PlayerDefaults, RealKitSlot, RGB, StreetPartName, StreetPiece, Team } from '@/api/types'
+import type { Catalog, KitKind, Player, PlayerDefaults, RealKitSlot, RGB, StreetPart, StreetPartName, StreetPiece, Team } from '@/api/types'
 import type { PreviewAppearance, PreviewKit, PreviewOutfit } from '@/components/common/PlayerPreview'
 import { fullKit } from '@/lib/teams'
 
 export const STREET_PARTS: StreetPartName[] = ['top', 'bottom', 'socks']
+/** Piece slots of each part in the game's teamkits table. */
+export const STREET_SLOTS: Record<StreetPartName, number> = { top: 5, bottom: 2, socks: 2 }
 export const GOALKEEPER_POSITION = 0 // teamplayerlinks.position of a goalkeeper (fsmod.catalog.POSITIONS)
 
 /** Team kit the 3D preview dresses for a slot, as the build writes it: the real kit when the team uses real kits and
@@ -73,25 +75,31 @@ export function derivedStreetColors(team: Team, kind: KitKind, part: StreetPartN
   return [main, trim, main]
 }
 
-/** Street piece of a part: the user's choice, else the template's first piece with derived colors. */
-export function streetPiece(team: Team, kind: KitKind, part: StreetPartName, catalog: Catalog | undefined): StreetPiece {
+/** Pieces and colors of a street part: the user's, else the template's pieces with derived colors. */
+export function streetPart(team: Team, kind: KitKind, part: StreetPartName, catalog: Catalog | undefined): StreetPart {
   const own = team.street_kits?.[kind]?.[part]
   if (own) return own
-  const tpl = catalog?.template_street[team.template]?.[kind]?.[part]
+  const template = catalog?.template_street[team.template]?.[kind]?.[part]
   const styles = catalog?.street_options[part] ?? {}
-  const style = tpl?.style ?? Number(Object.keys(styles)[0] ?? 0)
-  const pattern = tpl?.pattern ?? styles[style]?.[0] ?? 0
-  return { style, pattern, colors: derivedStreetColors(team, kind, part) }
+  const style = Number(Object.keys(styles)[0] ?? 0)
+  return { pieces: template ?? [{ style, pattern: styles[style]?.[0] ?? 0 }], colors: derivedStreetColors(team, kind, part) }
 }
 
-export function streetOutfit(team: Team, kind: KitKind, catalog: Catalog | undefined): PreviewOutfit {
-  const top = streetPiece(team, kind, 'top', catalog)
-  const bottom = streetPiece(team, kind, 'bottom', catalog)
+/** The index-th piece of a street part, with the part's colors (what the 3D preview wears). */
+export function streetPiece(team: Team, kind: KitKind, part: StreetPartName, catalog: Catalog | undefined, index = 0): StreetPiece {
+  const { pieces, colors } = streetPart(team, kind, part, catalog)
+  return { ...(pieces[index] ?? pieces[0]), colors }
+}
+
+/** selected: which piece of each part the preview wears (the game picks one per player in each match). */
+export function streetOutfit(team: Team, kind: KitKind, catalog: Catalog | undefined, selected: Partial<Record<StreetPartName, number>> = {}): PreviewOutfit {
+  const top = streetPiece(team, kind, 'top', catalog, selected.top)
+  const bottom = streetPiece(team, kind, 'bottom', catalog, selected.bottom)
   return {
     kind: 'street',
     top,
     bottom,
-    socks: streetPiece(team, kind, 'socks', catalog),
+    socks: streetPiece(team, kind, 'socks', catalog, selected.socks),
     arms: catalog?.street_arms[top.style] ?? 0,
     fullLength: catalog?.street_full_length_bottoms.includes(bottom.style) ?? false,
     crest: team.crest,

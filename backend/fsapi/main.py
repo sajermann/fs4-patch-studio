@@ -87,7 +87,8 @@ class AppState:
             uid = 'u' + os.urandom(6).hex()  # starts with a letter: an all-digit address names a game id
             pl = original_player.load(self.game, self.catalog(), playerid, uid, self.store.save_image)
             return pl.model_dump(mode='json', exclude_none=True)
-        return original_player.absorb_game_links(data, load_player)
+        restored = original_team.restore_street_slots(data, self.catalog().db)
+        return original_player.absorb_game_links(data, load_player) or restored
 
     @property
     def store(self):

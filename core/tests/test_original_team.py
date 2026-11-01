@@ -53,7 +53,8 @@ def test_load_fills_the_team_with_what_the_game_has(game, catalog, assets):
         assert im.size == (1024, 1024)
     with Image.open(os.path.join(assets[0], home.shorts)) as im:
         assert im.size == (1024, 512)
-    assert set(tm.street_kits) == {'home', 'away'} and tm.street_kits['home'].top is not None
+    assert set(tm.street_kits) == {'home', 'away'} and len(tm.street_kits['home'].top.pieces) == 5
+    assert len(tm.street_kits['home'].bottom.pieces) == 2 and len(tm.street_kits['home'].socks.pieces) == 2
     assert not original_team.changes(tm, assets[0]).any
 
 
@@ -76,7 +77,8 @@ def test_edited_original_team_keeps_its_id_and_changes_only_what_changed(game, c
     buf = io.BytesIO()
     Image.new('RGBA', (300, 300), (0, 128, 0, 255)).save(buf, format='PNG')
     tm.crest = save_image('new-crest.png', buf.getvalue())
-    tm.street_kits['away'].top = model.StreetPart(style=24, pattern=3, colors=[(1, 2, 3), (4, 5, 6), (7, 8, 9)])
+    tm.street_kits['away'].top = model.StreetPart(pieces=[{'style': 24, 'pattern': 3}],
+                                                  colors=[(1, 2, 3), (4, 5, 6), (7, 8, 9)])
     project = model.Project(teams=[tm])
     assert not validation.has_errors(validation.validate(project, catalog, folder))
     result = builder.build(project, game, folder)
@@ -116,6 +118,43 @@ def test_edited_original_team_keeps_its_id_and_changes_only_what_changed(game, c
     jersey = rx3tex.by_name(game_kit, 'jersey_cm')
     assert edited[jersey['off']:jersey['off'] + jersey['size']] == game_kit[jersey['off']:jersey['off'] + jersey['size']]
     assert not result.loose
+
+
+def test_project_saved_with_a_single_street_piece_is_converted(game, catalog, assets):
+    """Contract 3: StreetPart had style + pattern. An untouched part gets the game's pieces and stays unchanged; an
+    edited one keeps its piece and is still a change."""
+    folder, _ = assets
+    tm = load(game, catalog, assets)
+    data = tm.model_dump(mode='json', exclude_none=True)
+    snapshot = data['loaded']['team']['street_kits']
+    for kit_json in (snapshot['home'], snapshot['away'], data['street_kits']['home'], data['street_kits']['away']):
+        for part in kit_json.values():
+            first = part.pop('pieces')[0]
+            part.update(first)
+    data['street_kits']['away']['top']['style'] = 24
+    data['street_kits']['away']['top']['pattern'] = 3
+    project = {'teams': [data]}
+
+    assert original_team.restore_street_slots(project, catalog.db)
+    converted = model.Team(**data)
+    assert converted.street_kits['home'] == tm.street_kits['home']
+    assert [(p.style, p.pattern) for p in converted.street_kits['away'].top.pieces] == [(24, 3)]
+    assert original_team.changes(converted, folder).street_kits == {'away'}
+    assert not original_team.restore_street_slots(project, catalog.db)  # nothing left to convert
+
+
+def test_street_pieces_of_an_edited_original_team(game, catalog, assets):
+    """Removing pieces from the list repeats the ones left in the teamkits slots; the other parts stay the game's."""
+    folder, _ = assets
+    tm = load(game, catalog, assets)
+    kept = tm.street_kits['home'].bottom
+    tm.street_kits['home'].top.pieces = [model.StreetPiece(style=24, pattern=2), model.StreetPiece(style=10, pattern=4)]
+    project = model.Project(teams=[tm])
+    assert not validation.has_errors(validation.validate(project, catalog, folder))
+    db = t3db.Database(builder.build(project, game, folder).database, game.meta)
+    home = next(r for r in rows_of(db, 'teamkits', 'teamtechid', BARCELONA) if value(db, 'teamkits', r, 'teamkittypetechid') == 0)
+    assert [value(db, 'teamkits', home, f'top_geo_type_{n}') for n in range(1, 6)] == [24, 10, 24, 10, 24]
+    assert [value(db, 'teamkits', home, f'bottom_geo_type_{n}') for n in (1, 2)] == [p.style for p in kept.pieces]
 
 
 def test_validation_of_original_teams(game, catalog, assets):

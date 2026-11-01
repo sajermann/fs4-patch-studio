@@ -359,10 +359,11 @@ def _street_kit_fields(db, table, row, street):
         piece = street and getattr(street, part)
         if not piece:
             continue
-        # the game picks one of the slots at random: the same piece in all of them fixes it
-        for n in range(1, STREET_SLOTS[col] + 1):
-            db.put(table, row, f'{col}_geo_type_{n}', piece.style)
-            db.put(table, row, f'{col}_texture_pattern_{n}', piece.pattern)
+        # the game picks one of the slots for each player in each match: a shorter list repeats (one piece fixes it)
+        for n in range(STREET_SLOTS[col]):
+            slot = piece.pieces[n % len(piece.pieces)]
+            db.put(table, row, f'{col}_geo_type_{n + 1}', slot.style)
+            db.put(table, row, f'{col}_texture_pattern_{n + 1}', slot.pattern)
         for which, c in zip(('primary', 'secondary', 'tertiary'), piece.colors):
             for ch, v in zip('rgb', c):
                 db.put(table, row, f'{col}_color_{which}_{ch}', v)

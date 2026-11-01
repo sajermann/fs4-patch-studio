@@ -436,7 +436,7 @@ def test_body_preview_assets(env):
     assert c.get('/api/preview/street/top/20/5.png').content[:4] == b'\x89PNG'
     assert c.get('/api/preview/body/top/24.glb').content[:4] == b'glTF'
     cat = c.get('/api/catalog').json()
-    assert cat['street_options']['top']['20'] and cat['template_street']['112298']['home']['top']['style'] == 20
+    assert cat['street_options']['top']['20'] and cat['template_street']['112298']['home']['top'][0]['style'] == 20
     assert c.get('/api/preview/body/gloves/0.glb').content[:4] == b'glTF'
     assert c.get('/api/preview/shoe/503.png').content[:4] == b'\x89PNG'
     assert c.get('/api/preview/kit/jersey.png', params={'color': '10,20,200'}).content[:4] == b'\x89PNG'

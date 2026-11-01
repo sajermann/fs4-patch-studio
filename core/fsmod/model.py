@@ -11,8 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 # project file format: bump it whenever the layout changes (older files are converted when read, and an app that
 # predates the new number refuses the file instead of dropping what it does not know). 3 = teams in several leagues,
-# players in several teams and the game's own entries (original_id)
-CONTRACT_VERSION = 3
+# players in several teams and the game's own entries (original_id); 4 = street kits with a list of pieces per part
+CONTRACT_VERSION = 4
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
 Channel = Annotated[int, Field(ge=0, le=255)]
@@ -55,17 +55,33 @@ class League(Entity):
         return self.original_id if self.is_original else self.uid
 
 
+class StreetPiece(BaseModel):
+    """One piece a player can wear: mesh type and texture variation."""
+    style: int  # top/bottom/sock_geo_type_N
+    pattern: int  # *_texture_pattern_N (variation of clothes/<part>_<style>_<pattern>_cm.rx3)
+
+
 class StreetPart(BaseModel):
-    """One piece of a street kit (teamkits): mesh type, texture variation and the 3 colors painted on its mask
-    (red = primary, green = secondary, blue = tertiary)."""
-    style: int  # top/bottom/sock_geo_type
-    pattern: int  # *_texture_pattern (variation of clothes/<part>_<style>_<pattern>_cm.rx3)
+    """One part of a street kit (teamkits): the pieces the game picks from, for each player in each match (5 slots
+    for the top, 2 for bottom and socks; a shorter list repeats), and the 3 colors painted on their masks (red =
+    primary, green = secondary, blue = tertiary). The colors are one set for the whole part: the game has no colors
+    per slot."""
+    pieces: list[StreetPiece] = Field(min_length=1)
     colors: tuple[RGB, RGB, RGB]
+
+    @model_validator(mode='before')
+    @classmethod
+    def _single_piece(cls, data):
+        """Projects saved before the list of pieces: style + pattern become its only piece."""
+        if isinstance(data, dict) and 'pieces' not in data and 'style' in data:
+            data = dict(data)
+            data['pieces'] = [{'style': data.pop('style'), 'pattern': data.pop('pattern', 0)}]
+        return data
 
 
 class StreetKit(BaseModel):
-    """Street Home/Away (teamkits kittype 0/1). A missing part keeps the template's pieces (the game picks one
-    of them at random) with colors derived from the team kit."""
+    """Street Home/Away (teamkits kittype 0/1). A missing part keeps the template's pieces with colors derived from
+    the team kit. The goalkeeper wears these pieces too, with colors the game chooses itself (nothing to edit)."""
     top: Optional[StreetPart] = None
     bottom: Optional[StreetPart] = None
     socks: Optional[StreetPart] = None
@@ -271,7 +287,7 @@ class GamePatches(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3] = CONTRACT_VERSION
+    version: Literal[2, 3, 4] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []
