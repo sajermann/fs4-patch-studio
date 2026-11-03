@@ -260,7 +260,7 @@ export function LeagueEditPage() {
   const original = l.original_id != null
   const canDelete = !draft.teams.some((tm) => tm.leagues.includes(l.uid))
   // restoring an original league also gives it back its teams: who joined leaves it, who left comes back (each team
-  // keeps its other leagues)
+  // keeps its other leagues); the page stays and loads the league again from the game
   const restore = () => {
     const id = l.original_id!
     const ownTeams = new Set(gameTeams.filter((o) => o.league === id).map((o) => o.id))
@@ -273,7 +273,6 @@ export function LeagueEditPage() {
       }),
     }))
     removeLeague(l.uid)
-    goBack(back)
   }
 
   return (

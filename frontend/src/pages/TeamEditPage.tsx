@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { ApiError, api, imageUrl, kitPreviewUrl } from '@/api/client'
 import type { KitKind, KitPart, RGB, Team } from '@/api/types'
 import { ColorInput, EntityIssues, Field, FieldIssues, OriginalBadge } from '@/components/common/form'
+import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { LineupEditor, type LineupPlayer } from '@/components/common/LineupEditor'
 import { RosterCard } from '@/components/common/Roster'
 import { TeamLeagues } from '@/components/common/TeamLeagues'
@@ -222,7 +223,7 @@ function LineupTab({ team }: { team: Team }) {
 export function TeamEditPage() {
   const { t } = useI18n()
   const { uid: param } = useParams()
-  const { removeTeam } = useProject()
+  const { draft, removeTeam, updateTeam } = useProject()
   const navigate = useNavigate()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [copyOpen, setCopyOpen] = useState(false)
@@ -258,6 +259,9 @@ export function TeamEditPage() {
     )
   }
 
+  const hiddenLeagues = new Set(draft.leagues.filter((l) => l.hidden).map((l) => l.uid))
+  const leagueHidden = team.leagues.length > 0 && team.leagues.every((l) => typeof l === 'string' && hiddenLeagues.has(l))
+
   return (
     <div className="max-w-5xl space-y-4">
       <BackButton back={back} />
@@ -266,9 +270,20 @@ export function TeamEditPage() {
           {team.crest && <img src={imageUrl(team.crest)} alt="" className="size-10 object-contain" />}
           <h1 className="text-2xl font-semibold">{team.name || t('teams.new')}</h1>
           {original && <OriginalBadge entry={team.uid} team={team.original_id} />}
+          {!original && team.hidden && <OutOfPatchBadge alert />}
+          {!original && !team.hidden && leagueHidden && <OutOfPatchBadge alert label={t('teams.leagueOutOfPatch')} />}
           <EntityIssues uid={team.uid} />
         </div>
         <div className="flex gap-2">
+          {!original && (
+            <HideButton
+              variant="outline"
+              hidden={!!team.hidden}
+              onToggle={() => updateTeam(team.uid, { hidden: !team.hidden })}
+              hideHint={t('teams.hideHint')}
+              showHint={t('teams.showHint')}
+            />
+          )}
           {!original && (
             <Button
               variant="outline"
@@ -349,17 +364,17 @@ export function TeamEditPage() {
             <AlertDialogAction
               onClick={async () => {
                 if (team.original_id != null) {
-                  // the game's squad comes back too (who left returns, who joined leaves)
+                  // the game's squad comes back too (who left returns, who joined leaves); the page stays and loads
+                  // the team again from the game
                   try {
                     removeTeam(team.uid, await api.originalSquad(team.original_id))
                   } catch (e) {
                     toast.error(e instanceof ApiError ? e.message : t('teamEdit.restoreFailed'))
-                    return
                   }
                 } else {
                   removeTeam(team.uid)
+                  goBack(back)
                 }
-                goBack(back)
               }}
             >
               {original ? t('teamEdit.restoreOriginal') : t('common.delete')}

@@ -6,6 +6,7 @@ import { HAIR_MODES, HAIR_THICKNESS, THICK_HAIR_MODES, type HairMode, type Playe
 import { BaseDataDialog } from '@/components/common/BaseDataDialog'
 import { FacePicker, type BrowsedFace } from '@/components/common/FacePicker'
 import { EntityIssues, Field, NumberInput, OriginalBadge, Stepper } from '@/components/common/form'
+import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { PhotoCard, PlayerAvatar } from '@/components/common/PlayerPhoto'
 import {
   AlertDialog,
@@ -526,7 +527,7 @@ function AppearanceTab({ player }: { player: Player }) {
 export function PlayerEditPage() {
   const { t } = useI18n()
   const { uid: param } = useParams()
-  const { draft, removePlayer } = useProject()
+  const { draft, removePlayer, updatePlayer } = useProject()
   const navigate = useNavigate()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [baseOpen, setBaseOpen] = useState(false)
@@ -567,9 +568,19 @@ export function PlayerEditPage() {
           <PlayerAvatar player={player} className="size-10" />
           <h1 className="text-2xl font-semibold">{name || t('players.new')}</h1>
           {original && <OriginalBadge entry={player.uid} />}
+          {!original && player.hidden && <OutOfPatchBadge alert />}
           <EntityIssues uid={player.uid} />
         </div>
         <div className="flex gap-2">
+          {!original && (
+            <HideButton
+              variant="outline"
+              hidden={!!player.hidden}
+              onToggle={() => updatePlayer(player.uid, { hidden: !player.hidden })}
+              hideHint={t('players.hideHint')}
+              showHint={t('players.showHint')}
+            />
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -635,7 +646,7 @@ export function PlayerEditPage() {
             <AlertDialogAction
               onClick={() => {
                 removePlayer(player.uid)
-                goBack(back)
+                if (!original) goBack(back) // restored: the page stays and loads him again from the game
               }}
             >
               {original ? t('teamEdit.restoreOriginal') : t('common.delete')}

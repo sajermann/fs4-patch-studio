@@ -4,12 +4,24 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 
-/** Show / hide toggle for table rows (the row itself is a link, so the click does not reach it). */
-export function HideButton({ hidden, onToggle, hideHint, showHint }: { hidden: boolean; onToggle: () => void; hideHint: string; showHint: string }) {
+/** Show / hide toggle for table rows (the row itself is a link, so the click does not reach it) and edit pages. */
+export function HideButton({
+  hidden,
+  onToggle,
+  hideHint,
+  showHint,
+  variant = 'ghost',
+}: {
+  hidden: boolean
+  onToggle: () => void
+  hideHint: string
+  showHint: string
+  variant?: 'ghost' | 'outline'
+}) {
   const { t } = useI18n()
   return (
     <Button
-      variant="ghost"
+      variant={variant}
       size="sm"
       className="min-w-24 justify-start" // same width for "hide" and "show": the columns do not move
       title={hidden ? showHint : hideHint}
@@ -23,11 +35,11 @@ export function HideButton({ hidden, onToggle, hideHint, showHint }: { hidden: b
   )
 }
 
-/** "Not in the patch" badge for hidden project leagues/teams. */
-export function OutOfPatchBadge({ label }: { label?: string }) {
+/** "Not in the patch" badge for hidden project leagues/teams; alert: the red one of the edit pages. */
+export function OutOfPatchBadge({ label, alert = false }: { label?: string; alert?: boolean }) {
   const { t } = useI18n()
   return (
-    <Badge variant="outline" className="ml-2 font-normal">
+    <Badge variant={alert ? 'destructive' : 'outline'} className={alert ? 'font-normal' : 'ml-2 font-normal'}>
       {label ?? t('list.outOfPatch')}
     </Badge>
   )
