@@ -14,7 +14,7 @@ from PIL import Image
 
 from . import builder, kit, original_league, original_team, scanface
 from .catalog import POSITIONS, SKILLS
-from .model import REAL_KIT_FILES
+from .model import FRIENDLY_TEAM_SIZES, REAL_KIT_FILES
 
 # lengths the game's text slots are meant for (longer texts overflow in some screens)
 GOALKEEPER_POSITION = 0  # teamplayerlinks.position GK (catalog.POSITIONS)
@@ -33,6 +33,10 @@ class Issue:
 
     def to_json(self):
         return asdict(self)
+
+
+# the game's selector hides them and the World Tour tables do not use their teams (Rest of World, Street Video-Temp)
+INTERNAL_LEAGUES = {76, 2095}
 
 
 def validate(project, catalog, assets_dir):
@@ -184,8 +188,18 @@ def validate(project, catalog, assets_dir):
             if isinstance(lk.team, int) and lk.team in catalog.team_ids:
                 joins.setdefault(lk.team, []).append(
                     (p.uid, f'teams.{i}', p.ref, link_position(p, lk.team), p.shown_name))
+    left = {}  # teamid -> [uid of the edited game players who left it]
+    for p in project.original_players:
+        mine = {lk.team for lk in p.teams}
+        for link in catalog.player_links(p.original_id):
+            if link['team'] not in mine:
+                left.setdefault(link['team'], []).append(p.uid)
+    # a team nobody plays with can stay small: hidden, or internal (street video, friendly pools) and not moved out
+    entries = {tm.original_id: tm for tm in project.original_teams}
+    unplayed = {*project.originals.hidden_teams, *(tid for tid, tm in entries.items() if set(tm.leagues) <= INTERNAL_LEAGUES),
+                *(t['id'] for t in catalog.teams if t['league'] in INTERNAL_LEAGUES and t['id'] not in entries)}
     game_squads = {}
-    for tid in {*joins, *(tm.original_id for tm in project.original_teams)}:
+    for tid in {*joins, *left, *(tm.original_id for tm in project.original_teams)}:
         squad = {p['id']: (p['position'], p['display_name']) for p in catalog.players
                  if tid in p['teams'] and p['id'] not in edited}
         joined = []
@@ -196,6 +210,14 @@ def validate(project, catalog, assets_dir):
         if len(squad) > builder.MAX_ROSTER:
             for entity, where in joined:
                 error('team_full', entity, where, count=len(squad), max=builder.MAX_ROSTER)
+        # only when it lost players: some teams of the game have none (Free Agents) and are never played
+        if len(squad) < min(builder.MIN_ROSTER, len(catalog.player_ids_in(tid))) and tid not in unplayed:
+            entry = entries.get(tid)
+            name = entry.name if entry else next(t['name'] for t in catalog.teams if t['id'] == tid)
+            if entry:
+                error('roster_too_small', entry.uid, 'players', count=len(squad), min=builder.MIN_ROSTER)
+            for uid in left.get(tid, []):
+                error('team_too_small', uid, 'teams', team=name, count=len(squad), min=builder.MIN_ROSTER)
         game_squads[tid] = squad
 
     # ---- teams
@@ -285,8 +307,8 @@ def validate(project, catalog, assets_dir):
                     warning('duplicate_number', p.uid, f'teams.{k}.number', number=lk.number,
                             other=numbers[lk.number])
                 numbers.setdefault(lk.number, p.uid)
-        if not members:
-            error('roster_empty', tm.uid, 'players')
+        if len(members) < builder.MIN_ROSTER:
+            error('roster_too_small', tm.uid, 'players', count=len(members), min=builder.MIN_ROSTER)
         elif len(members) > builder.MAX_ROSTER:
             error('roster_too_large', tm.uid, 'players', max=builder.MAX_ROSTER, count=len(members))
         if tm.captain is not None and tm.captain not in members:
@@ -327,7 +349,8 @@ def validate(project, catalog, assets_dir):
         check_text(p.uid, 'jersey_name', p.jersey_name, chars)
         if len(p.shown_name) > DISPLAY_NAME_LIMIT:
             warning('text_too_long', p.uid, 'display_name', limit=DISPLAY_NAME_LIMIT, length=len(p.shown_name))
-        if not p.teams and not p.is_original:  # a game player without teams stays in the game as a free agent
+        # a game player without teams stays in the game as a free agent; one picked for the World Tour is exported
+        if not p.teams and not p.is_original and not any(s.player == p.uid for s in project.world_tour.slots):
             warning('free_agent_not_exported', p.uid, 'teams')
         linked = set()
         for i, lk in enumerate(p.teams):
@@ -426,6 +449,19 @@ def validate(project, catalog, assets_dir):
     for tm in project.teams:
         if tm.leagues and all(isinstance(lg, int) and lg in changes.hidden_leagues for lg in tm.leagues):
             warning('team_league_hidden', tm.uid, 'leagues')
+    picked = set()
+    new_players = {p.uid for p in project.new_players}
+    for side, size in FRIENDLY_TEAM_SIZES.items():
+        slots = getattr(project.world_tour, side)
+        where = f'world_tour.{side}'
+        if len(slots) > size:
+            error('world_tour_team_too_large', None, where, count=len(slots), max=size)
+        for slot in slots:
+            if slot.player not in (new_players if isinstance(slot.player, str) else catalog.players_by_id):
+                error('world_tour_player_not_found', None, where, id=slot.player)
+            if slot.player in picked:
+                error('world_tour_player_repeated', None, where, id=slot.player)
+            picked.add(slot.player)
     return issues
 
 

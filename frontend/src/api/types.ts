@@ -200,13 +200,28 @@ export interface GamePatches {
   close_up_heads?: boolean // players keep the close-up head, hair and eyes at any camera distance
 }
 
+export type FriendlyMode = 'original' | 'clone'
+
+/** A player of the World Tour friendly match. original: himself (keeps his photo, no level or skills to buy); clone: a
+ * copy with a level and skills to buy, without his photo in the menus. */
+export interface FriendlyPlayer {
+  player: PlayerRef
+  mode?: FriendlyMode
+}
+
+export interface WorldTour {
+  dark?: FriendlyPlayer[]
+  white?: FriendlyPlayer[]
+}
+
 export interface Project {
-  version: 3
+  version: 5
   leagues: League[]
   teams: Team[]
   players: Player[]
   originals?: OriginalChanges
   game_patches?: GamePatches
+  world_tour?: WorldTour
 }
 
 /** Values a new player inherits from its template player where the project leaves a field unset. */

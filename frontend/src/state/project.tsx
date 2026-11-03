@@ -7,7 +7,7 @@ import { lineupsWithout, takersWithout } from '@/lib/lineup'
 import { linkOf, teamsWithout } from '@/lib/players'
 import type { Issue, League, OriginalSquadLink, Player, PlayerDefaults, Project, Team } from '@/api/types'
 
-const EMPTY: Project = { version: 3, leagues: [], teams: [], players: [] }
+const EMPTY: Project = { version: 5, leagues: [], teams: [], players: [] }
 const VALIDATE_DELAY_MS = 400
 
 /** A new entry's uid: starts with a letter (never all digits, the addresses of the game's teams/players). */
@@ -124,7 +124,17 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   // live validation of the draft (debounced; the latest answer wins)
   useEffect(() => {
-    if (!query.data || !dirty) return
+    if (!query.data) return
+    if (!dirty) {
+      // back to the saved project (restored, undone): its own results, and an answer still on the way no longer counts
+      validateSeq.current++
+      setIssues(query.data.issues)
+      setDefaults(query.data.defaults)
+      setUntouched(new Set(query.data.untouched))
+      setChangedSquads(new Set(query.data.changed_squads))
+      setChangedLeagues(new Set(query.data.changed_leagues))
+      return
+    }
     const seq = ++validateSeq.current
     const timer = setTimeout(() => {
       api
@@ -241,12 +251,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
             ),
           }
         }),
-      // deleting a new player also takes him out of captaincies, set pieces and lineups; removing an original
+      // deleting a new player also takes him out of captaincies, set pieces, lineups and the World Tour; removing an original
       // player's entry ("restore original") leaves him as the game has him (those places name him by playerid)
       removePlayer: (uid) =>
         setDraft((p) => ({
           ...p,
           players: p.players.filter((pl) => pl.uid !== uid),
+          world_tour: p.world_tour && {
+            dark: p.world_tour.dark?.filter((s) => s.player !== uid),
+            white: p.world_tour.white?.filter((s) => s.player !== uid),
+          },
           teams: p.players.find((pl) => pl.uid === uid)?.original_id != null ? p.teams : p.teams.map((t) => ({
             ...t,
             captain: t.captain === uid ? undefined : t.captain,

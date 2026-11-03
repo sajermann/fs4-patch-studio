@@ -1,4 +1,4 @@
-import { Plus, X } from 'lucide-react'
+import { Plus, UserX, X } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Player, TeamKey, TeamLink } from '@/api/types'
@@ -6,6 +6,16 @@ import { FieldIssues, NumberInput, OriginalCrest, TeamCrest } from '@/components
 import { matches } from '@/components/common/list'
 import { PickerDialog, type PickerItem } from '@/components/common/PickerDialog'
 import { PositionSelect } from '@/components/common/Roster'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -72,7 +82,7 @@ function LinkIssues({ player, index }: { player: string; index: number }) {
 }
 
 /** The player's clubs and national teams (TeamLink): each with its own number and position. Adding a team that is
- * full asks who leaves it (useJoinTeam). */
+ * full asks who leaves it (useJoinTeam); leaving all of them at once asks for confirmation. */
 export function PlayerTeamsCard({ player }: { player: Player }) {
   const { t } = useI18n()
   const { setDraft, updatePlayer } = useProject()
@@ -85,6 +95,7 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
   const ref = playerRef(player)
   const teamsIssues = useIssues(player.uid, 'teams')
   const [adding, setAdding] = useState(false)
+  const [removingAll, setRemovingAll] = useState(false)
 
   const setLink = (index: number, patch: Partial<TeamLink>) =>
     updatePlayer(player.uid, { teams: player.teams.map((l, k) => (k === index ? { ...l, ...patch } : l)) })
@@ -95,9 +106,16 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
         <CardTitle>{t('playerEdit.teams')}</CardTitle>
         <CardDescription>{t('playerEdit.teamsDescription')}</CardDescription>
         <CardAction>
-          <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
-            <Plus /> {t('playerEdit.addTeam')}
-          </Button>
+          <div className="flex flex-wrap justify-end gap-2">
+            {player.teams.length > 0 && (
+              <Button variant="outline" size="sm" onClick={() => setRemovingAll(true)}>
+                <UserX /> {t('playerEdit.removeFromAll')}
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+              <Plus /> {t('playerEdit.addTeam')}
+            </Button>
+          </div>
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -162,6 +180,22 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
         {player.teams.length === 0 && <p className="text-sm text-muted-foreground">{t('playerEdit.noTeams')}</p>}
         <AddTeamDialog player={player} open={adding} onOpenChange={setAdding} onPick={(team) => void join(ref, team)} />
         {dialog}
+        <AlertDialog open={removingAll} onOpenChange={setRemovingAll}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('playerEdit.removeFromAllTitle', { name: playerName(player, t('nav.players')) })}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(player.original_id != null ? 'playerEdit.removeFromAllOriginalDescription' : 'playerEdit.removeFromAllDescription', { count: player.teams.length })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => setDraft((p) => player.teams.reduce((project, l) => leaveTeam(project, ref, l.team), p))}>
+                {t('playerEdit.removeFromAll')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   )

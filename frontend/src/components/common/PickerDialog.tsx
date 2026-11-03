@@ -30,6 +30,7 @@ export function PickerDialog<K extends string | number>({
   query,
   onQuery,
   groups,
+  header,
   notice,
   empty,
   disabled,
@@ -43,6 +44,7 @@ export function PickerDialog<K extends string | number>({
   query: string
   onQuery: (q: string) => void
   groups: PickerGroup<K>[]
+  header?: ReactNode // above the search box (e.g. a choice that applies to what is added)
   notice?: ReactNode // a line above the list (e.g. why nothing can be added)
   empty: string
   disabled?: boolean // every Add button (e.g. the target is full)
@@ -66,7 +68,8 @@ export function PickerDialog<K extends string | number>({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <SearchInput value={query} onChange={onQuery} placeholder={placeholder} />
+        {header}
+        <SearchInput autoFocus={!!header} value={query} onChange={onQuery} placeholder={placeholder} />
         {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
         {shown.length === 0 ? (
           <p className="text-sm text-muted-foreground">{empty}</p>

@@ -26,13 +26,14 @@ overlay): an entry that fits stays in place, a bigger one moves to the end of th
 import datetime
 import os
 import re
+import struct
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from PIL import Image
 
 from . import (big, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, original_league,
-               original_player, original_team, photo, preview, rx3tex, scanface, t3db)
+               original_player, original_team, photo, preview, rx3tex, scanface, t3db, world_tour)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
 HIDDEN_LEAGUES = {382, 76, 2092, 2095, 2097}  # ids the league selector never shows
@@ -52,6 +53,7 @@ IMAGE_COUNTRIES = range(217, 256)
 STREET_SLOTS = {'top': 5, 'bottom': 2, 'sock': 2}  # teamkits *_geo_type_N / *_texture_pattern_N slots
 EPOCH = datetime.date(1582, 10, 14)
 MAX_ROSTER = 13
+MIN_ROSTER = 6  # the smallest roster of the game's own teams; with far fewer the game starts but a match crashes
 # teams of a league (new + original): the team selector loads every crest of the open league on both sides at
 # once and, past ~36, some do not load when coming back from the next screen (stress test 23/10, 36 validated)
 MAX_LEAGUE_TEAMS = 30
@@ -162,6 +164,15 @@ class Db:
         pos = next((k for k, r in enumerate(t.records) if t.value(r, f) > v), len(t.records))
         t.records.insert(pos, row)
         t.raw_records.insert(pos, raw)
+
+    @staticmethod
+    def put_any(table, row, field_name, value):
+        """Like put, for floats too."""
+        f = table.field(field_name)
+        if f.type == 4:
+            row[table.fields.index(f)] = struct.unpack('>I', struct.pack('>f', value))[0]
+        else:
+            Db.put(table, row, field_name, value)
 
     def append(self, table_name, row, raw):
         t = self.table(table_name)
@@ -959,9 +970,10 @@ def build(project, game, assets_dir, log=None, progress=None):
             elif kind != 'goalkeeper':
                 jobs.append(pool.submit(_kit_files, game, tid, kind_n, kits[kind], crest_img))
 
-    # ---- players only in the game's teams: records cloned from the default template team
+    # ---- players only in the game's teams or in the World Tour: records cloned from the default template team
     default_links = [links.records[k] for k in db.rows('teamplayerlinks', 'teamid', model.DEFAULT_TEMPLATE_TEAM)]
-    for k, pl in enumerate(pl for pl in project.new_players if pl.uid not in player_ids and pl.teams):
+    picked = {s.player for s in project.world_tour.slots}
+    for k, pl in enumerate(pl for pl in project.new_players if pl.uid not in player_ids and (pl.teams or pl.uid in picked)):
         build_player(pl, db.get(links, default_links[k % len(default_links)], 'playerid'), pl.shown_name)
 
     # ---- the game's players edited in place (same playerid): their row, photo and head, only what changed
@@ -1031,6 +1043,10 @@ def build(project, game, assets_dir, log=None, progress=None):
     step('images', len(jobs), len(jobs))
 
     apply_original_changes(db, project.originals)
+    try:
+        world_tour.apply(db, game, project, player_ids, result.loose, entries, texts, say)
+    except world_tour.WorldTourError as e:
+        raise BuildError(f'World Tour: {e}') from e
     out = db.db.build()
     bad = dbcrc.check(out)
     if bad:
@@ -1048,7 +1064,7 @@ def build(project, game, assets_dir, log=None, progress=None):
             entries[os.path.basename(file), entry] = new_locale
     step('texts', len(entries), len(entries))
     try:
-        entries.update(gamepatches.entries(game, project.game_patches))
+        entries.update(gamepatches.entries(game, project.game_patches, project.world_tour))
     except gamepatches.GamePatchError as e:
         raise BuildError(str(e)) from e
     say(f'database {len(out)} bytes; {len(texts)} texts; {len(entries)} replaced entries')

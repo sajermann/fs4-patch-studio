@@ -162,7 +162,7 @@ def test_validation_of_original_teams(game, catalog, assets):
     twin = tm.model_copy(update={'uid': 'tm_twin'})
     project = model.Project(teams=[tm, twin])
     codes = {i.code for i in validation.validate(project, catalog, assets[0])}
-    assert 'original_team_edited_twice' in codes and 'roster_empty' not in codes
+    assert 'original_team_edited_twice' in codes and 'roster_too_small' not in codes
     project.teams = [tm.model_copy(update={'original_id': 999999})]
     assert 'original_team_not_found' in {i.code for i in validation.validate(project, catalog, assets[0])}
 

@@ -84,6 +84,13 @@ Back up your project before updating (Settings → Download backup).
 
 - Unlock or lock the game's stadiums.
 
+### World Tour
+
+- Pick who plays the friendly match at the start of the World Tour (up to 3 players in Dark and 4 in White). After the
+  match they can join your squad; places left empty get the game's random players. Needs a new save.
+- Each one comes as a **clone** (levels up and buys skills, but has no thumbnail in the menus; the original stays in the
+  club) or as the **original** (has a thumbnail, but does not level up and cannot be edited in the game).
+
 ### Patches
 
 - Turn optional, ready-made changes to the game on or off, e.g. the camera one (close-up face at any distance).

@@ -11,8 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 # project file format: bump it whenever the layout changes (older files are converted when read, and an app that
 # predates the new number refuses the file instead of dropping what it does not know). 3 = teams in several leagues,
-# players in several teams and the game's own entries (original_id); 4 = street kits with a list of pieces per part
-CONTRACT_VERSION = 4
+# players in several teams and the game's own entries (original_id); 4 = street kits with a list of pieces per part;
+# 5 = world_tour (players of the friendly match)
+CONTRACT_VERSION = 5
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
 Channel = Annotated[int, Field(ge=0, le=255)]
@@ -286,13 +287,37 @@ class GamePatches(BaseModel):
     close_up_heads: bool = False  # players keep the close-up head, hair and eyes at any camera distance
 
 
+class FriendlyPlayer(BaseModel):
+    player: Union[str, int]  # uid of a new player, or playerid of one of the game's own (Player.ref)
+    mode: Literal['original', 'clone'] = 'clone'  # fsmod.world_tour says what each one means
+
+
+FRIENDLY_TEAM_SIZES = {'dark': 3, 'white': 4}  # the most the game offers from each team (the user's captain is in Dark)
+
+
+class WorldTour(BaseModel):
+    """Players of the World Tour friendly match, whom the user can then add to the squad; places left empty get the
+    game's random players. Nothing picked = the game as it is."""
+    dark: list[FriendlyPlayer] = []
+    white: list[FriendlyPlayer] = []
+
+    @property
+    def slots(self):
+        return [*self.dark, *self.white]
+
+    @property
+    def has_clones(self):
+        return any(s.mode == 'clone' for s in self.slots)
+
+
 class Project(Entity):
-    version: Literal[2, 3, 4] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []
     originals: OriginalChanges = OriginalChanges()
     game_patches: GamePatches = GamePatches()
+    world_tour: WorldTour = WorldTour()
 
     @field_validator('version')
     @classmethod
@@ -350,7 +375,10 @@ class Project(Entity):
             if p.hidden or (p.teams and not links):  # every team of the player is hidden
                 continue
             players.append(p if len(links) == len(p.teams) else p.model_copy(update={'teams': links}))
-        return self.model_copy(update={'leagues': leagues, 'teams': teams, 'players': players})
+        left_out_players = {p.uid for p in self.players if not p.is_original} - {p.uid for p in players}
+        world_tour = WorldTour(**{side: [s for s in getattr(self.world_tour, side) if s.player not in left_out_players]
+                                  for side in FRIENDLY_TEAM_SIZES})
+        return self.model_copy(update={'leagues': leagues, 'teams': teams, 'players': players, 'world_tour': world_tour})
 
     def to_json(self):
         return self.model_dump(mode='json', exclude_none=True)

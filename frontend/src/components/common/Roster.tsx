@@ -42,17 +42,39 @@ export function PositionSelect({ value, placeholder, onChange }: { value?: numbe
   )
 }
 
-/** Dialog: players not in the team yet, in two groups: the project's (free agents first; the game's players edited
- * in the project too) and the game's (search; they keep their other teams). Picking one closes it (a full team then
- * asks who leaves). */
-function AddPlayerDialog({ team, open, onOpenChange, onPick }: { team: TeamKey; open: boolean; onOpenChange: (o: boolean) => void; onPick: (ref: PlayerRef) => void }) {
+/** Dialog: players not in the team yet (team) or not picked yet (exclude), in two groups: the project's (free agents
+ * first; the game's players edited in the project too) and the game's (search; they keep their other teams). Picking
+ * one closes it (a full team then asks who leaves), unless keepOpen. */
+export function AddPlayerDialog({
+  team,
+  exclude,
+  keepOpen,
+  title,
+  description,
+  header,
+  disabled,
+  open,
+  onOpenChange,
+  onPick,
+}: {
+  team?: TeamKey
+  exclude?: Set<PlayerRef>
+  keepOpen?: boolean
+  title?: string
+  description?: string
+  header?: ReactNode
+  disabled?: boolean
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  onPick: (ref: PlayerRef) => void
+}) {
   const { t } = useI18n()
   const { draft } = useProject()
   const teamName = useTeamName()
   const [q, setQ] = useState('')
   const found = useOriginalPlayers({ q: q || undefined, limit: 40 }, open).data?.items ?? []
   const project = draft.players
-    .filter((p) => !linkOf(p, team) && matches(q, playerName(p, ''), p.jersey_name))
+    .filter((p) => !(team != null && linkOf(p, team)) && !exclude?.has(playerRef(p)) && matches(q, playerName(p, ''), p.jersey_name))
     .sort((a, b) => Number(a.teams.length > 0) - Number(b.teams.length > 0))
     .map((p): PickerItem<PlayerRef> => ({
       key: playerRef(p),
@@ -66,7 +88,7 @@ function AddPlayerDialog({ team, open, onOpenChange, onPick }: { team: TeamKey; 
       subtitle: p.teams.length ? p.teams.map((l) => teamName(l.team)).join(', ') : t('players.freeAgent'),
     }))
   const game = found
-    .filter((p) => !playerOf(draft, p.id)) // edited ones are in the project group
+    .filter((p) => !playerOf(draft, p.id) && !exclude?.has(p.id)) // edited ones are in the project group
     .map((p): PickerItem<PlayerRef> => ({
       key: p.id,
       icon: <OriginalPlayerAvatar player={p} />,
@@ -78,8 +100,10 @@ function AddPlayerDialog({ team, open, onOpenChange, onPick }: { team: TeamKey; 
     <PickerDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={t('roster.addPlayerTitle')}
-      description={t('roster.addPlayerDescription')}
+      title={title ?? t('roster.addPlayerTitle')}
+      description={description ?? t('roster.addPlayerDescription')}
+      header={header}
+      disabled={disabled}
       placeholder={t('players.search')}
       query={q}
       onQuery={setQ}
@@ -89,7 +113,7 @@ function AddPlayerDialog({ team, open, onOpenChange, onPick }: { team: TeamKey; 
       ]}
       empty={t('roster.noPlayersFound')}
       onPick={(ref) => {
-        onOpenChange(false)
+        if (!keepOpen) onOpenChange(false)
         onPick(ref)
       }}
     />

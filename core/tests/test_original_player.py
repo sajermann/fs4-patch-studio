@@ -119,7 +119,8 @@ def test_players_in_several_teams(game, catalog):
     brazil_striker = next(pid for pid, p in squad.items() if p['position'] != 0 and len(p['teams']) == 1)
     keeper.teams.append(model.TeamLink(team=BRAZIL, number=1, position=0))
     national.teams = [model.TeamLink(team=BRAZIL, number=99, position=25)]  # leaves Palmeiras, Brazil only
-    project.players += [messi]
+    project.players += [messi, *(model.Player(uid=f'jg_extra{k}', first_name='Extra', last_name='Player',
+                                              teams=[model.TeamLink(team='tm_02')]) for k in range(4))]
     codes = {(i.code, i.field) for i in validation.validate(project, catalog, PALMEIRAS) if i.severity == 'error'}
     assert ('team_full', 'teams.1') in codes and ('team_full', 'teams.0') in codes  # Brazil already has 13
     leaving = [entry(game, catalog, pid, f'jg_{pid}') for pid in (brazil_keeper, brazil_striker)]
@@ -169,3 +170,29 @@ def test_roles_of_a_player_who_leaves_go_to_who_joins(game, catalog):
     project.teams = [tm]
     issues = validation.validate(project, catalog, PALMEIRAS)
     assert not [i for i in issues if i.severity == 'error' and i.entity != tm.uid or i.code == 'captain_not_in_roster']
+
+
+def test_a_team_needs_at_least_6_players(game, catalog):
+    street_team = 112341  # Street Stylers: the game's smallest rosters have 6
+    squad = sorted(catalog.player_ids_in(street_team))
+    assert len(squad) == builder.MIN_ROSTER
+    leaving = entry(game, catalog, squad[0], 'jg_leaving')
+    leaving.teams = []
+    project = model.Project(players=[leaving])
+    issues = validation.validate(project, catalog, PALMEIRAS)
+    found = [i for i in issues if i.code == 'team_too_small']
+    assert [(i.entity, i.field, i.severity) for i in found] == [('jg_leaving', 'teams', 'error')]
+    assert found[0].params['count'] == 5 and found[0].params['min'] == 6
+    project.originals.hidden_teams = [street_team]  # out of the selector: nobody plays with it
+    assert 'team_too_small' not in {i.code for i in validation.validate(project, catalog, PALMEIRAS)}
+
+    # Barcelona keeps 12 of 13; his 6-player Street Video team is internal: nobody plays with it
+    project = model.Project(players=[entry(game, catalog, MESSI, 'jg_messi')])
+    project.players[0].teams = []
+    assert not validation.has_errors(validation.validate(project, catalog, PALMEIRAS))
+
+    new_team = load_palmeiras()
+    team = new_team.teams[0]
+    new_team.players = new_team.roster(team.uid)[:5]
+    codes = {(i.code, i.entity) for i in validation.validate(new_team, catalog, PALMEIRAS)}
+    assert ('roster_too_small', team.uid) in codes
