@@ -1,6 +1,9 @@
-import pytest
+import io
 
-from fsmod import builder, chunk, dbcrc, gamepatches, model, scanface, validation, world_tour
+import pytest
+from PIL import Image
+
+from fsmod import builder, chunk, dbcrc, gamepatches, model, photo, scanface, validation, world_tour
 from fsmod.catalog import Catalog
 
 MESSI, INIESTA, XAVI, RONALDO = 158023, 41, 10535, 20801
@@ -54,7 +57,10 @@ def test_clone_is_a_created_copy_with_his_own_head_files(game, tmp_path):
     players = db.table('players')
     clone = players.records[db.rows('players', 'playerid', first_free)[0]]
     source = players.records[db.rows('players', 'playerid', MESSI)[0]]
-    assert [f.name for f in players.fields if players.value(clone, f) != players.value(source, f)] == ['playerid']
+    changed = {f.name for f in players.fields if players.value(clone, f) != players.value(source, f)}
+    assert changed - {'playerid'} <= set(world_tour.CREATED_PLAYER_STATS)
+    for field, value in world_tour.CREATED_PLAYER_STATS.items():
+        assert db.get(players, clone, field) == value
     assert db.rows('createplayer', 'create_playerid', first_free) and db.rows('playerperks', 'playerid', first_free)
     assert not db.rows('createplayer', 'create_playerid', MESSI)
     assert len(squad(db, 241)) == len(squad(before, 241))  # the original stays in his club
@@ -66,6 +72,63 @@ def test_clone_is_a_created_copy_with_his_own_head_files(game, tmp_path):
     assert str(MESSI).encode() not in lod  # hairlod_<id>player_hair...: no '_' after the id
     lua = chunk.decode(result.entries['data0.big', gamepatches.PLAYER_LUA])
     assert gamepatches.SCANNED_HEAD_LINES in lua
+
+
+def test_original_keeps_his_own_skills(game, tmp_path):
+    before = builder.Db(game.original_db(), game.meta)
+    _, db = build(game, tmp_path, dark=[{'player': MESSI, 'mode': 'original'}])
+    players = db.table('players')
+    k = db.rows('players', 'playerid', MESSI)[0]
+    assert players.records[k] == before.table('players').records[before.rows('players', 'playerid', MESSI)[0]]
+
+
+def test_clone_photo_is_the_file_that_beats_the_drawn_image(game, tmp_path):
+    result, db = build(game, tmp_path, dark=[{'player': MESSI}])
+    clone = squad(db, world_tour.DARK)[0]
+    assert photo.photo_name(clone) not in result.loose  # the game never looks for it
+    image = Image.open(io.BytesIO(chunk.decode(result.loose[world_tour.thumbnail_name(clone)])))
+    assert image.size == (world_tour.THUMBNAIL_CANVAS, world_tour.THUMBNAIL_CANVAS)
+    box = image.convert('RGBA').getchannel('A').getbbox()
+    assert box[0] >= 28 and box[1] >= 54  # transparent margin: sideways and on top
+
+
+def test_clone_with_no_photo_keeps_the_drawn_image(game, tmp_path):
+    data = {'version': model.CONTRACT_VERSION, 'players': [{'uid': 'p1', 'first_name': 'Ana', 'last_name': 'Lima'}],
+            'world_tour': {'white': [{'player': 'p1'}]}}
+    result = builder.build(model.load(data), game, str(tmp_path))
+    db = builder.Db(result.database, game.meta)
+    assert world_tour.thumbnail_name(squad(db, world_tour.WHITE)[0]) not in result.loose
+
+
+def lineup(db, teamid):
+    table = db.table('fs4lineup')
+    rows = db.rows('fs4lineup', 'teamid', teamid)
+    assert len(rows) == 1
+    return [db.get(table, table.records[rows[0]], f'position{k}') for k in range(13)]
+
+
+def test_lineups_start_the_picks_and_the_captain(game, tmp_path):
+    first = builder.Db(game.original_db(), game.meta).max_value('players', 'playerid') + 1
+    _, db = build(game, tmp_path, dark=[{'player': p} for p in (MESSI, RONALDO, INIESTA)],
+                  white=[{'player': p} for p in (XAVI, 13732, 5471, 7763)])
+    assert lineup(db, world_tour.DARK)[:5] == [first, first + 1, first + 2, first + 7, 0]  # all equal: first picked in goal
+    assert lineup(db, world_tour.WHITE)[:5] == [first + 3, first + 4, first + 5, first + 6, 0]
+
+
+def test_a_team_with_few_picks_names_generated_players(game, tmp_path):
+    first = builder.Db(game.original_db(), game.meta).max_value('players', 'playerid') + 1
+    _, db = build(game, tmp_path, dark=[{'player': MESSI}], white=[{'player': XAVI}])
+    captain = first + 2
+    dark_generated = [captain + 1 + k for k in range(4)]  # 6 - the pick - the captain
+    white_generated = [dark_generated[-1] + 1 + k for k in range(5)]
+    assert lineup(db, world_tour.DARK)[:4] == [dark_generated[0], first, captain, dark_generated[1]]
+    assert lineup(db, world_tour.WHITE)[:4] == [white_generated[0], first + 1, white_generated[1], white_generated[2]]
+
+
+def test_a_team_with_no_picks_has_no_lineup(game, tmp_path):
+    _, db = build(game, tmp_path, white=[{'player': XAVI, 'mode': 'original'}])
+    assert not db.rows('fs4lineup', 'teamid', world_tour.DARK)
+    assert db.rows('fs4lineup', 'teamid', world_tour.WHITE)
 
 
 def test_short_id_only_takes_that_player_s_files(game, tmp_path):

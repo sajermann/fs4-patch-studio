@@ -11,14 +11,23 @@ switched off (fsmod.gamepatches). A team with no picks is left for the game to c
 
 A player comes in one of two ways:
   original  the player himself. No level or skills to buy (the game only gives those to created players).
-  clone     a copy with his own playerid and created-player rows: he has a level and skills to buy, and his original
-            stays in his club. A created player cut from a team is deleted from the game, so an original can never get
-            those rows. The clone keeps a scanned head by having the original's files under his id (and player.lua
-            changed, fsmod.gamepatches), but the menus do not show his photo.
+  clone     a copy with his own playerid and created-player rows: he has a level and skills to buy, starts with the
+            same skills as the created players, and his original stays in his club. A created player cut from a team is
+            deleted from the game, so an original can never get those rows. The clone keeps a scanned head by having the
+            original's files under his id (and player.lua changed, fsmod.gamepatches).
+
+The game never looks for the photo of a created player: it draws his head and shows imgAssets/heads/p<id>.png, and a file
+of that name beats the drawing. So a clone's photo goes there, framed for the place the screen gives a drawn image.
+
+With no fs4lineup row the game picks each team's starters by rating, so strong picks would leave out the captain and weak
+ones would sit out: a team with picks gets a row.
 """
+import io
 import itertools
 
-from . import chunk, photo, scanface
+from PIL import Image
+
+from . import chunk, crest, photo, scanface
 from .world_tour_rows import CREATED_PLAYER_ROWS, TEAM_ROWS
 
 DARK, WHITE = 4000, 4001
@@ -27,6 +36,15 @@ GENERATED_POSITION = 27  # teamplayerlinks.position of the game's generated play
 FIRST_JERSEY = {DARK: 2, WHITE: 1}  # the captain takes number 1 in Dark
 CAPTAIN_FIELD = 'captainid'
 TAKER_FIELDS = ('penaltytakerid', 'freekicktakerid', 'longkicktakerid', 'leftcornerkicktakerid', 'rightcornerkicktakerid')
+CREATED_PLAYER_STATS = {'fsathleticism': 71, 'fsdefending': 71, 'fsdribbling': 71, 'fsgk': 71, 'fspassing': 71,
+                        'fsshooting': 71, 'fsspeed': 71, 'skillmoves': 0, 'overallrating': 71, 'playerstylecode': 1,
+                        'developmentstylecode': 1, 'developmenttypecode': 1}  # as the game writes its created players
+# fifa_playerhead.big shows a .dds at _y 77, 100x100 and anything else at _y 64, 128x128, keeping the center
+PHOTO_Y, PHOTO_SIZE, DRAWN_Y, DRAWN_SIZE = 77, 100, 64, 128
+THUMBNAIL_CANVAS = 256
+LINEUP_MODE = {'numberofplayers': 4, 'hasgoalie': 1, 'tacticsidx': 1}  # the only mode of the friendly match
+LINEUP_SIDE = {DARK: 0, WHITE: 1}
+TEAM_SIZE = 6  # the game tops each friendly team up to this many players
 TEXT_KEYS = ('TeamName', 'CT_TeamName', 'TeamName_Abbr15', 'TeamName_Abbr10', 'TeamName_Abbr7')  # not Abbr3: it would
 # hide, in the match scoreboard, the abbreviation the user gives the team
 
@@ -66,8 +84,8 @@ def _files_of(game, name, loose, entries):
     return found[2] if found else None
 
 
-def clone_files(game, source, clone, loose, entries):
-    """{loose file name: bytes} of a clone: the scanned head and the photo of source under the clone's id."""
+def clone_head_files(game, source, clone, loose, entries):
+    """{loose file name: bytes} of a clone: the scanned head of source under the clone's id."""
     files = {}
     for template in scanface.FILES.values():
         data = _files_of(game, scanface.ASSETS + template.format(source), loose, entries)
@@ -76,12 +94,28 @@ def clone_files(game, source, clone, loose, entries):
             # be part of another number
             renamed = scanface.renamed(chunk.decode(data), f'_{source}', f'_{clone}')
             files[scanface.ASSETS + template.format(clone)] = chunk.chunkzip(renamed)
+    return files
+
+
+def thumbnail_name(pid):
+    return photo.photo_name(pid).removesuffix('dds') + 'png'
+
+
+def clone_thumbnail(game, source, loose):
+    """The photo of source in a transparent square, so that it looks right at the size of a drawn image: compressed like
+    p<id>.dds (the game loads it under the .png name). None when he has no photo."""
     picture = loose.get(photo.photo_name(source))
     if picture is None and source in game.photo_index:
         picture = game.read_photo(source)[1]
-    if picture is not None:
-        files[photo.photo_name(clone)] = picture
-    return files
+    if picture is None:
+        return None
+    image = Image.open(io.BytesIO(chunk.decode(picture))).convert('RGBA')
+    margin = (DRAWN_SIZE - PHOTO_SIZE) / 2
+    scale = THUMBNAIL_CANVAS / DRAWN_SIZE
+    size = round(PHOTO_SIZE * scale)
+    frame = Image.new('RGBA', (THUMBNAIL_CANVAS, THUMBNAIL_CANVAS))
+    frame.paste(image.resize((size, size), Image.LANCZOS), (round(margin * scale), round((margin + PHOTO_Y - DRAWN_Y) * scale)))
+    return crest.dds_entry(game.read_photo(min(game.photo_index))[1], frame)
 
 
 def _add_clone(db, source):
@@ -93,6 +127,8 @@ def _add_clone(db, source):
     clone = db.max_value('players', 'playerid') + 1
     row = list(players.records[rows[0]])
     db.put(players, row, 'playerid', clone)
+    for field, value in CREATED_PLAYER_STATS.items():
+        db.put(players, row, field, value)
     db.insert_sorted('players', 'playerid', row, players.raw_records[rows[0]])
     kits = db.table('playerkit')
     for k in db.rows('playerkit', 'playerid', source):
@@ -146,6 +182,27 @@ def _add_team(db, teamid, roster, captain):
         db.append('teamstadiumlinks', row, raw)
 
 
+def _add_lineups(db, rosters, captain):
+    """fs4lineup rows of the teams with picks. Slot 0 is the goalkeeper: the best at it, the first picked among equals.
+    Generated players get the next free ids (captain, Dark, then White), so a team with too few picks can name them, and
+    one of them goes in goal rather than the only pick."""
+    players = db.table('players')
+    keeping = lambda pid: db.get(players, players.records[db.rows('players', 'playerid', pid)[0]], 'fsgk')
+    size = LINEUP_MODE['numberofplayers']
+    next_id = captain + 1
+    for teamid, side in LINEUP_SIDE.items():
+        roster = rosters.get(teamid, [])
+        own = [captain] if teamid == DARK else []
+        generated = list(range(next_id, next_id + TEAM_SIZE - len(roster) - len(own)))
+        next_id += len(generated)
+        if not roster:
+            continue
+        picks = sorted(roster, key=keeping, reverse=True)
+        order = [*picks, *own] if len(picks) + len(own) >= size else [generated[0], *picks, *own, *generated[1:]]
+        slots = {f'position{k}': pid for k, pid in enumerate(order[:size])}
+        _append(db, 'fs4lineup', {'teamid': teamid, 'side': side, **LINEUP_MODE, **slots})
+
+
 def apply(db, game, project, player_ids, loose, entries, texts, say):
     """Puts the picked players and their teams in the database, the clones' files in loose and the team names in texts.
     Runs after every other change to the players: a clone copies his original as the project leaves him."""
@@ -159,7 +216,10 @@ def apply(db, game, project, player_ids, loose, entries, texts, say):
                 pid = _add_clone(db, source)
                 players = db.table('players')
                 if db.get(players, players.records[db.rows('players', 'playerid', source)[0]], 'headclasscode') == 0:
-                    loose.update(clone_files(game, source, pid, loose, entries))
+                    loose.update(clone_head_files(game, source, pid, loose, entries))
+                thumbnail = clone_thumbnail(game, source, loose)
+                if thumbnail is not None:
+                    loose[thumbnail_name(pid)] = thumbnail
                 say(f'World Tour {name}: {pid}, clone of {source}')
             else:
                 pid = source
@@ -176,3 +236,4 @@ def apply(db, game, project, player_ids, loose, entries, texts, say):
     for teamid, roster in rosters.items():
         _add_links(db, teamid, roster)
         _add_team(db, teamid, roster, captain if teamid == DARK else roster[0])
+    _add_lineups(db, rosters, captain)

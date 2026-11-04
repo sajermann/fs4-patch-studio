@@ -88,8 +88,9 @@ Back up your project before updating (Settings → Download backup).
 
 - Pick who plays the friendly match at the start of the World Tour (up to 3 players in Dark and 4 in White). After the
   match they can join your squad; places left empty get the game's random players. Needs a new save.
-- Each one comes as a **clone** (levels up and buys skills, but has no thumbnail in the menus; the original stays in the
-  club) or as the **original** (has a thumbnail, but does not level up and cannot be edited in the game).
+- Each one comes **with progression** (a copy with his photo that starts with the same skills as the captain, levels up
+  and buys skills; the original stays in the club) or **without progression** (the actual player with his own skills, who
+  gains no experience and cannot be edited in the game). The players you pick start the friendly match.
 
 ### Patches
 
