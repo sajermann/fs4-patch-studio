@@ -6,7 +6,8 @@ import shutil
 import pytest
 
 from conftest import FIXTURES, REFERENCE
-from fsmod import builder, chunk, model
+from fsmod import builder, chunk, model, player_generator
+from fsmod.catalog import Catalog
 
 PALMEIRAS = os.path.join(FIXTURES, 'palmeiras')
 
@@ -648,3 +649,12 @@ def test_set_piece_takers_default_to_the_captain(game):
     assert get(row, 'leftcornerkicktakerid') == pid[roster[1].uid]
     assert get(row, 'penaltytakerid') == pid[roster[2].uid]
     assert get(row, 'rightcornerkicktakerid') == get(row, 'freekicktakerid') == pid[roster[0].uid]
+
+
+def test_generated_players_build(game):
+    project = load_palmeiras()
+    project.players = project.players[:2]
+    project.players += player_generator.generate(project, project.teams[0].uid, Catalog(game))
+    assert len(project.players) == builder.MAX_ROSTER
+    result = builder.build(project, game, PALMEIRAS)
+    assert result.entries

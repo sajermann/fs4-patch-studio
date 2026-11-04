@@ -23,8 +23,8 @@ from .faces import FaceError, FaceService
 from .original_images import OriginalImages
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
 from .project_store import BackupError, ProjectFileError, ProjectStore, migrate_folder
-from fsmod import (builder, kit, kitprint, model, original_league, original_player, original_team, photo, preview,
-                   scanface, validation)
+from fsmod import (builder, kit, kitprint, model, original_league, original_player, original_team, photo,
+                   player_generator, preview, scanface, validation)
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
 
@@ -310,6 +310,14 @@ def create_app(state=None):
     def validate_project(project: model.Project):
         """Issues of a draft + the values each player inherits from its template player (see state_of)."""
         return state_of(project)
+
+    @app.post('/api/teams/{uid}/generate-players')
+    def generate_players(uid: str, project: model.Project):
+        """Players that complete the roster of a new team of the draft (the client adds them to it)."""
+        if not any(t.uid == uid for t in project.new_teams):
+            raise HTTPException(404, {'code': 'team_not_found', 'message': f'Time novo {uid} não existe no projeto.'})
+        players = player_generator.generate(project, uid, state.catalog())
+        return [p.model_dump(mode='json', exclude_none=True) for p in players]
 
     # ---------------------------------------------------------------- originals (read-only)
     @app.get('/api/originals/leagues')

@@ -121,6 +121,9 @@ export const api = {
   validate: (project: Project) =>
     request<{ issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; changed_leagues: number[] }>('/api/project/validate', json('POST', project)),
 
+  /** Players that complete the roster of a new team of the draft; the caller adds them to the draft. */
+  generatePlayers: (team: string, project: Project) => request<Player[]>(`/api/teams/${team}/generate-players`, json('POST', project)),
+
   originalLeagues: () => request<OriginalLeague[]>('/api/originals/leagues'),
   originalTeams: () => request<OriginalTeam[]>('/api/originals/teams'),
   originalStadiums: () => request<OriginalStadium[]>('/api/originals/stadiums'),

@@ -818,3 +818,33 @@ def test_unexpected_errors_come_back_with_a_code(env, monkeypatch):
         raise OSError(28, 'No space left on device')
     monkeypatch.setattr(ProjectStore, 'save', full)
     assert client.put('/api/project', json={'version': 3}).json()['detail']['code'] == 'no_disk_space'
+
+
+def test_generate_players_completes_the_roster_of_a_new_team(env):
+    c = env['client']
+    project, _ = palmeiras_v2(c)
+    team = project['teams'][0]['uid']
+    project['players'] = project['players'][:2]
+
+    r = c.post(f'/api/teams/{team}/generate-players', json=project)
+    assert r.status_code == 200, r.text
+    generated = r.json()
+
+    assert [p['last_name'] for p in generated] == [f'{i:02d}' for i in range(1, 12)]
+    assert all(p['first_name'] == 'Player' and p['generic'] for p in generated)
+    assert all(p['teams'][0]['team'] == team and p['teams'][0]['position'] == 25 for p in generated)
+    assert all(p['skills']['SHO'] == 50 and p['skills']['TRI'] == 2 for p in generated)
+    assert len({p['uid'] for p in generated}) == 11
+    numbers = [p['teams'][0]['number'] for p in generated]
+    assert len(set(numbers)) == 11
+
+    project['players'] += generated
+    uids = {p['uid'] for p in generated}
+    issues = c.post('/api/project/validate', json=project).json()['issues']
+    assert [i for i in issues if i['severity'] == 'error' or i['entity'] in uids] == []
+    assert c.post(f'/api/teams/{team}/generate-players', json=project).json() == []
+
+    project['players'] = [p for p in project['players'] if p['last_name'] not in ('01', '04')]
+    regenerated = c.post(f'/api/teams/{team}/generate-players', json=project).json()
+    assert [p['last_name'] for p in regenerated] == ['01', '04']
+    assert c.post('/api/teams/unknown/generate-players', json=project).status_code == 404

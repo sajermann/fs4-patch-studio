@@ -54,6 +54,7 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `POST /api/dialog/folder?initial=` | Windows folder picker on this machine; `{folder}` or null |
 | `GET/PUT /api/config` | local settings |
 | `GET/PUT /api/project`, `POST /api/project/validate` | project (contract v2) + validation issues (`code`, `severity`, `entity`, `field`, pt-BR `message`) + `defaults` (per player: values inherited from the template player where the project leaves a field unset) |
+| `POST /api/teams/{uid}/generate-players` | body: the draft project; returns the `Player`s that complete the roster of that new team up to 13 (strikers named Player 01, 02... skipping the names the team already has, skills at the middle, the rest random); the client adds them to the draft |
 | `GET /api/project/backup` | zip of the project folder (`database.json` + `images/` + `faces/`), downloaded by the "Fazer backup" button |
 | `POST /api/project/restore` (zip) | replaces the project with a backup zip (its content or the `project` folder itself); checked and extracted beside the folder first, so a bad zip (`invalid_backup` + `reason`) changes nothing |
 | `POST /api/originals/leagues/{leagueid}/edit?uid=` | starts editing an original league (one the game's selector shows): its images (the flags of its country) become provisional project images and the `League` comes back filled with the game's data (`original_id`, `loaded`; the build only rewrites what changed) |

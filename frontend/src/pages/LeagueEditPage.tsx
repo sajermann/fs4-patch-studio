@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { ApiError, api, imageUrl } from '@/api/client'
 import type { League, LeagueKey, OriginalTeam, Team, TeamKey } from '@/api/types'
 import { EntityIssues, Field, NumberInput, OriginalBadge, OriginalCrest, TeamCrest } from '@/components/common/form'
-import { OutOfPatchBadge } from '@/components/common/HideButton'
+import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { matches } from '@/components/common/list'
 import { PickerDialog, type PickerItem } from '@/components/common/PickerDialog'
 import {
@@ -216,6 +216,7 @@ export function LeagueEditPage() {
   const { t } = useI18n()
   const { key: param } = useParams()
   const { draft, setDraft, updateLeague, removeLeague } = useProject()
+  const { isLeagueHidden, toggleLeague } = useOriginalChanges()
   const gameTeams = useOriginalTeams().data ?? []
   const gameLeagues = useOriginalLeagues().data
   const navigate = useNavigate()
@@ -282,8 +283,27 @@ export function LeagueEditPage() {
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-semibold">{l.name || t('leagues.new')}</h1>
           {original && <OriginalBadge entry={l.uid} league={l.original_id} />}
+          {original && isLeagueHidden(l.original_id!) && <OutOfPatchBadge alert label={t('leagues.hiddenByProject')} />}
+          {!original && l.hidden && <OutOfPatchBadge alert />}
         </div>
         <div className="flex gap-2">
+          {original ? (
+            <HideButton
+              variant="outline"
+              hidden={isLeagueHidden(l.original_id!)}
+              onToggle={() => toggleLeague(l.original_id!)}
+              hideHint={t('leagues.originalHideHint')}
+              showHint={t('leagues.originalShowHint')}
+            />
+          ) : (
+            <HideButton
+              variant="outline"
+              hidden={!!l.hidden}
+              onToggle={() => updateLeague(l.uid, { hidden: !l.hidden })}
+              hideHint={t('leagues.hideHint')}
+              showHint={t('leagues.showHint')}
+            />
+          )}
           {original ? (
             <Button
               variant="outline"

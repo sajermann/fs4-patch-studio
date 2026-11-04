@@ -1,6 +1,8 @@
-import { Plus, UserMinus, UserPlus } from 'lucide-react'
+import { Dices, Plus, UserMinus, UserPlus } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
+import { ApiError, api } from '@/api/client'
 import type { PlayerRef, Team, TeamKey, TeamLink } from '@/api/types'
 import { EntityIssues, FieldIssues, NumberInput, OriginalBadge } from '@/components/common/form'
 import { OutOfPatchBadge } from '@/components/common/HideButton'
@@ -8,6 +10,16 @@ import { matches } from '@/components/common/list'
 import { PickerDialog, type PickerItem } from '@/components/common/PickerDialog'
 import { OriginalPlayerAvatar, PlayerAvatar } from '@/components/common/PlayerPhoto'
 import { RoleCells, RoleHeads, TakersCard } from '@/components/common/TakersCard'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -125,12 +137,14 @@ export function AddPlayerDialog({
  * Adding to a full team asks who leaves it (useJoinTeam). */
 export function RosterCard({ team }: { team: Team }) {
   const { t } = useI18n()
-  const { setDraft, updatePlayer, updateTeam, addPlayer } = useProject()
+  const { draft, setDraft, updatePlayer, updateTeam, addPlayer } = useProject()
   const { position: positionAbbr } = useLookups()
   const catalog = useCatalog().data
   const navigate = useNavigate()
   const from = useFrom(team.name || t('players.colTeam'))
   const [adding, setAdding] = useState(false)
+  const [confirmingGenerate, setConfirmingGenerate] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const ensure = useGamePlayerEntry()
   const { join, dialog } = useJoinTeam()
   const key = teamKey(team)
@@ -139,6 +153,7 @@ export function RosterCard({ team }: { team: Team }) {
   const members = useTeamMembers(team)
   const active = members.filter((m) => !m.hidden)
   const max = catalog?.max_roster ?? 13
+  const missing = max - active.length
   const rosterIssues = useIssues(team.uid, 'players')
   const captain = team.captain ?? (original ? game?.captain : active[0]?.ref)
   const takers = { ...(original ? game?.takers : {}), ...team.takers }
@@ -161,6 +176,18 @@ export function RosterCard({ team }: { team: Team }) {
     addPlayer({ uid, teams: [{ team: key, number }], first_name: '', last_name: '', generic: true, skills: {}, appearance: {}, fields: {} })
     navigate(`/players/${uid}`, from)
   }
+  const generatePlayers = async () => {
+    setGenerating(true)
+    try {
+      const players = await api.generatePlayers(team.uid, draft)
+      setDraft((p) => ({ ...p, players: [...p.players, ...players] }))
+      toast.success(players.length === 1 ? t('roster.playerGenerated') : t('roster.playersGenerated', { count: players.length }))
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('roster.generateFailed'))
+    } finally {
+      setGenerating(false)
+    }
+  }
   const inheritedNumber = (m: Member) => (m.number != null ? t('common.inherited', { value: m.number }) : t('common.default'))
   const inheritedPosition = (m: Member) =>
     m.position != null ? t('common.inherited', { value: positionAbbr.get(m.position) ?? m.position }) : t('street.reset')
@@ -182,9 +209,14 @@ export function RosterCard({ team }: { team: Team }) {
                 <UserPlus /> {t('roster.addPlayer')}
               </Button>
               {!original && (
-                <Button size="sm" onClick={createPlayer} disabled={active.length >= max}>
-                  <Plus /> {t('players.new')}
-                </Button>
+                <>
+                  <Button variant="outline" size="sm" onClick={() => setConfirmingGenerate(true)} disabled={generating || active.length >= max}>
+                    <Dices /> {t('roster.generatePlayers')}
+                  </Button>
+                  <Button size="sm" onClick={createPlayer} disabled={active.length >= max}>
+                    <Plus /> {t('players.new')}
+                  </Button>
+                </>
               )}
             </div>
           </CardAction>
@@ -236,6 +268,20 @@ export function RosterCard({ team }: { team: Team }) {
         </CardContent>
         <AddPlayerDialog team={key} open={adding} onOpenChange={setAdding} onPick={(ref) => void join(ref, key)} />
         {dialog}
+        <AlertDialog open={confirmingGenerate} onOpenChange={setConfirmingGenerate}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('roster.generateTitle')}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {missing === 1 ? t('roster.generateDescriptionOne', { max }) : t('roster.generateDescription', { count: missing, max })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => void generatePlayers()}>{t('roster.generatePlayers')}</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </Card>
       <TakersCard
         entity={team.uid}
