@@ -443,6 +443,21 @@ def test_body_preview_assets(env):
     assert c.get('/api/preview/kit/socks.png', params={'color': '10,20,200'}).status_code == 422
 
 
+def test_face_in_an_unknown_format_is_reported(env):
+    """A pack file the converter cannot read: the same error for the check, the 3D files and the gallery thumbnail."""
+    c = env['client']
+    pack = env['tmp'] / 'odd-pack' / 'screenassets'
+    for sub, name in (('heads', 'head_1_0.rx3'), ('faces', 'face_1_0_0_0_0_0_0_0_0_textures.rx3')):
+        (pack / sub).mkdir(parents=True)
+        (pack / sub / name).write_bytes(b'RX3l' + bytes(60))
+    q = {'folder': str(pack), 'face': 1}
+    for url in ('/api/preview/scanned-check', '/api/preview/scanned/head.glb', '/api/facepack/thumb.png'):
+        r = c.get(url, params=q)
+        assert r.status_code == 422 and r.json()['detail']['code'] == 'face_unsupported', url
+        assert r.json()['detail']['error']
+    assert c.get('/api/preview/scanned-check', params={**q, 'face': 2}).json()['detail']['code'] == 'face_not_found'
+
+
 def test_real_face_from_a_pack(env):
     """FIFA 14 pack read in place: gallery, converted preview, copy into the project, validation."""
     from fsmod import facepack

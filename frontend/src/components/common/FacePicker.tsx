@@ -28,7 +28,18 @@ export interface BrowsedFace {
 // or name (accents ignored).
 const fold = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 
-export function FacePicker({ player, browsing, onBrowse }: { player: Player; browsing: BrowsedFace | null; onBrowse: (face: BrowsedFace | null) => void }) {
+export function FacePicker({
+  player,
+  browsing,
+  onBrowse,
+  unsupported = false,
+}: {
+  player: Player
+  browsing: BrowsedFace | null
+  onBrowse: (face: BrowsedFace | null) => void
+  /** the face being looked at does not convert: it cannot be picked */
+  unsupported?: boolean
+}) {
   const { t } = useI18n()
   const { updatePlayer } = useProject()
   const defaultDir = useStatus().data?.config.face_pack_dir
@@ -176,7 +187,15 @@ export function FacePicker({ player, browsing, onBrowse }: { player: Player; bro
                     t('faces.face', { id: f.id }) + (f.hair ? '' : ` ${t('faces.noHair')}`),
                   ].join('\n')}
                 >
-                  <img src={faceThumbUrl({ folder: pack.folder, face: f.id })} alt="" loading="lazy" className="aspect-square w-full object-contain" />
+                  <img
+                    src={faceThumbUrl({ folder: pack.folder, face: f.id })}
+                    alt=""
+                    loading="lazy"
+                    className="aspect-square w-full object-contain"
+                    onError={(e) => {
+                      e.currentTarget.style.visibility = 'hidden' // a face the app cannot read: no broken image icon
+                    }}
+                  />
                   <span className="w-full truncate text-center text-[11px] leading-tight">{f.player?.name ?? '—'}</span>
                   <span className="font-mono text-[10px] text-muted-foreground">{f.id}</span>
                   {current && <Check className="absolute top-1 left-1 size-3.5 text-primary" />}
@@ -190,14 +209,18 @@ export function FacePicker({ player, browsing, onBrowse }: { player: Player; bro
 
       {browsing && (
         <div className="flex items-center gap-2 rounded-md border border-primary/40 bg-primary/5 p-2 text-sm">
-          <p className="min-w-0 flex-1">
-            {t('faces.viewing')}{' '}
-            <span className="font-medium">
-              {browsing.face.player ? `${browsing.face.player.name} (${browsing.face.id})` : browsing.face.id}
-            </span>{' '}
-            {t('faces.viewingRest')}
-          </p>
-          <Button size="sm" onClick={() => void pick()} disabled={picking}>
+          {unsupported ? (
+            <p className="min-w-0 flex-1 text-destructive">{t('faces.unsupported', { id: browsing.face.id })}</p>
+          ) : (
+            <p className="min-w-0 flex-1">
+              {t('faces.viewing')}{' '}
+              <span className="font-medium">
+                {browsing.face.player ? `${browsing.face.player.name} (${browsing.face.id})` : browsing.face.id}
+              </span>{' '}
+              {t('faces.viewingRest')}
+            </p>
+          )}
+          <Button size="sm" onClick={() => void pick()} disabled={picking || unsupported}>
             {picking ? <LoaderCircle className="animate-spin" /> : <Check />} {t('faces.use')}
           </Button>
           <Button size="icon" variant="ghost" className="size-8" onClick={() => onBrowse(null)} title={t('faces.stopViewing')}>

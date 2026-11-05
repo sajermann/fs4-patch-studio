@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from conftest import REPO
-from fsmod import facepack, model, preview, rx3mesh, scanface
+from fsmod import facepack, model, preview, rx3mesh, rx3tex, scanface
 
 PACK = os.path.join(REPO, 'Faces', 'various-by-Colgado')  # local face pack (outside git); tests skip without it
 VALIDATED = os.path.join(REPO, 'pesquisa', 'faces', 'out', '274254_v14')
@@ -24,9 +24,13 @@ def assets():
 
 def test_converter_matches_the_files_validated_in_game(game, assets, monkeypatch):
     """The 274254 reference predates the cap pulled to the scalp (24/10): compared with it off, and the hair with it
-    on must be the reference hair pulled."""
+    on must be the reference hair pulled. It also predates the fit of the back of the neck, the paint skipping the eyes and
+    the hair color map resized apart from its alpha: off here too."""
     if not os.path.isdir(VALIDATED):
         pytest.skip('validated face not available')
+    monkeypatch.setattr(scanface, 'NAPE_FRONT', -1e9)
+    monkeypatch.setattr(scanface, 'PAINT_SKIPS_EYES', False)
+    monkeypatch.setattr(rx3tex, 'DXT5_RESIZE_APART', False)
     tpl, src = scanface.template_files(game), facepack.read_face(assets, FACE)
     pulled = scanface.convert(tpl, src, scanface.TEMPLATE, preview.hair_color(3))
     monkeypatch.setattr(scanface, 'CAP_GAP', None)
@@ -67,6 +71,48 @@ def test_scalp_paint_can_be_turned_off(game, assets):
     assert painted[face] != bare[face]
     assert {n: d for n, d in painted.items() if n != face} == {n: d for n, d in bare.items() if n != face}
     assert model.ScannedFace(source_id=FACE).paint_scalp is True
+
+def test_face_in_an_unknown_format_is_reported(game):
+    """Whatever breaks inside the converter reaches the app as FaceFormatError (the build and the preview handle it)."""
+    tpl = scanface.template_files(game)
+    with pytest.raises(scanface.FaceFormatError):
+        scanface.convert(tpl, {'head': b'RX3l' + bytes(60), 'face': b'RX3l' + bytes(60)}, scanface.TEMPLATE, '#000000')
+    with pytest.raises(scanface.FaceFormatError, match='missing face files'):
+        scanface.convert(tpl, {}, scanface.TEMPLATE, '#000000')
+
+
+@pytest.mark.parametrize('pack, face_id, case', [
+    ('redo-facepack-132-by-redo1000', 200779, 'no teeth where they are expected'),
+    ('redo-facepack-133-by-redo1000', 241861, 'lower teeth on the head bone'),
+    ('redo-facepack-126-by-redo1000', 72421, 'garbage after a wrong small mip'),
+    ('redo-facepack-140-by-redo1000', 999131, 'hair with strands only')])
+def test_converter_handles_odd_faces(game, pack, face_id, case):
+    assets = facepack.assets_dir(os.path.join(REPO, 'Faces', pack))
+    if not assets:
+        pytest.skip('face pack not available')
+    src = facepack.read_face(assets, face_id)
+    out = scanface.convert(scanface.template_files(game), src, scanface.TEMPLATE, preview.hair_color(1), paint=False,
+                           hair_mode='volume')
+    hair = out[scanface.FILES['hair'].format(scanface.TEMPLATE)]
+    assert scanface.hair_parts(hair) == {'strands': 0, 'cap': 1}, case
+
+
+def test_head_with_swapped_meshes_is_not_converted(game):
+    assets = facepack.assets_dir(os.path.join(REPO, 'Faces', 'redo-facepack-130-by-redo1000'))
+    if not assets:
+        pytest.skip('face pack not available')
+    with pytest.raises(scanface.FaceFormatError, match='swapped'):
+        scanface.convert(scanface.template_files(game), facepack.read_face(assets, 999099), scanface.TEMPLATE, '#000000')
+
+
+def test_hair_color_map_keeps_its_color_with_a_low_alpha(game):
+    """The alpha of hair_cm is not opacity: a resize that premultiplies it wrecks the color."""
+    tex = bytearray(scanface.template_files(game)['hair_textures'])
+    t = rx3tex.by_name(tex, 'hair_cm')
+    rx3tex.set_image(tex, t, Image.new('RGBA', (t['w'] * 2, t['h'] * 2), (120, 90, 60, 8)))
+    r, g, b, a = rx3tex.to_image(tex, t).getpixel((5, 5))
+    assert abs(r - 120) < 8 and abs(g - 90) < 8 and abs(b - 60) < 8 and abs(a - 8) < 8
+
 
 def test_pack_folder_with_or_without_screenassets(tmp_path):
     for layout in ('with', 'flat'):
@@ -124,6 +170,62 @@ def test_converter_handles_other_pack_layouts(game, assets, face_id, case):
     counts = {m['name'].split('.')[0]: len(m['attrs']['p0']) for m in rx3mesh.meshes(hair)}
     if case == 'hair cap only':
         assert min(counts.values()) == 3  # the template's strands are emptied (one zero-area triangle)
+
+
+@pytest.fixture(scope='module')
+def rig_pack():
+    """Pack whose faces hang the eyes on a bone outside the skin; some of them bring hair with another rig's matrices."""
+    found = facepack.assets_dir(os.path.join(REPO, 'Faces', 'some-faces-from-jgarca'))
+    if not found:
+        pytest.skip('face pack not available')
+    return found
+
+
+@pytest.mark.parametrize('face_id', [142708, 204485, 209331, 212188, 216816])
+def test_converter_handles_eyes_on_a_bone_outside_the_skin(game, rig_pack, face_id):
+    src = facepack.read_face(rig_pack, face_id)
+    skin = {b for _, bw in scanface.vertex_bones(src['head'], '<', 0, scanface.decl(src['head'], '<', 0)) for b in bw}
+    assert not skin & scanface.used_bones(src['head'], '<', 1, scanface.decl(src['head'], '<', 1))
+    assert scanface.head_bone(src['head'], '<') in skin
+    out = scanface.convert(scanface.template_files(game), src, scanface.TEMPLATE, preview.hair_color(1))
+    assert set(out) == {f.format(scanface.TEMPLATE) for f in scanface.FILES.values()}
+
+
+def test_hair_with_another_rigs_matrices_uses_the_heads_skeleton(rig_pack, assets):
+    src = facepack.read_face(rig_pack, 204485)
+    assert scanface.hair_skeleton(src['hair'], src['head']) == scanface.bone_positions(src['head'], '<')
+    ok = facepack.read_face(assets, FACE)
+    assert scanface.hair_skeleton(ok['hair'], ok['head']) == scanface.bone_positions(ok['hair'], '<')
+
+
+def test_lash_strip_below_the_eye_is_raised(game, rig_pack):
+    """Mo Salah's strip crosses the eye in the pack; one already above the middle stays where it is."""
+    tpl = scanface.template_files(game)
+    out = scanface.convert(tpl, facepack.read_face(rig_pack, 209331), scanface.TEMPLATE, preview.hair_color(1))
+    hair, head = (out[scanface.FILES[k].format(scanface.TEMPLATE)] for k in ('hair', 'head'))
+    assert scanface.raise_lashes(hair, head) == hair  # now in place: nothing left to raise
+    eye = [m for m in rx3mesh.meshes(head) if 'eyes' in m['name']][0]['attrs']['p0']
+    cap = [m for m in rx3mesh.meshes(hair) if 'alphaA' in m['name']][0]['attrs']
+    lash = [p[1] for p, uv in zip(cap['p0'], cap['t0']) if 0.03 <= uv[0] <= 0.04 and 0.06 <= uv[1] <= 0.11]
+    assert lash and sum(lash) / len(lash) > (min(p[1] for p in eye) + max(p[1] for p in eye)) / 2
+
+
+def test_back_of_the_neck_follows_the_template(game):
+    """Only behind the neck and only inwards: the fit never widens it nor touches the front or the head; the weights
+    fade into the template's there and the rest keeps the voted ones."""
+    tpl = scanface.template_files(game)['head']
+    fit = scanface.neck_fitter(tpl, 0)
+    assert fit((0.0, 165.0, 9.0)) == (0.0, 165.0, 9.0)  # in front, above the chin
+    assert fit((0.0, 170.0, -9.0)) == (0.0, 170.0, -9.0)  # above the nape
+    assert fit((0.0, 164.0, -12.0))[2] > -12.0  # too wide: pulled in
+    assert fit((0.0, 165.5, -3.0))[2] == -3.0  # slimmer than the template: stays
+    weights = scanface.neck_weights(tpl, 0, scanface.decl(tpl, '>', 0))
+    normal = (0.0, 0.0, -1.0)
+    voted = ([147, 0, 0, 0], [255, 0, 0, 0])
+    assert weights((0.0, 170.0, -7.0), normal, *voted) is None
+    assert weights((0.0, 165.0, 9.0), (0.0, 0.0, 1.0), *voted) is None
+    idx, scaled = weights((0.0, 164.0, -7.0), normal, *voted)
+    assert sum(scaled) == 255 and len(idx) == 4 and set(idx) - {147, 0}  # the template's bones came in
 
 
 def test_build_writes_the_real_face_as_loose_files(game, assets, tmp_path):

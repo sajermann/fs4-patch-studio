@@ -53,12 +53,26 @@ THICK_GAMMA = 0.6  # exponent of the opacities in 'thick' (< 1: soft strand edge
 # 'thick' as the editor shows it (ScannedFace.hair_thickness): exponent = 1 - thickness, so 0 = as in the pack
 HAIR_THICKNESS = round(1 - THICK_GAMMA, 2)
 HAIR_THICKNESS_MAX = 0.9
+# Back of the neck (validated in game): FIFA 14 napes stick out of the collars of FIFA Street's shirts when the head
+# moves, unless they have the template's shape and weights. Both fade out towards the front, from z=NAPE_FRONT on
+NAPE_FRONT, NAPE_FADE = 2.0, 3.0  # cm
+NAPE_FIT_TOP, NAPE_FIT_FULL = 167.0, 164.0  # cm: laid onto the template's neck (only ever pulled in), whole below full
+NAPE_WEIGHTS_TOP, NAPE_WEIGHTS_FADE = 168.0, 2.0  # cm: takes the template's bone weights
+# Lash strips of the hair cap: most packs have them above the eye's middle; below it, they cross the eye
+LASH_MIN_GAP, LASH_GAP = 0.1, 0.4  # cm above the eye's middle: lowest accepted, and where a lower strip is moved to
+LASH_MAX_VERTICES = 80
+PAINT_SKIPS_EYES = True  # the scalp paint ignores cap vertices around the eyes (see paint_scalp). To go back: False
 # kind -> file name (format with the id), relative to screenassets/ (pack) or data/sceneassets/ (game)
 FILES = {'head': 'heads/head_{}_0.rx3', 'face': 'faces/face_{}_0_0_0_0_0_0_0_0_textures.rx3',
          'eyes': 'heads/eyes_{}_0_textures.rx3', 'hair': 'hair/hair_{}_0_0.rx3',
          'hair_textures': 'hair/hair_{}_0_textures.rx3', 'hairlod': 'hairlod/hairlod_{}_0_0.rx3'}
 REQUIRED = ('head', 'face')
 PROJECT_DIR = 'faces'  # project folder: faces/<player uid>/<FILES names with the pack id>
+
+
+class FaceFormatError(ValueError):
+    """A face the converter cannot handle: packs are made with many tools and some bring files in a layout it has
+    never met."""
 
 
 def project_face_dir(project_folder, player_uid):
@@ -176,10 +190,9 @@ def _closest_on_triangle(p, a, b, c):
     return lin(lin(a, ab, vb * den), ac, vc * den)
 
 
-def neck_fitter(template, slot, top=160.5, full=158.0):
-    """Function that lays the FIFA 14 neck base onto the template's neck surface (closest point on its triangles):
-    FIFA 14 necks are wider, stick out in front and have side/back flaps where the template has no mesh, so they
-    go through the collars of FIFA Street's shirts. Whole below `full`, fading out up to `top` (below the chin)."""
+def _neck_surface(template, slot, top, full):
+    """Function that lays a point onto the template's neck surface (closest point on its triangles): whole below
+    `full`, fading out up to `top`."""
     pos = positions(template, '>', slot)
     o, _ = of_type(template, '>', INDICES)[slot]
     n = struct.unpack('>I', template[o + 4:o + 8])[0]
@@ -197,6 +210,26 @@ def neck_fitter(template, slot, top=160.5, full=158.0):
     return fit
 
 
+def neck_fitter(template, slot, top=160.5, full=158.0):
+    """Function that lays the FIFA 14 neck base onto the template's neck surface: FIFA 14 necks are wider, stick out
+    in front and have side/back flaps where the template has no mesh, so they go through the collars of FIFA Street's
+    shirts. Whole below `full`, fading out up to `top` (below the chin). The back of the neck goes higher (NAPE_FIT_*),
+    but only inwards: necks slimmer than the template's stay as they are."""
+    base = _neck_surface(template, slot, top, full)
+    high = _neck_surface(template, slot, NAPE_FIT_TOP, NAPE_FIT_FULL)
+
+    def fit(p):
+        q = base(p)
+        back = max(0.0, min(1.0, (NAPE_FRONT - p[2]) / NAPE_FADE))
+        if back == 0 or p[1] >= NAPE_FIT_TOP:
+            return q
+        r = high(p)
+        if r[2] <= q[2]:
+            return q
+        return tuple(a + (b - a) * back for a, b in zip(q, r))
+    return fit
+
+
 def s10n(v):
     out = []
     for k in range(3):
@@ -206,31 +239,52 @@ def s10n(v):
 
 
 def neck_weights(template, slot, dd, below=160.0):
-    """Function (pos, normal) -> (indices, weights) of the nearest template vertex facing the same way, below the
-    chin (None above it: the face keeps its voted bone map). The template's neck base hangs on the torso bone and
-    follows the shirt; mapped by position, the FIFA 14 neck base landed on neck bones that follow the head and
-    tore out of the collars."""
+    """Function (pos, normal, voted indices, voted weights) -> (indices, weights) of the nearest template vertex
+    facing the same way, below the chin (None above it: the face keeps its voted bone map). The template's neck base
+    hangs on the torso bone and follows the shirt; mapped by position, the FIFA 14 neck base landed on neck bones that
+    follow the head and tore out of the collars. Above the chin, the back of the neck fades from the voted weights
+    into the template's (NAPE_WEIGHTS_*): voted, it can skip the template's middle neck bone and leave the collar in
+    some poses even when its shape already fits."""
     o, _ = of_type(template, '>', VERTICES)[slot]
     _, count, stride, _ = struct.unpack('>IIII', template[o:o + 16])
     ioff, woff, noff = dd['i0'][0], dd['w0'][0], dd['n0'][0]
-    pts = []
+    high = []
     for i in range(count):
         b = o + 16 + i * stride
         p = struct.unpack_from('>3f', template, b)
-        if p[1] < below + 3:
+        if p[1] < NAPE_WEIGHTS_TOP + 3:
             n = s10n(struct.unpack_from('>I', template, b + noff)[0])
-            pts.append((p, n, template[b + ioff:b + ioff + 4], template[b + woff:b + woff + 4]))
+            high.append((p, n, template[b + ioff:b + ioff + 4], template[b + woff:b + woff + 4]))
+    low = [q for q in high if q[0][1] < below + 3]
 
-    def lookup(p, n):
-        if p[1] >= below:
-            return None
-
+    def nearest(pts, p, n):
         def cost(q):
             d = sum((a - c) ** 2 for a, c in zip(p, q[0]))
             facing = sum(a * c for a, c in zip(n, q[1]))
             return d + (100.0 if facing < 0.3 else 0.0)  # same side of the surface
-        q = min(pts, key=cost)
-        return q[2], q[3]
+        return min(pts, key=cost)
+
+    def lookup(p, n, voted_idx, voted_weights):
+        if p[1] < below:
+            q = nearest(low, p, n)
+            return q[2], q[3]
+        mix = (max(0.0, min(1.0, (NAPE_FRONT - p[2]) / NAPE_FADE))
+               * max(0.0, min(1.0, (NAPE_WEIGHTS_TOP - p[1]) / NAPE_WEIGHTS_FADE)))
+        if mix == 0:
+            return None
+        q = nearest(high, p, n)
+        weights = {}
+        for x, w in zip(voted_idx, voted_weights):
+            if w:
+                weights[x] = weights.get(x, 0) + w * (1 - mix)
+        for x, w in zip(q[2], q[3]):
+            if w:
+                weights[x] = weights.get(x, 0) + w * mix
+        top = sorted(weights.items(), key=lambda kv: -kv[1])[:4]
+        total = sum(w for _, w in top)
+        scaled = [round(w * 255 / total) for _, w in top]
+        scaled[0] += 255 - sum(scaled)
+        return [x for x, _ in top] + [0] * (4 - len(top)), scaled + [0] * (4 - len(top))
     return lookup
 
 
@@ -252,12 +306,24 @@ def vertex_bones(d, e, k, dd):
     return out
 
 
+def head_bone(d, e):
+    """Bone that carries the head: the one the eyes (mesh 1) use. Some packs hang the eyes on a bone the skin (mesh 0)
+    does not use at all; there it is the most weighted bone of the skin."""
+    eyes = used_bones(d, e, 1, decl(d, e, 1))
+    skin = {}
+    for _, bw in vertex_bones(d, e, 0, decl(d, e, 0)):
+        for x, w in bw.items():
+            skin[x] = skin.get(x, 0) + w
+    return min(eyes) if any(b in skin for b in eyes) else max(skin, key=skin.get)
+
+
 def mouth_slit(d, e, k):
     """Height (y, cm) of the mouth slit: midway between the upper teeth (hanging only on the head bone, the one
     the eyes use) and the lower teeth (not on it). Teeth = vertices inside the head (z > 3) above y=160 mapped to
-    the bottom strip of the face texture (v >= 0.86), where both games draw the teeth."""
+    the bottom strip of the face texture (v >= 0.86), where both games draw the teeth. None when a face does not have
+    both (no teeth there, or the lower teeth hanging on the head bone too)."""
     dd = decl(d, e, k)
-    head = min(used_bones(d, e, 1, decl(d, e, 1)))
+    head = head_bone(d, e)
     o, _ = of_type(d, e, VERTICES)[k]
     _, count, stride, _ = struct.unpack(e + 'IIII', d[o:o + 16])
     upper, lower = [], []
@@ -270,6 +336,8 @@ def mouth_slit(d, e, k):
             upper.append(p[1])
         elif share < 0.1:
             lower.append(p[1])
+    if not upper or not lower:
+        return None
     return (sum(upper) / len(upper) + sum(lower) / len(lower)) / 2
 
 
@@ -317,8 +385,8 @@ def vote_map(src, k, template, slot, offset, fallback):
     bones vote freely: the family test misses jaw children that rarely share vertices with the jaw (FIFA 14 lower
     teeth, bone 27: 17%), and they must still reach the jaw (Messi's lower teeth hang on it directly)."""
     sd, td = decl(src, '<', k), decl(template, '>', slot)
-    src_head = min(used_bones(src, '<', 1, decl(src, '<', 1)))
-    tpl_head = min(used_bones(template, '>', 1, decl(template, '>', 1)))
+    src_head = head_bone(src, '<')
+    tpl_head = head_bone(template, '>')
     src_jaw, src_family = jaw_family(vertex_bones(src, '<', k, sd), src_head)
     tpl_jaw, tpl_family = jaw_family(vertex_bones(template, '>', slot, td), tpl_head)
     o, _ = of_type(template, '>', VERTICES)[slot]
@@ -458,7 +526,7 @@ def convert_vertices(src, k, dst_decl, bone_map, fit=None, weights_of=None, offs
         scaled[0] += 255 - sum(scaled)
         idx = [bone for bone, _ in top] + [0] * (4 - len(top))
         scaled += [0] * (4 - len(scaled))
-        copied = weights_of(p, nrm) if weights_of else None
+        copied = weights_of(p, nrm, idx, scaled) if weights_of else None
         if copied:
             idx, scaled = copied
         v[dst_decl['i0'][0]:dst_decl['i0'][0] + 4] = bytes(idx)
@@ -518,15 +586,35 @@ def renamed(d, old, new):
     return out
 
 
+def hair_skeleton(hair, head):
+    """Bind positions of a pack's hair bones. Some hair files bring the matrices of another skeleton under the bone
+    ids of the head's (the main bone of a mesh shows up far from it, e.g. at the leg, and the hair moves apart from
+    the head in game): those use the head's skeleton."""
+    own = bone_positions(hair, '<')
+    for k in range(len(of_type(hair, '<', VERTICES))):
+        weights = {}
+        for _, bw in vertex_bones(hair, '<', k, decl(hair, '<', k)):
+            for x, w in bw.items():
+                weights[x] = weights.get(x, 0) + w
+        if not weights:
+            continue
+        main = max(weights, key=weights.get)
+        ys = [p[1] for p in positions(hair, '<', k)]
+        if main >= len(own) or abs(own[main][1] - sum(ys) / len(ys)) > 40:
+            return bone_positions(head, '<')
+    return own
+
+
 def convert_mesh(template, src, slot_of, old_id, new_id, fit_neck=False, offset=(0.0, 0.0, 0.0), vote=False,
-                 empty=()):
+                 empty=(), skeleton=None):
     """slot_of[k] = template mesh index that receives FIFA 14 mesh k. offset: see align_offset. fit_neck: lay mesh
     0's neck base onto the template's (and take its weights below the chin); vote: bone map of mesh 0 by vote
     (vote_map; head mesh only). empty: template slots the face has nothing for (hair with a cap only): they get a
-    single zero-area triangle, so none of the template's own geometry is left."""
+    single zero-area triangle, so none of the template's own geometry is left. skeleton: bind positions of src's bones
+    when not its own (hair_skeleton)."""
     secs = sections(template, '>')
     idx_of = {t: [i for i, s in enumerate(secs) if s[0] == t] for t in (HEADER, NAMES, VERTICES, INDICES)}
-    src_bones = [tuple(c + d for c, d in zip(b, offset)) for b in bone_positions(src, '<')]
+    src_bones = [tuple(c + d for c, d in zip(b, offset)) for b in (skeleton or bone_positions(src, '<'))]
     dst_bones = bone_positions(template, '>')
     replace = {}
     header = bytearray(template[secs[idx_of[HEADER][0]][1]:][:secs[idx_of[HEADER][0]][2]])
@@ -538,16 +626,19 @@ def convert_mesh(template, src, slot_of, old_id, new_id, fit_neck=False, offset=
             # the eyes align the head, but the mouths can sit a few mm apart: the mouth bones vote again with the
             # slits lined up (274254: -0.79 cm, which puts lower lip bones 75/87/91 on FS's lower lip)
             slit_tpl, slit_src = mouth_slit(template, '>', slot), mouth_slit(src, '<', k)
-            dy = slit_tpl - (slit_src + offset[1])
             face_map = vote_map(src, k, template, slot, offset, bone_map)
-            mouth_map = vote_map(src, k, template, slot, (offset[0], offset[1] + dy, offset[2]), bone_map)
-            centers = {}
-            for p, bw in vertex_bones(src, '<', k, decl(src, '<', k)):
-                for x, w in bw.items():
-                    c = centers.setdefault(x, [0.0, 0.0, 0.0])
-                    c[0], c[1], c[2] = c[0] + p[1] * w, c[1] + p[2] * w, c[2] + w
-            bone_map = {b: (mouth_map[b] if b in centers and abs(centers[b][0] / centers[b][2] - slit_src) < 2.5
-                            and centers[b][1] / centers[b][2] > 3 else face_map[b]) for b in face_map}
+            if slit_src is None:  # no slit to line up: the face's vote decides the mouth too
+                bone_map = face_map
+            else:
+                dy = slit_tpl - (slit_src + offset[1])
+                mouth_map = vote_map(src, k, template, slot, (offset[0], offset[1] + dy, offset[2]), bone_map)
+                centers = {}
+                for p, bw in vertex_bones(src, '<', k, decl(src, '<', k)):
+                    for x, w in bw.items():
+                        c = centers.setdefault(x, [0.0, 0.0, 0.0])
+                        c[0], c[1], c[2] = c[0] + p[1] * w, c[1] + p[2] * w, c[2] + w
+                bone_map = {b: (mouth_map[b] if b in centers and abs(centers[b][0] / centers[b][2] - slit_src) < 2.5
+                                and centers[b][1] / centers[b][2] > 3 else face_map[b]) for b in face_map}
         neck = fit_neck and k == 0
         fit = neck_fitter(template, slot) if neck else None
         weights_of = neck_weights(template, slot, dd) if neck else None
@@ -573,16 +664,16 @@ def convert_mesh(template, src, slot_of, old_id, new_id, fit_neck=False, offset=
 
 def hair_parts(d):
     """{'cap': mesh index, 'strands': mesh index} of a hair RX3 by submesh name (alphaA = cap, alphaB = strands);
-    packs differ in order and some hair has a cap only."""
+    packs differ in order and some hair has a cap only. Hair with strands only: they act as the cap."""
     out = {}
     for k, m in enumerate(rx3mesh.meshes(d)):
         part = 'cap' if 'alphaA' in m['name'] else 'strands' if 'alphaB' in m['name'] else None
         if part and part not in out:
             out[part] = k
-    return out
+    return {'cap': out['strands']} if 'strands' in out and 'cap' not in out else out
 
 
-def rich_hairlod(template, src_lod, src_hair, old_id, new_id, offset, trim=0.01, share=0.6):
+def rich_hairlod(template, src_lod, src_hair, old_id, new_id, offset, trim=0.01, share=0.6, skeleton=None):
     """hairlod (far camera) stretched, axis by axis, onto the box of the body of the full hair (cap + strands).
 
     In play the game draws only the hairlod cap (player.lua, PlayerAssetLowLod; submesh alphaA). The FIFA 14 lod
@@ -590,7 +681,7 @@ def rich_hairlod(template, src_lod, src_hair, old_id, new_id, offset, trim=0.01,
     (Puyol: 60-67% of the way from his near cap to his whole hair), the box goes `share` of the way from the near
     cap to the body of the hair, leaving out the `trim` outermost vertices on each side (thin strand tips).
     Cap UVs, opacity and the painted scalp are unchanged."""
-    out = convert_mesh(template, src_lod, [0], old_id, new_id, offset=offset)
+    out = convert_mesh(template, src_lod, [0], old_id, new_id, offset=offset, skeleton=skeleton)
     parts = hair_parts(src_hair)
     full = [tuple(c + d for c, d in zip(p, offset)) for k in parts.values() for p in positions(src_hair, '<', k)]
     o, _ = of_type(out, '>', VERTICES)[0]
@@ -646,14 +737,21 @@ def paint_scalp(face, head, hair, hair_tex, color, res=256, reach=3.0):
     at UV 0) is blended over it; FIFA 14 scalps are bare skin, so wherever the cap is not fully opaque (edges, the
     nape, the far-camera hairlod) the game shows skin. For each texel of the head mesh (texture space, res²), the
     nearest cap vertex within `reach` cm and outside the skin (60° around the normal) gives the opacity and the
-    hair_cm shade; the result is blurred, scaled to the texture and blended with the hair color (hex RGB)."""
+    hair_cm shade; the result is blurred, scaled to the texture and blended with the hair color (hex RGB). Cap vertices
+    around the eyes (lashes and brows modeled in the cap) do not count: they stained the forehead and the lids."""
     head_mesh = [m for m in rx3mesh.meshes(head) if 'eyes' not in m['name']][0]
     cap = [m for m in rx3mesh.meshes(hair) if 'alphaA' in m['name']][0]
     coeff = rx3tex.to_image(hair_tex, rx3tex.textures(hair_tex)[0]).convert('RGBA')
     shade = rx3tex.to_image(hair_tex, rx3tex.textures(hair_tex)[1]).convert('L')
     cpx, spx = coeff.load(), shade.load()
+    eyes = [m for m in rx3mesh.meshes(head) if 'eyes' in m['name']][0]['attrs']['p0']
+    x0, x1 = min(p[0] for p in eyes) - 2, max(p[0] for p in eyes) + 2
+    y0, y1 = min(p[1] for p in eyes) - 3, max(p[1] for p in eyes) + 2.5
+    z0 = min(p[2] for p in eyes) - 4
     cells = {}
     for p, uv in zip(cap['attrs']['p0'], cap['attrs']['t0']):
+        if PAINT_SKIPS_EYES and x0 <= p[0] <= x1 and y0 <= p[1] <= y1 and p[2] >= z0:
+            continue
         u, v = uv[0] % 1, uv[1] % 1
         hit = (cpx[int(u * coeff.width), int(v * coeff.height)][0], spx[int(u * shade.width), int(v * shade.height)])
         cells.setdefault(tuple(int(c // reach) for c in p[:3]), []).append((p[:3], hit))
@@ -769,6 +867,56 @@ def cap_to_scalp(hair, head, gap=CAP_GAP, smooth=CAP_SMOOTH):
         x, y, z = struct.unpack_from(fmt, hair, at)
         struct.pack_into(fmt, hair, at, x + pull[i][0], y + pull[i][1], z + pull[i][2])
     return hair
+
+
+def raise_lashes(hair, head):
+    """Converted hair (RX3b) with the cap's lash strips moved up when they sit below LASH_MIN_GAP above the eye's
+    middle (LASH_GAP then). A strip = a closed piece of the cap lying wholly around one eye; most hair has none."""
+    eye = [m for m in rx3mesh.meshes(head) if 'eyes' in m['name']][0]['attrs']['p0']
+    y0, y1, z0 = min(p[1] for p in eye), max(p[1] for p in eye), min(p[2] for p in eye)
+    k = hair_parts(hair)['cap']
+    cap = rx3mesh.meshes(hair)[k]
+    pts, idx = cap['attrs']['p0'], cap['indices']
+    root = list(range(len(pts)))
+
+    def find(a):
+        while root[a] != a:
+            root[a] = root[root[a]]
+            a = root[a]
+        return a
+    for t in range(0, len(idx) - 2, 3):
+        for a, b in ((idx[t], idx[t + 1]), (idx[t + 1], idx[t + 2])):
+            root[find(a)] = find(b)
+    pieces = {}
+    for i in range(len(pts)):
+        pieces.setdefault(find(i), []).append(i)
+    strips = {}
+    for piece in pieces.values():
+        q = [pts[i] for i in piece]
+        side = 1 if q[0][0] > 0 else -1
+        if (len(q) <= LASH_MAX_VERTICES and max(p[0] for p in q) - min(p[0] for p in q) > 2.5
+                and all(0.8 < p[0] * side < 7 and y0 - 1 < p[1] < y1 + 1.5 and p[2] > z0 - 2 for p in q)):
+            strips.setdefault(side, []).extend(piece)
+    if not strips:
+        return hair
+    gaps = []
+    for side, strip in strips.items():
+        ys = [p[1] for p in eye if p[0] * side > 0]
+        gaps.append(sum(pts[i][1] for i in strip) / len(strip) - (min(ys) + max(ys)) / 2)
+    gap = sum(gaps) / len(gaps)
+    if gap >= LASH_MIN_GAP:
+        return hair
+    out = bytearray(hair)
+    o, _ = of_type(out, '>', VERTICES)[k]
+    _, _, stride, _ = struct.unpack('>IIII', out[o:o + 16])
+    off, _, typ = decl(out, '>', k)['p0']
+    fmt = '>3f' if typ == 'f32' else '>3e'
+    for strip in strips.values():
+        for i in strip:
+            at = o + 16 + i * stride + off
+            x, y, z = struct.unpack_from(fmt, out, at)
+            struct.pack_into(fmt, out, at, x, y + LASH_GAP - gap, z)
+    return out
 
 
 def _buffers(d, k):
@@ -926,6 +1074,17 @@ def game_files(sources, playerid):
 
 def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_mode='standard',
             hair_thickness=HAIR_THICKNESS):
+    """_convert, with anything that goes wrong while reading the pack's files reported as FaceFormatError."""
+    try:
+        return _convert(tpl, src, new_id, hair_color, template, paint, hair_mode, hair_thickness)
+    except FaceFormatError:
+        raise
+    except (ValueError, LookupError, ArithmeticError, TypeError, struct.error) as e:
+        raise FaceFormatError(str(e) or type(e).__name__) from e
+
+
+def _convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_mode='standard',
+             hair_thickness=HAIR_THICKNESS):
     """FIFA Street files {asset name relative to data/sceneassets: RX3b bytes} of a FIFA 14 face.
 
     tpl: template_files(); src: {kind: RX3l bytes} of the pack (REQUIRED kinds, optional hair/hair_textures/
@@ -942,6 +1101,9 @@ def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_mo
     steps = HAIR_MODES[hair_mode]
     if not 0 <= hair_thickness <= HAIR_THICKNESS_MAX:
         raise ValueError(f'hair thickness out of range: {hair_thickness}')
+    skin, eyes = (struct.unpack('<IIII', src['head'][o:o + 16])[1] for o, _ in of_type(src['head'], '<', VERTICES)[:2])
+    if skin < eyes:  # hand-made head with its meshes the other way round; converted anyway, it had torn ears and eyes
+        raise FaceFormatError(f'head meshes swapped: {skin} skin vertices, {eyes} eye vertices')
     old, new = str(template), str(new_id)
     name = {kind: f.format(new) for kind, f in FILES.items()}
     offset = align_offset(tpl['head'], src['head'])
@@ -960,7 +1122,8 @@ def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_mo
         if None in slot_of:
             raise ValueError('hair submesh that is neither cap nor strands')
         empty = [tpl_parts[p] for p in tpl_parts if p not in src_parts]
-        files[name['hair']] = convert_mesh(tpl['hair'], hair, slot_of, old, new, offset=offset, empty=empty)
+        files[name['hair']] = convert_mesh(tpl['hair'], hair, slot_of, old, new, offset=offset, empty=empty,
+                                           skeleton=hair_skeleton(hair, src['head']))
         files[name['hair_textures']] = convert_textures(tpl['hair_textures'], src['hair_textures'],
                                                         [(0, 0), (1, 1)], old, new)
         if 'sharp' in steps:
@@ -971,9 +1134,12 @@ def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_mo
         # some packs mark "no far hair" with a 1 cm placeholder quad inside the head (215421): never stretched
         lod = positions(src['hairlod'], '<', 0)
         placeholder = max(max(q[k] for q in lod) - min(q[k] for q in lod) for k in range(3)) < 3
-        files[name['hairlod']] = (rich_hairlod(tpl['hairlod'], src['hairlod'], hair, old, new, offset)
+        lod_bones = hair_skeleton(src['hairlod'], src['head'])
+        files[name['hairlod']] = (rich_hairlod(tpl['hairlod'], src['hairlod'], hair, old, new, offset,
+                                               skeleton=lod_bones)
                                   if hair and not placeholder else
-                                  convert_mesh(tpl['hairlod'], src['hairlod'], [0], old, new, offset=offset))
+                                  convert_mesh(tpl['hairlod'], src['hairlod'], [0], old, new, offset=offset,
+                                               skeleton=lod_bones))
     if hair and paint:
         paint_scalp(files[name['face']], files[name['head']], files[name['hair']], files[name['hair_textures']],
                     hair_color)
@@ -984,4 +1150,6 @@ def convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_mo
     if hair and 'pull' in steps and CAP_GAP is not None:
         # after the paint, like the game test (the paint looks for the original cap)
         cap_to_scalp(files[name['hair']], files[name['head']])
+    if hair:
+        files[name['hair']] = raise_lashes(files[name['hair']], files[name['head']])
     return {k: bytes(v) for k, v in files.items()}

@@ -12,6 +12,9 @@ from PIL import Image
 
 TEXTURE_SECTION, NAMES_SECTION = 0x7A0B60DA, 0x4C9B9EB2
 DDS_FOURCC = {0: b'DXT1', 1: b'DXT3', 2: b'DXT5'}  # 1 = DXT3 (explicit 4-bit alpha), confirmed in game
+# DXT5 resized with color and alpha apart. Pillow resizes RGBA premultiplied; the alpha of hair color maps (hair_cm) is
+# not opacity and is 0..12 in many packs, which leaves about 12 levels of color (red/green/yellow noise in game)
+DXT5_RESIZE_APART = True
 
 
 def swap16(b):
@@ -55,10 +58,14 @@ def textures(d):
         _, _, fmt, _, _, w, h, _, mips = struct.unpack(e + 'IBBBBHHHH', d[off:off + 16])
         levels, q = [], off + 16
         for m in range(mips):
+            if q + 16 > off + size:
+                break
             _, _, mip_size, _ = struct.unpack(e + 'IIII', d[q:q + 16])
+            if q + 16 + mip_size > off + size:  # some packs have garbage after a wrong small mip: the rest is still good
+                break
             levels.append((q + 16, mip_size, max(1, w >> m), max(1, h >> m)))
             q += 16 + mip_size
-        out.append(dict(off=off, size=size, fmt=fmt, w=w, h=h, mips=mips, levels=levels))
+        out.append(dict(off=off, size=size, fmt=fmt, w=w, h=h, mips=len(levels), levels=levels))
     for t, name in zip(out, names(d)):
         t['name'] = name
     return out
@@ -88,7 +95,13 @@ def _encode(img, t, w, h, bg=None):
     if t['fmt'] == 3:
         r, g, b, a = img.convert('RGBA').resize((w, h), Image.LANCZOS).split()
         return Image.merge('RGBA', (a, r, g, b)).tobytes()  # A R G B order
-    im = img.convert('RGBA').resize((max(4, w), max(4, h)), Image.LANCZOS)
+    size = (max(4, w), max(4, h))
+    if t['fmt'] == 2 and bg is None and DXT5_RESIZE_APART:
+        rgba = img.convert('RGBA')
+        im = Image.merge('RGBA', (*rgba.convert('RGB').resize(size, Image.LANCZOS).split(),
+                                  rgba.getchannel('A').resize(size, Image.LANCZOS)))
+    else:
+        im = img.convert('RGBA').resize(size, Image.LANCZOS)
     if bg is not None:  # fixed color for fully transparent pixels (Pillow's resize zeroes their color)
         a = im.split()[3]
         im = Image.composite(im.convert('RGB'), Image.new('RGB', im.size, bg),

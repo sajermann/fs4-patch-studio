@@ -155,6 +155,7 @@ export const api = {
   /** Opens the Windows folder picker on this machine; null when cancelled. */
   browseFacePack: () => request<{ folder: string | null }>('/api/facepack/browse', { method: 'POST' }),
   /** Copies one face of the pack into the project (faces/<player uid>/). */
+  checkScannedFace: (query: string) => request<{ ok: boolean }>(`/api/preview/scanned-check?${query}`),
   pickFace: (folder: string, faceId: number, player: string) =>
     request<{ face: ScannedFace }>('/api/facepack/use', json('POST', { folder, face_id: faceId, player })),
   /** Copies a player's real face files to another player of the project (copy of a player). */

@@ -1,7 +1,8 @@
+import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Copy, DatabaseZap, Dices, Eraser, LoaderCircle, RotateCcw, Trash2, User } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { photoPreviewUrl, scannedFaceQuery, type FaceSource } from '@/api/client'
+import { api, ApiError, photoPreviewUrl, scannedFaceQuery, type FaceSource } from '@/api/client'
 import { HAIR_MODES, HAIR_THICKNESS, THICK_HAIR_MODES, type HairMode, type Player } from '@/api/types'
 import { BaseDataDialog } from '@/components/common/BaseDataDialog'
 import { FacePicker, type BrowsedFace } from '@/components/common/FacePicker'
@@ -343,6 +344,15 @@ function AppearanceTab({ player }: { player: Player }) {
     : !generic && gameHead
       ? { base: `/api/preview/game-head/${player.original_id}`, query: '' }
       : null
+  const faceQuery = faceSource ? scanned?.query : undefined
+  const faceCheck = useQuery({
+    queryKey: ['scanned-check', faceQuery],
+    queryFn: () => api.checkScannedFace(faceQuery as string),
+    enabled: !!faceQuery,
+    retry: false,
+    staleTime: Infinity,
+  })
+  const faceUnsupported = !!faceQuery && faceCheck.error instanceof ApiError && faceCheck.error.code === 'face_unsupported'
   // Team Home kit of the player's team (the goalkeeper kit for a goalkeeper; neutral grey for free agents)
   const link = player.teams.find((l) => linkedTeam(draft, l.team)) ?? player.teams[0]
   const team = link && linkedTeam(draft, link.team)
@@ -416,7 +426,7 @@ function AppearanceTab({ player }: { player: Player }) {
                 )}
               </div>
             )}
-            <FacePicker key={player.uid} player={player} browsing={browsing} onBrowse={setBrowsing} />
+            <FacePicker key={player.uid} player={player} browsing={browsing} onBrowse={setBrowsing} unsupported={faceUnsupported} />
             {player.face && (
               <label className="mt-3 flex items-start gap-2 text-sm">
                 <Checkbox
@@ -490,14 +500,24 @@ function AppearanceTab({ player }: { player: Player }) {
               </div>
             }
           >
-            {catalog && (
-              <PlayerPreview
-                appearance={preview}
-                outfit={{ kind: 'team', kit }}
-                face={scanned}
-                closeUpOnly={!!draft.game_patches?.close_up_heads}
-              />
-            )}
+            {catalog &&
+              (faceUnsupported && faceSource ? (
+                <div className="flex size-full flex-col items-center justify-center gap-2 p-6 text-center">
+                  <AlertTriangle className="size-8 text-destructive" />
+                  <p className="font-medium">{t('faces.unsupportedTitle')}</p>
+                  <p className="text-sm text-muted-foreground">{t('faces.unsupported', { id: faceSource.face })}</p>
+                  {faceCheck.error instanceof ApiError && faceCheck.error.error && (
+                    <p className="font-mono text-xs break-all text-muted-foreground">{faceCheck.error.error}</p>
+                  )}
+                </div>
+              ) : (
+                <PlayerPreview
+                  appearance={preview}
+                  outfit={{ kind: 'team', kit }}
+                  face={scanned}
+                  closeUpOnly={!!draft.game_patches?.close_up_heads}
+                />
+              ))}
           </Suspense>
         </div>
         <p

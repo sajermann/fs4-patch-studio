@@ -508,7 +508,7 @@ def create_app(state=None):
         try:
             return fn(*args, **kwargs)
         except FaceError as e:
-            raise HTTPException(e.status, {'code': e.code, 'message': e.message})
+            raise HTTPException(e.status, {'code': e.code, 'message': e.message, **({'error': e.error} if e.error else {})})
 
     def png_response(data, cache=True):
         return Response(data, media_type='image/png', headers=PREVIEW_CACHE if cache else None)
@@ -582,7 +582,7 @@ def create_app(state=None):
         if not (folder or player):
             raise HTTPException(404)
         key, files = faces_call(state.faces.source_files, folder, face, state.store.folder, player)
-        return png_response(state.faces.thumbnail(key, files))
+        return png_response(faces_call(state.faces.thumbnail, key, files))
 
     @app.post('/api/facepack/use')
     def facepack_use(pick: FacePick):
@@ -617,11 +617,20 @@ def create_app(state=None):
             raise HTTPException(404)
         state.catalog()  # 409 when original files are missing (the template lives there)
         key, files = faces_call(state.faces.source_files, folder, face, state.store.folder, player)
-        try:
-            c = state.faces.converted(key, files, haircolor, paint, hair, thick)
-        except ValueError as e:
-            raise HTTPException(422, {'code': 'face_conversion_failed', 'message': f'Não deu para converter esta face: {e}'})
-        return scanned_asset(asset, c)
+        return scanned_asset(asset, faces_call(state.faces.converted, key, files, haircolor, paint, hair, thick))
+
+    @app.get('/api/preview/scanned-check')
+    def scanned_preview_check(face: int, haircolor: int = 0, paint: bool = True, folder: str | None = None,
+                              player: str | None = None, hair: str = 'standard',
+                              thick: float = Query(scanface.HAIR_THICKNESS, ge=0, le=scanface.HAIR_THICKNESS_MAX)):
+        """Whether the face converts (same query as /api/preview/scanned): 422 face_unsupported when it does not, so the
+        client shows that instead of a 3D preview that would never load."""
+        if not (folder or player) or hair not in scanface.HAIR_MODES:
+            raise HTTPException(404)
+        state.catalog()
+        key, files = faces_call(state.faces.source_files, folder, face, state.store.folder, player)
+        faces_call(state.faces.converted, key, files, haircolor, paint, hair, thick)
+        return {'ok': True}
 
     @app.get('/api/preview/game-head/{playerid}/{asset}')
     def game_head_preview(playerid: int, asset: str):

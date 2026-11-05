@@ -4,17 +4,28 @@ The pack stays where the user keeps it (read in place, never written); picking a
 files into the project (scanface.PROJECT_DIR/<player uid>/). The 3D preview shows the face already converted
 (fsmod.scanface, ~3 s), so it is what the game will draw; conversions and thumbnails are cached in memory.
 """
+import logging
 import os
+import struct
 import threading
 from collections import OrderedDict
 
 from fsmod import facepack, preview, scanface
 
 
+log = logging.getLogger('fsapi')
+UNSUPPORTED_MESSAGE = 'Esta face está em um formato que o app ainda não sabe converter.'
+
+
 class FaceError(Exception):
-    def __init__(self, code, message, status=400):
+    def __init__(self, code, message, status=400, error=None):
         super().__init__(message)
-        self.code, self.message, self.status = code, message, status
+        self.code, self.message, self.status, self.error = code, message, status, error
+
+
+def _unsupported(key, error):
+    log.warning('face %s not converted: %s', key, error)
+    return FaceError('face_unsupported', UNSUPPORTED_MESSAGE, 422, str(error) or type(error).__name__)
 
 
 class _Lru:
@@ -70,7 +81,10 @@ class FaceService:
                 'faces': facepack.list_faces(assets)}
 
     def thumbnail(self, key, files):
-        return self._thumbs.get(key, lambda: facepack.thumbnail(files))
+        try:
+            return self._thumbs.get(key, lambda: facepack.thumbnail(files))
+        except (ValueError, LookupError, ArithmeticError, TypeError, OSError, struct.error) as e:
+            raise _unsupported(key, e) from e
 
     def _pack_files(self, assets, face_id):
         files = facepack.read_face(assets, face_id)
@@ -100,18 +114,25 @@ class FaceService:
     def converted(self, key, files, haircolorcode, paint=True, hair_mode='standard',
                   hair_thickness=scanface.HAIR_THICKNESS):
         """{kind: RX3b bytes} of the face converted like the build will (hair color painted on the scalp unless
-        paint is False; hair_mode: scanface.HAIR_MODES; hair_thickness: its 'thick' step)."""
+        paint is False; hair_mode: scanface.HAIR_MODES; hair_thickness: its 'thick' step). A face that does not convert
+        raises FaceError (kept in the cache: the 3D preview asks for 8 files of the same conversion at once)."""
         def make():
             with self._lock:
                 if self._template is None:
                     self._template = scanface.template_files(self.game)
-            out = scanface.convert(self._template, files, scanface.TEMPLATE, preview.hair_color(haircolorcode),
-                                  paint=paint, hair_mode=hair_mode, hair_thickness=hair_thickness)
+            try:
+                out = scanface.convert(self._template, files, scanface.TEMPLATE, preview.hair_color(haircolorcode),
+                                       paint=paint, hair_mode=hair_mode, hair_thickness=hair_thickness)
+            except scanface.FaceFormatError as e:
+                return _unsupported(key, e)
             return {kind: out[f.format(scanface.TEMPLATE)] for kind, f in scanface.FILES.items()
                     if f.format(scanface.TEMPLATE) in out}
         if 'thick' not in scanface.HAIR_MODES[hair_mode]:
             hair_thickness = scanface.HAIR_THICKNESS  # no effect: one cache entry
-        return self._converted.get((key, haircolorcode, paint, hair_mode, hair_thickness), make)
+        result = self._converted.get((key, haircolorcode, paint, hair_mode, hair_thickness), make)
+        if isinstance(result, FaceError):
+            raise result
+        return result
 
 
 def _stamp(base, face_id):
