@@ -1,14 +1,16 @@
-"""python -m fsapi [--port 8765] [--no-browser] [--parent-pid PID]"""
+"""python -m fsapi [--port 8765] [--no-browser] [--parent-pid PID]
+python -m fsapi --dialog <json>: shows one Windows dialog and prints the answer (fsapi.dialogs; the server runs it)."""
 import argparse
 import ctypes
 import logging
 import os
+import sys
 import threading
 import webbrowser
 
 import uvicorn
 
-from . import diagnostics
+from . import diagnostics, dialogs
 
 log = logging.getLogger('fsapi')
 
@@ -39,6 +41,9 @@ def exit_with_parent(pid):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == dialogs.DIALOG_ARG:  # child process of one dialog, not the server
+        dialogs.run_child(sys.argv[2])
+        return
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=8765)
     ap.add_argument('--no-browser', action='store_true')
