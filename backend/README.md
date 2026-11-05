@@ -37,9 +37,11 @@ output), `backend/project/` (your mod: `database.json`, images, faces), `backend
 Tests:
 
 ```bat
-cd core && python -m pytest -q
-cd backend && python -m pytest -q
+cd core && python -m pytest -q -n auto
+cd backend && python -m pytest -q -n auto
 ```
+
+`-n auto` runs the tests in parallel on every CPU core (much faster on the core tests); without it they run one by one.
 
 Tests that need the game's original files (or other local data) are skipped when they are not available. The
 backend tests use temporary folders and a fake game; they never touch a real installation.

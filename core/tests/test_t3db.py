@@ -1,4 +1,40 @@
-from fsmod import dbcrc, t3db
+import pytest
+
+from fsmod import crc, dbcrc, t3db
+
+
+def test_crc_matches_the_standard_check_value():
+    assert crc.crc32_mpeg2(b'123456789') == 0x0376E6E7
+    assert crc.crc32_mpeg2(b'') == 0xFFFFFFFF
+    # continuing from a previous value is the same as one call over everything
+    assert crc.crc32_mpeg2(b'6789', crc.crc32_mpeg2(b'12345')) == 0x0376E6E7
+
+
+def test_bits_are_read_and_written_msb_first_without_touching_the_neighbours():
+    buf = bytearray(b'\xFF\x00\xFF')
+    assert t3db.get_bits(buf, 4, 8) == 0xF0
+    assert t3db.get_bits(buf, 4, 0) == 0
+    t3db.set_bits(buf, 6, 4, 0b0110)
+    assert buf == bytearray([0b11111101, 0b10000000, 0xFF])
+    t3db.set_bits(buf, 0, 4, 0b10011)  # only the low n bits of the value count
+    assert buf[0] == 0b00111101
+    with pytest.raises(IndexError):
+        t3db.get_bits(buf, 20, 8)
+    with pytest.raises(IndexError):
+        t3db.set_bits(buf, 20, 8, 0)
+
+
+def test_huffman_decode_stops_at_the_byte_of_the_last_character():
+    # tree: 0 -> 'a', 10 -> 'b', 11 -> 'c'
+    tree = bytes([0, ord('a'), 1, 0]) + bytes([0, ord('b'), 0, ord('c')])
+    huffman = t3db.Huffman(tree)
+    # bytes used = length prefix + bytes holding the bits; the extra padding byte EA's encoder adds does not count
+    for text, used in ((b'', 1), (b'a', 2), (b'abc', 2), (b'aaaaaaaa', 2), (b'cccc', 2), (b'abcabcabcabc', 4)):
+        encoded = huffman.encode(text)
+        for tail in (b'', b'\xFF\xFF'):  # what comes after is the next string: never read as this one
+            assert huffman.decode(b'\x00' + encoded + tail, 1) == (text, used)
+    with pytest.raises(ValueError, match='without a Huffman code'):
+        huffman.encode(b'abz')
 
 
 def test_original_database_round_trip_is_byte_identical(game):

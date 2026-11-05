@@ -19,20 +19,20 @@ from .crc import crc32_mpeg2
 
 # ---------------------------------------------------------------- bits
 def get_bits(buf, bitpos, n):
-    v = 0
-    for i in range(n):
-        p = bitpos + i
-        v = (v << 1) | ((buf[p >> 3] >> (7 - (p & 7))) & 1)
-    return v
+    start, end = bitpos >> 3, (bitpos + n + 7) >> 3
+    if end > len(buf):
+        raise IndexError(f'bits {bitpos}+{n} are outside the buffer')
+    return (int.from_bytes(buf[start:end], 'big') >> (-(bitpos + n) & 7)) & ((1 << n) - 1)
 
 
 def set_bits(buf, bitpos, n, v):
-    for i in range(n):
-        p = bitpos + n - 1 - i
-        if (v >> i) & 1:
-            buf[p >> 3] |= 1 << (7 - (p & 7))
-        else:
-            buf[p >> 3] &= ~(1 << (7 - (p & 7))) & 0xFF
+    start, end = bitpos >> 3, (bitpos + n + 7) >> 3
+    if end > len(buf):
+        raise IndexError(f'bits {bitpos}+{n} are outside the buffer')
+    shift = -(bitpos + n) & 7
+    mask = ((1 << n) - 1) << shift
+    current = int.from_bytes(buf[start:end], 'big')
+    buf[start:end] = ((current & ~mask) | ((v << shift) & mask)).to_bytes(end - start, 'big')
 
 
 # ---------------------------------------------------------------- Huffman
@@ -44,6 +44,8 @@ class Huffman:
         self.nodes = [(tree[4 * i:4 * i + 2], tree[4 * i + 2:4 * i + 4]) for i in range(len(tree) // 4)]
         self.codes = {}
         self._walk(0, '')
+        self._code_sizes = {c: len(code) for c, code in self.codes.items()}
+        self._byte_steps = {}  # (node << 8 | byte) -> (characters completed by that byte, node after it)
 
     def _walk(self, idx, prefix):
         for bit, e in (('0', self.nodes[idx][0]), ('1', self.nodes[idx][1])):
@@ -67,26 +69,39 @@ class Huffman:
                     stack.append(e[0])
         return (highest + 1) * 4
 
-    def decode(self, area, off, prefix_len=1):
-        n = int.from_bytes(area[off:off + prefix_len], 'big')
+    def _byte_step(self, key):
+        """Walks the 8 bits of one byte from a node; memoized in _byte_steps (at most 256 per node)."""
+        cur, byte = key >> 8, key & 0xFF
         out = bytearray()
-        bit, cur = (off + prefix_len) * 8, 0
-        while len(out) < n:
-            b = (area[bit >> 3] >> (7 - (bit & 7))) & 1
-            bit += 1
-            e = self.nodes[cur][b]
+        for shift in range(7, -1, -1):
+            e = self.nodes[cur][(byte >> shift) & 1]
             if e[1] != 0 or e[0] == 0:
                 out.append(e[1])
                 cur = 0
             else:
                 cur = e[0]
-        return bytes(out), ((bit + 7) >> 3) - off
+        step = self._byte_steps[key] = (bytes(out), cur)
+        return step
+
+    def decode(self, area, off, prefix_len=1):
+        """(string, bytes used). Reads a byte at a time: the string ends in the byte holding its last character, and
+        whatever that byte decodes after it is padding."""
+        n = int.from_bytes(area[off:off + prefix_len], 'big')
+        pos, cur, have, parts = off + prefix_len, 0, 0, []
+        steps = self._byte_steps
+        while have < n:
+            key = cur << 8 | area[pos]
+            pos += 1
+            chars, cur = steps.get(key) or self._byte_step(key)
+            parts.append(chars)
+            have += len(chars)
+        return b''.join(parts)[:n], pos - off
 
     def missing_chars(self, s: bytes):
         return sorted({chr(c) for c in s if c not in self.codes})
 
     def nbits(self, s: bytes):
-        return sum(len(self.codes[c]) for c in s)
+        return sum(map(self._code_sizes.__getitem__, s))
 
     def encoded_size(self, s: bytes, prefix_len=1):
         """Size of encode(s) without encoding it."""
@@ -94,10 +109,10 @@ class Huffman:
         return prefix_len + ((n + 7) // 8 if self.exact_padding else n // 8 + 1)
 
     def encode(self, s: bytes, prefix_len=1):
-        missing = self.missing_chars(s)
-        if missing:
-            raise ValueError(f'characters without a Huffman code in this table: {missing}')
-        bits = ''.join(self.codes[c] for c in s)
+        try:
+            bits = ''.join(map(self.codes.__getitem__, s))
+        except KeyError:
+            raise ValueError(f'characters without a Huffman code in this table: {self.missing_chars(s)}') from None
         # EA's encoder uses nbits//8 + 1 bytes (at least one padding bit); exact_padding: (nbits + 7) // 8
         bits += '0' * (-len(bits) % 8 if self.exact_padding else 8 - len(bits) % 8)
         return len(s).to_bytes(prefix_len, 'big') + (int(bits, 2).to_bytes(len(bits) // 8, 'big') if bits else b'')
