@@ -30,6 +30,7 @@ def test_converter_matches_the_files_validated_in_game(game, assets, monkeypatch
         pytest.skip('validated face not available')
     monkeypatch.setattr(scanface, 'NAPE_FRONT', -1e9)
     monkeypatch.setattr(scanface, 'PAINT_SKIPS_EYES', False)
+    monkeypatch.setattr(scanface, 'HAIR_FOLLOWS_SKIN', False)
     monkeypatch.setattr(rx3tex, 'DXT5_RESIZE_APART', False)
     tpl, src = scanface.template_files(game), facepack.read_face(assets, FACE)
     pulled = scanface.convert(tpl, src, scanface.TEMPLATE, preview.hair_color(3))
@@ -103,6 +104,72 @@ def test_head_with_swapped_meshes_is_not_converted(game):
         pytest.skip('face pack not available')
     with pytest.raises(scanface.FaceFormatError, match='swapped'):
         scanface.convert(scanface.template_files(game), facepack.read_face(assets, 999099), scanface.TEMPLATE, '#000000')
+
+
+def _pack_face(*path, face_id):
+    assets = facepack.assets_dir(os.path.join(REPO, 'Faces', *path))
+    if not assets:
+        pytest.skip('face pack not available')
+    return facepack.read_face(assets, face_id)
+
+
+def _hair_weight(hair, bone):
+    """Share of the hair's bone weight on one bone, over all its meshes."""
+    total = on_bone = 0
+    for k in range(len(scanface.of_type(hair, '>', scanface.VERTICES))):
+        for _, weights in scanface.vertex_bones(hair, '>', k, scanface.decl(hair, '>', k)):
+            total += sum(weights.values())
+            on_bone += weights.get(bone, 0)
+    return on_bone / total
+
+
+def test_head_stored_eyes_first_has_the_usual_order_after_the_fix(game):
+    """Names right, eyes stored first: the same two meshes, each with its own bytes."""
+    head = _pack_face('pele-by-classic-patch', 'base', face_id=190043)['head']
+    fixed = scanface.head_mesh_first(head)
+    before, after = rx3mesh.meshes(head), rx3mesh.meshes(fixed)
+    assert [m['name'].split('.')[0] for m in before] == ['eyes_', 'head_']
+    assert [m['name'].split('.')[0] for m in after] == ['head_', 'eyes_']
+    assert before[0]['attrs'] == after[1]['attrs'] and before[0]['indices'] == after[1]['indices']
+    assert before[1]['attrs'] == after[0]['attrs'] and before[1]['indices'] == after[0]['indices']
+    assert scanface.head_mesh_first(fixed) == fixed
+
+
+def test_head_stored_eyes_first_is_converted(game):
+    files = _pack_face('pele-by-classic-patch', 'base', face_id=190043)
+    out = scanface.convert(scanface.template_files(game), files, scanface.TEMPLATE, '#000000', paint=False)
+    assert scanface.FILES['head'].format(scanface.TEMPLATE) in out
+
+
+def test_hair_stays_on_the_head_when_the_nearest_bone_is_the_jaw(game):
+    """The hair of this face moved with the mouth: its head bone landed on the template's jaw."""
+    files = _pack_face('neymar_pack_by_ViP3eR', '2014_wc', face_id=190871)
+    template = scanface.template_files(game)
+    hair = scanface.convert(template, files, scanface.TEMPLATE, '#000000', paint=False)[
+        scanface.FILES['hair'].format(scanface.TEMPLATE)]
+    head_bone = scanface.head_bone(template['head'], '>')
+    jaw = scanface.jaw_family(scanface.vertex_bones(template['head'], '>', 0, scanface.decl(template['head'], '>', 0)),
+                              head_bone)[0]
+    assert _hair_weight(hair, head_bone) > 0.9
+    assert _hair_weight(hair, jaw) < 0.01
+
+
+def test_only_the_beard_follows_the_jaw(game):
+    """Same vote, different places: hair above the eyes stays on the head, a beard below them goes with the chin."""
+    template = scanface.template_files(game)
+    top = scanface.head_bone(template['head'], '>')
+
+    def jaw_bones(*path, face_id):
+        files = _pack_face(*path, face_id=face_id)
+        head = scanface.head_mesh_first(files['head'])
+        follow = scanface.skin_follow(template['head'], head, scanface.align_offset(template['head'], head))
+        guarded = scanface.beard_only_on_jaw(follow, files['hair'], template['head'], head)
+        return {b for b, t in follow.items() if t != top}, {b for b, t in guarded.items() if t != top}
+
+    voted, kept = jaw_bones('redo-facepack-125-by-redo1000', face_id=237685)
+    assert voted - kept, 'hair above the eyes must leave the jaw'
+    voted, kept = jaw_bones('various-by-Colgado', face_id=243614)
+    assert 23 in voted and 23 in kept, 'the beard must stay on the jaw'
 
 
 def test_hair_color_map_keeps_its_color_with_a_low_alpha(game):

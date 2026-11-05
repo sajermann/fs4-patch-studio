@@ -28,6 +28,7 @@ from PIL import Image, ImageChops, ImageFilter
 from . import chunk, rx3mesh, rx3tex
 
 HEADER, DECL, NAMES, INDICES, VERTICES, BONES = 0x22B2BE36, 0xC28193F0, 0x4C9B9EB2, 0x005878F4, 0x00587AA1, 0xDF9AEC1E
+MESH_SECTIONS = (DECL, INDICES, 0x0F3861A2, VERTICES, BONES, 0xD48D7880)  # section types with one entry per mesh
 TEXTURE, TEXTURE_HEADERS = 0x7A0B60DA, 0x6BD085DC
 ASSETS = 'data/sceneassets/'
 TEMPLATE = 158023  # Messi: skeleton, bone palette and materials of every converted face
@@ -62,6 +63,7 @@ NAPE_WEIGHTS_TOP, NAPE_WEIGHTS_FADE = 168.0, 2.0  # cm: takes the template's bon
 LASH_MIN_GAP, LASH_GAP = 0.1, 0.4  # cm above the eye's middle: lowest accepted, and where a lower strip is moved to
 LASH_MAX_VERTICES = 80
 PAINT_SKIPS_EYES = True  # the scalp paint ignores cap vertices around the eyes (see paint_scalp). To go back: False
+HAIR_FOLLOWS_SKIN = True  # hair bones the skin's vote sends to the head or jaw go there too (skin_follow). To go back: False
 # kind -> file name (format with the id), relative to screenassets/ (pack) or data/sceneassets/ (game)
 FILES = {'head': 'heads/head_{}_0.rx3', 'face': 'faces/face_{}_0_0_0_0_0_0_0_0_textures.rx3',
          'eyes': 'heads/eyes_{}_0_textures.rx3', 'hair': 'hair/hair_{}_0_0.rx3',
@@ -605,13 +607,76 @@ def hair_skeleton(hair, head):
     return own
 
 
+def head_mesh_first(head):
+    """RX3l head with the skin as mesh 0 and the eyes as mesh 1. A head whose names are right but stored eyes first
+    has the same meshes in another order: section table, header and names are put in the usual order. A head whose
+    names do not match the meshes (eyes named head_) is hand-made and comes out with torn ears and eyes:
+    FaceFormatError."""
+    secs = sections(head, '<')
+    skin, eyes = (struct.unpack('<IIII', head[o:o + 16])[1] for o, _ in of_type(head, '<', VERTICES)[:2])
+    if skin >= eyes:
+        return head
+    labels = [n.split('.')[0] for n in rx3mesh.names(head) if n.endswith('.FxRenderableSimple')]
+    if labels != ['eyes_', 'head_']:
+        raise FaceFormatError(f'head meshes swapped: {skin} skin vertices, {eyes} eye vertices')
+    out = bytearray(head)
+    for type_ in MESH_SECTIONS:
+        a, b = (i for i, s in enumerate(secs) if s[0] == type_)
+        ta, tb = 16 + 16 * a, 16 + 16 * b
+        out[ta:ta + 16], out[tb:tb + 16] = head[tb:tb + 16], head[ta:ta + 16]
+    h = of_type(head, '<', HEADER)[0][0]
+    out[h + 16:h + 32], out[h + 32:h + 48] = head[h + 32:h + 48], head[h + 16:h + 32]
+    first = of_type(head, '<', NAMES)[0][0] + 16
+    second = first + 8 + struct.unpack_from('<I', head, first + 4)[0]
+    end = second + 8 + struct.unpack_from('<I', head, second + 4)[0]
+    out[first:end] = head[second:end] + head[first:second]
+    return bytes(out)
+
+
+def skin_follow(template_head, head, offset):
+    """{source bone: template head or jaw} of the bones the skin's vote sends there; the hair goes the same way.
+    By position alone the source head bone can land on the template's jaw, a few cm from its head bone (the hair then
+    moves with the mouth), and a beard's chin bones on the head (the beard comes off the chin when the mouth opens)."""
+    if not HAIR_FOLLOWS_SKIN:
+        return {}
+    allowed = sorted(used_bones(template_head, '>', 0, decl(template_head, '>', 0)))
+    dst_bones = bone_positions(template_head, '>')
+    src_bones = [tuple(c + d for c, d in zip(b, offset)) for b in bone_positions(head, '<')]
+    voted = vote_map(head, 0, template_head, 0, offset, nearest_map(src_bones, dst_bones, allowed))
+    template_top = head_bone(template_head, '>')
+    template_jaw = jaw_family(vertex_bones(template_head, '>', 0, decl(template_head, '>', 0)), template_top)[0]
+    skin = set()
+    for _, bw in vertex_bones(head, '<', 0, decl(head, '<', 0)):
+        skin.update(bw)
+    return {b: t for b, t in voted.items() if b in skin and t in (template_top, template_jaw)}
+
+
+def beard_only_on_jaw(follow, mesh, template_head, head):
+    """follow for one hair mesh file: a bone whose hair is mostly above the eyes stays on the template's head, even if
+    the skin's vote sends the bone to the jaw (only beard and moustache may move with the mouth)."""
+    top = head_bone(template_head, '>')
+    jaw_bones = {b for b, t in follow.items() if t != top}
+    if not jaw_bones:
+        return follow
+    eyes = positions(head, '<', 1)
+    eye_y = sum(q[1] for q in eyes) / len(eyes)
+    above, below = {}, {}
+    for k in range(len(of_type(mesh, '<', VERTICES))):
+        for q, (_, bw) in zip(positions(mesh, '<', k), vertex_bones(mesh, '<', k, decl(mesh, '<', k))):
+            side = above if q[1] > eye_y else below
+            for b, w in bw.items():
+                side[b] = side.get(b, 0) + w
+    return {b: top if b in jaw_bones and above.get(b, 0) > below.get(b, 0) else t for b, t in follow.items()}
+
+
 def convert_mesh(template, src, slot_of, old_id, new_id, fit_neck=False, offset=(0.0, 0.0, 0.0), vote=False,
-                 empty=(), skeleton=None):
+                 empty=(), skeleton=None, follow=None):
     """slot_of[k] = template mesh index that receives FIFA 14 mesh k. offset: see align_offset. fit_neck: lay mesh
     0's neck base onto the template's (and take its weights below the chin); vote: bone map of mesh 0 by vote
     (vote_map; head mesh only). empty: template slots the face has nothing for (hair with a cap only): they get a
     single zero-area triangle, so none of the template's own geometry is left. skeleton: bind positions of src's bones
-    when not its own (hair_skeleton)."""
+    when not its own (hair_skeleton). follow: {source bone: template bone} taking over the nearest bone where the
+    mesh's slot uses it (skin_follow)."""
     secs = sections(template, '>')
     idx_of = {t: [i for i, s in enumerate(secs) if s[0] == t] for t in (HEADER, NAMES, VERTICES, INDICES)}
     src_bones = [tuple(c + d for c, d in zip(b, offset)) for b in (skeleton or bone_positions(src, '<'))]
@@ -622,6 +687,9 @@ def convert_mesh(template, src, slot_of, old_id, new_id, fit_neck=False, offset=
         dd = decl(template, '>', slot)
         allowed = sorted(used_bones(template, '>', slot, dd))
         bone_map = nearest_map(src_bones, dst_bones, allowed)
+        for b, t in (follow or {}).items():
+            if b in bone_map and t in allowed:
+                bone_map[b] = t
         if vote and k == 0:
             # the eyes align the head, but the mouths can sit a few mm apart: the mouth bones vote again with the
             # slits lined up (274254: -0.79 cm, which puts lower lip bones 75/87/91 on FS's lower lip)
@@ -673,7 +741,8 @@ def hair_parts(d):
     return {'cap': out['strands']} if 'strands' in out and 'cap' not in out else out
 
 
-def rich_hairlod(template, src_lod, src_hair, old_id, new_id, offset, trim=0.01, share=0.6, skeleton=None):
+def rich_hairlod(template, src_lod, src_hair, old_id, new_id, offset, trim=0.01, share=0.6, skeleton=None,
+                 follow=None):
     """hairlod (far camera) stretched, axis by axis, onto the box of the body of the full hair (cap + strands).
 
     In play the game draws only the hairlod cap (player.lua, PlayerAssetLowLod; submesh alphaA). The FIFA 14 lod
@@ -681,7 +750,7 @@ def rich_hairlod(template, src_lod, src_hair, old_id, new_id, offset, trim=0.01,
     (Puyol: 60-67% of the way from his near cap to his whole hair), the box goes `share` of the way from the near
     cap to the body of the hair, leaving out the `trim` outermost vertices on each side (thin strand tips).
     Cap UVs, opacity and the painted scalp are unchanged."""
-    out = convert_mesh(template, src_lod, [0], old_id, new_id, offset=offset, skeleton=skeleton)
+    out = convert_mesh(template, src_lod, [0], old_id, new_id, offset=offset, skeleton=skeleton, follow=follow)
     parts = hair_parts(src_hair)
     full = [tuple(c + d for c, d in zip(p, offset)) for k in parts.values() for p in positions(src_hair, '<', k)]
     o, _ = of_type(out, '>', VERTICES)[0]
@@ -1101,12 +1170,11 @@ def _convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_m
     steps = HAIR_MODES[hair_mode]
     if not 0 <= hair_thickness <= HAIR_THICKNESS_MAX:
         raise ValueError(f'hair thickness out of range: {hair_thickness}')
-    skin, eyes = (struct.unpack('<IIII', src['head'][o:o + 16])[1] for o, _ in of_type(src['head'], '<', VERTICES)[:2])
-    if skin < eyes:  # hand-made head with its meshes the other way round; converted anyway, it had torn ears and eyes
-        raise FaceFormatError(f'head meshes swapped: {skin} skin vertices, {eyes} eye vertices')
+    src = {**src, 'head': head_mesh_first(src['head'])}
     old, new = str(template), str(new_id)
     name = {kind: f.format(new) for kind, f in FILES.items()}
     offset = align_offset(tpl['head'], src['head'])
+    follow = skin_follow(tpl['head'], src['head'], offset)
     files = {name['head']: convert_mesh(tpl['head'], src['head'], [0, 1], old, new, True, offset, vote=True),
              name['face']: convert_textures(tpl['face'], src['face'], [(0, 0)], old, new)}
     files[name['eyes']] = renamed(tpl['eyes'], old, new)
@@ -1123,7 +1191,8 @@ def _convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_m
             raise ValueError('hair submesh that is neither cap nor strands')
         empty = [tpl_parts[p] for p in tpl_parts if p not in src_parts]
         files[name['hair']] = convert_mesh(tpl['hair'], hair, slot_of, old, new, offset=offset, empty=empty,
-                                           skeleton=hair_skeleton(hair, src['head']))
+                                           skeleton=hair_skeleton(hair, src['head']),
+                                           follow=beard_only_on_jaw(follow, hair, tpl['head'], src['head']))
         files[name['hair_textures']] = convert_textures(tpl['hair_textures'], src['hair_textures'],
                                                         [(0, 0), (1, 1)], old, new)
         if 'sharp' in steps:
@@ -1135,11 +1204,12 @@ def _convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_m
         lod = positions(src['hairlod'], '<', 0)
         placeholder = max(max(q[k] for q in lod) - min(q[k] for q in lod) for k in range(3)) < 3
         lod_bones = hair_skeleton(src['hairlod'], src['head'])
+        lod_follow = beard_only_on_jaw(follow, src['hairlod'], tpl['head'], src['head'])
         files[name['hairlod']] = (rich_hairlod(tpl['hairlod'], src['hairlod'], hair, old, new, offset,
-                                               skeleton=lod_bones)
+                                               skeleton=lod_bones, follow=lod_follow)
                                   if hair and not placeholder else
                                   convert_mesh(tpl['hairlod'], src['hairlod'], [0], old, new, offset=offset,
-                                               skeleton=lod_bones))
+                                               skeleton=lod_bones, follow=lod_follow))
     if hair and paint:
         paint_scalp(files[name['face']], files[name['head']], files[name['hair']], files[name['hair_textures']],
                     hair_color)
