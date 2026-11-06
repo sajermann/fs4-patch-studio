@@ -95,7 +95,8 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `POST /api/players-base/browse` | Windows file picker for the players JSON; `{file}` or null |
 | `POST /api/facepack/browse` | opens the Windows folder picker on this machine (tkinter, topmost); `{folder}` or null when cancelled |
 | `GET /api/facepack/thumb.png?face=&folder=\|player=` | face seen from the front (gallery), from the pack or from the project |
-| `POST /api/facepack/use` `{folder, face_id, player}` | copies that face's pack files into the project (`faces/<player uid>/`); the client then sets `player.face` |
+| `POST /api/facepack/use` `{folder, face_id, player}` | copies that face's pack files into the project (`faces/<player uid>/`); the client then sets `player.face` (comes with `paint_scalp: false`) |
+| `GET /api/facepack/hair-color?face=&folder=\|player=` | `{haircolorcode}`: the game hair color closest to the face's own hair (`scanface.hair_rgb` + `preview.nearest_hair_color`), suggested when a face is looked at; `null` without hair |
 | `GET /api/preview/scanned/{head.glb\|hair.glb\|hairlod.glb\|face.png\|eyes.png\|hair.png\|cap.png\|strands.png}?face=&haircolor=&folder=\|player=` | real face converted exactly like the build will (`fsmod.scanface`, ~3 s, cached) |
 | `GET /api/preview/lodhead.glb` | head every player has at the normal play camera (`body/playerlod_head.rx3`) |
 | `POST /api/patch/build` | validate + build `patch/` (assigns ids and saves them in the project) |

@@ -135,6 +135,16 @@ def test_head_stored_eyes_first_has_the_usual_order_after_the_fix(game):
     assert scanface.head_mesh_first(fixed) == fixed
 
 
+@pytest.mark.parametrize('face_id, case', [
+    (215107, 'eyes stored first, meshes named eyes/head without the underscore'),
+    (215108, 'hair texture whose 2x2/1x1 mips have another pitch')])
+def test_converter_handles_other_tools(game, face_id, case):
+    files = _pack_face('some-faces-from-jgarca', face_id=face_id)
+    out = scanface.convert(scanface.template_files(game), files, scanface.TEMPLATE, '#000000', paint=False)
+    head = rx3mesh.meshes(out[scanface.FILES['head'].format(scanface.TEMPLATE)])
+    assert len(head[0]['attrs']['p0']) > len(head[1]['attrs']['p0']), case
+
+
 def test_head_stored_eyes_first_is_converted(game):
     files = _pack_face('pele-by-classic-patch', 'base', face_id=190043)
     out = scanface.convert(scanface.template_files(game), files, scanface.TEMPLATE, '#000000', paint=False)
@@ -320,3 +330,13 @@ def test_build_writes_the_real_face_as_loose_files(game, assets, tmp_path):
     assert {scanface.ASSETS + n for n in expected} <= set(result.loose)
     for name, data in expected.items():
         assert chunk.decode(result.loose[scanface.ASSETS + name]) == data
+
+
+def test_hair_color_suggested_from_the_face():
+    """The player's hair color (used by the scalp paint) is suggested from the face's own hair."""
+    codes = range(len(preview.HAIR_COLORS))
+    assert preview.nearest_hair_color((0, 0, 0), codes) == 1  # black
+    assert preview.nearest_hair_color((79, 59, 41), codes) == 6  # neutral brown, not the reddish one (7)
+    assert scanface.hair_rgb({}) is None  # bald: no suggestion
+    files = _pack_face('some-faces-from-jgarca', face_id=215108)  # textures named hair_coeff.dds / hair_cm.dds
+    assert preview.nearest_hair_color(scanface.hair_rgb(files), codes) == 6

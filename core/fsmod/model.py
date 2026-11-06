@@ -120,8 +120,9 @@ class ScannedFace(BaseModel):
     folder (scanface.PROJECT_DIR/<player uid>/, pack names) when the user picks it; the build converts them."""
     source_id: int  # id of the face in the pack (its file names)
     pack: Optional[str] = None  # pack folder it came from, for reference only
-    paint_scalp: bool = True  # paint the hair color on the scalp (scanface.paint_scalp); off for faces whose texture
-    # already brings the hair painted and whose cap hangs over the forehead (Yamal: dark streaks)
+    paint_scalp: bool = True  # paint the hair color on the scalp (scanface.paint_scalp). Missing = on, as older
+    # versions saved it; new faces come with False (/api/facepack/use, 06/11/2026: it helps few faces and stains
+    # others, e.g. the forehead of faces whose cap hangs over it, or the ears)
     hair_mode: str = 'standard'  # hair converter, a key of scanface.HAIR_MODES (chosen by eye in the preview)
     hair_thickness: float = 0.4  # strand thickness of the 'thick' hair modes (scanface.HAIR_THICKNESS)
 

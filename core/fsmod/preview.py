@@ -55,6 +55,26 @@ def hair_color(code):
     return '#%06x' % (HAIR_COLORS[code] if 0 <= code < len(HAIR_COLORS) else 0xFF0000)
 
 
+def nearest_hair_color(rgb, codes):
+    """The haircolorcode among codes whose color (HAIR_COLORS) is closest to rgb (distance in CIELAB, as the eye
+    sees it: plain RGB took a neutral brown for the reddish one)."""
+    def lab(r, g, b):
+        def linear(v):
+            v /= 255
+            return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+        r, g, b = linear(r), linear(g), linear(b)
+        xyz = ((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.9505, 0.2126 * r + 0.7152 * g + 0.0722 * b,
+               (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.089)
+        fx, fy, fz = (t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116 for t in xyz)
+        return 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)
+    target = lab(*rgb)
+
+    def distance(code):
+        c = HAIR_COLORS[code]
+        return sum((p - q) ** 2 for p, q in zip(lab((c >> 16) & 255, (c >> 8) & 255, c & 255), target))
+    return min((c for c in codes if 0 <= c < len(HAIR_COLORS)), key=distance)
+
+
 def _rx3(sources, name):
     entry = sources.read_entry(name)
     if entry is None:

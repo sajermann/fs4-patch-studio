@@ -4,6 +4,7 @@ import errno
 import io
 import logging
 import os
+import struct
 import threading
 import time
 
@@ -735,7 +736,23 @@ def create_app(state=None):
     def facepack_use(pick: FacePick):
         """Copies the face's files into the project (faces/<player uid>/); the client then sets player.face."""
         pack = faces_call(state.faces.copy_to_project, pick.folder, pick.face_id, state.store.folder, pick.player)
-        return {'face': {'source_id': pick.face_id, 'pack': pack}}
+        # scalp paint off by default for new faces (it helps few faces and stains others); a face saved without
+        # the field still means on (ScannedFace.paint_scalp), as older versions wrote it
+        return {'face': {'source_id': pick.face_id, 'pack': pack, 'paint_scalp': False}}
+
+    @app.get('/api/facepack/hair-color')
+    def facepack_hair_color(face: int, folder: str | None = None, player: str | None = None):
+        """{'haircolorcode': the game hair color closest to the face's own hair, or None (no hair)}: suggested for
+        the player when a real face is looked at (the scalp paint uses the player's hair color)."""
+        if not (folder or player):
+            raise HTTPException(404)
+        codes = state.catalog().appearance_options['haircolorcode']
+        _, files = faces_call(state.faces.source_files, folder, face, state.store.folder, player)
+        try:
+            rgb = scanface.hair_rgb(files)
+        except (ValueError, LookupError, ArithmeticError, TypeError, struct.error):
+            rgb = None  # unreadable hair: no suggestion
+        return {'haircolorcode': preview.nearest_hair_color(rgb, codes) if rgb else None}
 
     class FaceCopy(BaseModel):
         from_player: str = Field(pattern=UID_PATTERN)

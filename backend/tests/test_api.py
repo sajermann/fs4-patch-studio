@@ -484,7 +484,12 @@ def test_real_face_from_a_pack(env):
     project, _ = palmeiras_v2(c)
     uid = project['players'][0]['uid']
     r = c.post('/api/facepack/use', json={'folder': pack, 'face_id': 274254, 'player': uid})
-    assert r.json() == {'face': {'source_id': 274254, 'pack': 'various-by-Colgado'}}
+    # new faces come with the scalp paint off
+    assert r.json() == {'face': {'source_id': 274254, 'pack': 'various-by-Colgado', 'paint_scalp': False}}
+    code = c.get('/api/facepack/hair-color', params={'folder': pack, 'face': 274254}).json()['haircolorcode']
+    assert code in state.catalog().appearance_options['haircolorcode']  # suggested from the face's own hair
+    assert c.get('/api/facepack/hair-color', params={'player': uid, 'face': 274254}).json()['haircolorcode'] == code
+    assert c.get('/api/facepack/hair-color', params={'face': 274254}).status_code == 404
     assert os.path.isfile(os.path.join(state.store.folder, 'faces', uid, 'heads', 'head_274254_0.rx3'))
     project['players'][0].update(generic=False, face=r.json()['face'])
     codes = {(i['code'], i['entity']) for i in c.put('/api/project', json=project).json()['issues']}

@@ -179,7 +179,7 @@ export interface BootImport {
 export interface ScannedFace {
   source_id: number
   pack?: string
-  paint_scalp?: boolean // hair color painted on the scalp by the converter (default true)
+  paint_scalp?: boolean // hair color painted on the scalp by the converter (missing = true, as older versions saved it; new faces come with false)
   hair_mode?: HairMode // hair converter (default 'standard')
   hair_thickness?: number // strand thickness of the 'split_sharp_thick' converter (0..0.9, default 0.4)
 }

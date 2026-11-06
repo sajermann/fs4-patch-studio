@@ -616,8 +616,9 @@ def head_mesh_first(head):
     skin, eyes = (struct.unpack('<IIII', head[o:o + 16])[1] for o, _ in of_type(head, '<', VERTICES)[:2])
     if skin >= eyes:
         return head
-    labels = [n.split('.')[0] for n in rx3mesh.names(head) if n.endswith('.FxRenderableSimple')]
-    if labels != ['eyes_', 'head_']:
+    # packs name the meshes 'head_'/'eyes_' or 'head'/'eyes'
+    labels = [n.split('.')[0].rstrip('_') for n in rx3mesh.names(head) if n.endswith('.FxRenderableSimple')]
+    if labels != ['eyes', 'head']:
         raise FaceFormatError(f'head meshes swapped: {skin} skin vertices, {eyes} eye vertices')
     out = bytearray(head)
     for type_ in MESH_SECTIONS:
@@ -784,18 +785,27 @@ def convert_textures(template, src, pairs, old_id, new_id):
         so, ss = st[si]
         th = struct.unpack('>IBBBBHHHH', template[to:to + 16])
         sh = struct.unpack('<IBBHHHHH', src[so:so + 16])
-        if (th[2], th[5], th[6], th[8]) != (sh[2], sh[4], sh[5], sh[7]):
+        same = (th[2], th[5], th[6], th[8]) == (sh[2], sh[4], sh[5], sh[7])
+        if same:
+            # mip records: (pitch, rows, size, 0); some tools write another pitch for the 2x2/1x1 mips, only the
+            # sizes must match for the raw copy (the template's records are kept)
+            q, r = to + 16, so + 16
+            for _ in range(th[8]):
+                mt = struct.unpack('>IIII', template[q:q + 16])
+                ms = struct.unpack('<IIII', src[r:r + 16])
+                if mt[2] != ms[2]:
+                    same = False
+                    break
+                q, r = q + 16 + mt[2], r + 16 + ms[2]
+        if not same:
             image = rx3tex.to_image(src, rx3tex.textures(src)[si]).convert('RGBA')
             rx3tex.set_image(out, rx3tex.textures(out)[ti], image)
             continue
         q, r = to + 16, so + 16
         for _ in range(th[8]):
-            mt = struct.unpack('>IIII', template[q:q + 16])
-            ms = struct.unpack('<IIII', src[r:r + 16])
-            if mt != ms:
-                raise ValueError(f'texture {ti}: mip levels differ')
-            out[q + 16:q + 16 + mt[2]] = rx3tex.swap16(src[r + 16:r + 16 + ms[2]])
-            q, r = q + 16 + mt[2], r + 16 + ms[2]
+            n = struct.unpack('>IIII', template[q:q + 16])[2]
+            out[q + 16:q + 16 + n] = rx3tex.swap16(src[r + 16:r + 16 + n])
+            q, r = q + 16 + n, r + 16 + n
     return renamed(out, old_id, new_id)
 
 
@@ -1118,6 +1128,36 @@ def align_offset(template_head, src_head):
         return [(min(p[k] for p in pts) + max(p[k] for p in pts)) / 2 for k in range(3)]
     a, b = center(positions(template_head, '>', 1)), center(positions(src_head, '<', 1))
     return (0.0, a[1] - b[1], a[2] - b[2])  # x stays 0: heads are symmetric
+
+
+def hair_rgb(src):
+    """(r, g, b) of a pack face's hair (RX3l files of read_files), or None for a face without hair: median of the
+    hair_cm texels under the hair's vertices where the hair is opaque (cap: hair_coeff R, strands: B, both read
+    with the second UV set like the game). Used to suggest the player's hair color, which the scalp paint uses."""
+    hair, tex = src.get('hair'), src.get('hair_textures')
+    if not hair or not tex:
+        return None
+    # by name ('hair_coeff' / 'hair_cm', some packs add '.dds'); the converter's order otherwise (0 coeff, 1 cm)
+    found = {(t.get('name') or '').split('.')[0]: t for t in rx3tex.textures(tex)}
+    listed = rx3tex.textures(tex)
+    if len(listed) < 2:
+        return None
+    coeff = rx3tex.to_image(tex, found.get('hair_coeff', listed[0])).convert('RGB')
+    color = rx3tex.to_image(tex, found.get('hair_cm', listed[1])).convert('RGB')
+    cpx, hpx = coeff.load(), color.load()
+    picked = []
+    for m in rx3mesh.meshes(hair):
+        channel = 0 if 'alphaA' in m['name'] else 2 if 'alphaB' in m['name'] else None
+        t0 = m['attrs'].get('t0')
+        if channel is None or not t0:
+            continue
+        t1 = m['attrs'].get('t1') or t0
+        for a, b in zip(t0, t1):
+            if cpx[int(b[0] % 1 * (coeff.width - 1)), int(b[1] % 1 * (coeff.height - 1))][channel] >= 128:
+                picked.append(hpx[int(a[0] % 1 * (color.width - 1)), int(a[1] % 1 * (color.height - 1))])
+    if not picked:
+        return None
+    return tuple(sorted(p[k] for p in picked)[len(picked) // 2] for k in range(3))
 
 
 def template_files(sources, template=TEMPLATE):

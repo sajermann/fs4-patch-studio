@@ -188,6 +188,9 @@ export const api = {
   browseFacePack: () => request<{ folder: string | null }>('/api/facepack/browse', { method: 'POST' }),
   /** Copies one face of the pack into the project (faces/<player uid>/). */
   checkScannedFace: (query: string) => request<{ ok: boolean }>(`/api/preview/scanned-check?${query}`),
+  /** Game hair color closest to a real face's own hair (suggested for the player), null for a face without hair. */
+  faceHairColor: (source: FaceSource) =>
+    request<{ haircolorcode: number | null }>(`/api/facepack/hair-color?${faceQuery(source)}`),
   pickFace: (folder: string, faceId: number, player: string) =>
     request<{ face: ScannedFace }>('/api/facepack/use', json('POST', { folder, face_id: faceId, player })),
   /** Copies a player's real face files to another player of the project (copy of a player). */

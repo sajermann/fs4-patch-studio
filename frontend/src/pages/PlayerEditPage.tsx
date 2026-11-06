@@ -48,6 +48,10 @@ const NONE = 'none'
 // codes that still matter with a real face: the scalp hair color (painted by the converter), the body skin and the body
 const FACE_MODE_CODES = ['haircolorcode', 'skintonecode', 'bodytypecode', 'shoetypecode', 'gkglovetypecode', 'jerseysleevelengthcode', 'socklengthcode']
 const FACE_MODE_LABELS: Record<string, MessageKey> = { haircolorcode: 'playerEdit.faceHairColor', skintonecode: 'playerEdit.faceSkinTone' }
+/** Options of a real face (ScannedFace) being looked at, before "use this face". */
+type BrowseFaceOptions = { paint_scalp: boolean; hair_mode: HairMode; hair_thickness: number }
+// new faces: scalp paint off (user's decision, 06/11/2026: it helps few faces and stains others)
+const NEW_FACE_OPTIONS: BrowseFaceOptions = { paint_scalp: false, hair_mode: 'standard', hair_thickness: HAIR_THICKNESS.default }
 // The profile label in the player card is not stored anywhere: the game shows the label of the highest of these
 // 7 bars. Confirmed in game: SHO -> Finisher, ATH -> Powerhouse.
 const STYLE_BY_SKILL: Record<string, string> = {
@@ -324,19 +328,56 @@ function AppearanceTab({ player }: { player: Player }) {
   const options = catalog?.appearance ?? {}
   const defaults = usePlayerDefaults(player.uid)
   const preview = previewAppearance(player, defaults, catalog, draft.boots)
-  const [browsing, setBrowsing] = useState<BrowsedFace | null>(null)
+  const [browsing, setBrowsingFace] = useState<BrowsedFace | null>(null)
+  // options of the face being looked at: shown and previewed at once, set on the player only by "use this face"
+  const [browseOptions, setBrowseOptions] = useState<BrowseFaceOptions>(NEW_FACE_OPTIONS)
+  const [browseHair, setBrowseHair] = useState<{ key: string; code: number } | null>(null)
+  const setBrowsing = (face: BrowsedFace | null) => {
+    setBrowsingFace(face)
+    if (!face) {
+      setBrowseOptions(NEW_FACE_OPTIONS)
+      setBrowseHair(null)
+    }
+  }
   const generic = player.generic
   // the converter paints the scalp with the player's hair color (fsmod.scanface)
-  const hairColorCode = player.appearance.haircolorcode ?? defaults?.appearance.haircolorcode ?? options.haircolorcode?.[0] ?? 0
+  const playerHairColor = player.appearance.haircolorcode ?? defaults?.appearance.haircolorcode ?? options.haircolorcode?.[0] ?? 0
   const faceSource: FaceSource | null = browsing
     ? { folder: browsing.folder, face: browsing.face.id }
     : !generic && player.face
       ? { player: player.uid, face: player.face.source_id }
       : null
-  const paintScalp = player.face?.paint_scalp ?? true
-  const hairMode = player.face?.hair_mode ?? 'standard'
+  // hair color suggested from the looked-at face's own hair (the user can still change it)
+  const browseKey = browsing ? `${browsing.folder}|${browsing.face.id}` : ''
+  const hairSuggestion = useQuery({
+    queryKey: ['face-hair-color', browseKey],
+    queryFn: () => api.faceHairColor(faceSource as FaceSource),
+    enabled: !!browsing,
+    retry: false,
+    staleTime: Infinity,
+  })
+  const browseHairColor = browsing
+    ? browseHair?.key === browseKey
+      ? browseHair.code
+      : (hairSuggestion.data?.haircolorcode ?? undefined)
+    : undefined
+  const hairColorCode = browseHairColor ?? playerHairColor
+  const faceOptions: BrowseFaceOptions = browsing
+    ? browseOptions
+    : {
+        paint_scalp: player.face?.paint_scalp ?? true,
+        hair_mode: player.face?.hair_mode ?? 'standard',
+        hair_thickness: player.face?.hair_thickness ?? HAIR_THICKNESS.default,
+      }
+  const setFaceOption = (patch: Partial<BrowseFaceOptions>) => {
+    if (browsing) setBrowseOptions((o) => ({ ...o, ...patch }))
+    else if (player.face) updatePlayer(player.uid, { face: { ...player.face, ...patch } })
+  }
+  const showFaceOptions = !!browsing || !!player.face
+  const paintScalp = faceOptions.paint_scalp
+  const hairMode = faceOptions.hair_mode
   const thickHair = THICK_HAIR_MODES.includes(hairMode)
-  const hairThickness = player.face?.hair_thickness ?? HAIR_THICKNESS.default
+  const hairThickness = faceOptions.hair_thickness
   // an original player who keeps the game's scanned head: that head as it is
   const original = player.original_id != null
   const gameHead = original && player.loaded?.player.generic === false
@@ -427,13 +468,24 @@ function AppearanceTab({ player }: { player: Player }) {
                 )}
               </div>
             )}
-            <FacePicker key={player.uid} player={player} browsing={browsing} onBrowse={setBrowsing} unsupported={faceUnsupported} />
-            {player.face && (
+            <FacePicker
+              key={player.uid}
+              player={player}
+              browsing={browsing}
+              onBrowse={setBrowsing}
+              unsupported={faceUnsupported}
+              pickExtras={{
+                face: browseOptions,
+                ...(browseHairColor !== undefined && { appearance: { haircolorcode: browseHairColor } }),
+              }}
+            />
+            {browsing && <p className="mt-3 text-xs text-muted-foreground">{t('playerEdit.faceOptionsPending')}</p>}
+            {showFaceOptions && (
               <label className="mt-3 flex items-start gap-2 text-sm">
                 <Checkbox
                   className="mt-0.5"
                   checked={paintScalp}
-                  onCheckedChange={(v) => player.face && updatePlayer(player.uid, { face: { ...player.face, paint_scalp: v === true } })}
+                  onCheckedChange={(v) => setFaceOption({ paint_scalp: v === true })}
                 />
                 <span>
                   {t('playerEdit.paintScalp')}
@@ -441,12 +493,12 @@ function AppearanceTab({ player }: { player: Player }) {
                 </span>
               </label>
             )}
-            {player.face && (
+            {showFaceOptions && (
               <div className="mt-3 grid gap-1.5 text-sm">
                 <Label>{t('playerEdit.hairMode')}</Label>
                 <Select
                   value={hairMode}
-                  onValueChange={(v) => player.face && updatePlayer(player.uid, { face: { ...player.face, hair_mode: v as HairMode } })}
+                  onValueChange={(v) => setFaceOption({ hair_mode: v as HairMode })}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue />
@@ -462,10 +514,10 @@ function AppearanceTab({ player }: { player: Player }) {
                 <span className="text-xs text-muted-foreground">{t(HAIR_MODE_HINTS[hairMode])}</span>
               </div>
             )}
-            {player.face && thickHair && (
+            {showFaceOptions && thickHair && (
               <HairThickness
                 value={hairThickness}
-                onCommit={(v) => player.face && updatePlayer(player.uid, { face: { ...player.face, hair_thickness: v } })}
+                onCommit={(v) => setFaceOption({ hair_thickness: v })}
               />
             )}
           </CardContent>
@@ -476,12 +528,22 @@ function AppearanceTab({ player }: { player: Player }) {
             .filter((code) => code !== 'shoetypecode' && options[code] && (generic || FACE_MODE_CODES.includes(code)))
             .map((code) => (
               <Field key={code} label={t((!generic && FACE_MODE_LABELS[code]) || APPEARANCE_LABELS[code])} entity={player.uid} field={`appearance.${code}`}>
-                <Stepper
-                  value={player.appearance[code]}
-                  options={options[code]}
-                  onChange={(v) => set(code, v)}
-                  inherited={defaults?.appearance[code]}
-                />
+                {/* looking at a real face: its hair color is kept here until "use this face" */}
+                {browsing && code === 'haircolorcode' ? (
+                  <Stepper
+                    value={hairColorCode}
+                    options={options[code]}
+                    onChange={(v) => (v === undefined ? setBrowseHair(null) : setBrowseHair({ key: browseKey, code: v }))}
+                    inherited={hairSuggestion.data?.haircolorcode ?? undefined}
+                  />
+                ) : (
+                  <Stepper
+                    value={player.appearance[code]}
+                    options={options[code]}
+                    onChange={(v) => set(code, v)}
+                    inherited={defaults?.appearance[code]}
+                  />
+                )}
                 {code === 'bodytypecode' && (
                   <p className="mt-1 flex items-start gap-1 text-xs text-amber-600 dark:text-amber-500">
                     <AlertTriangle className="mt-0.5 size-3 shrink-0" />

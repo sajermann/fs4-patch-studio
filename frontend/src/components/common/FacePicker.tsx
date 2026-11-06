@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError, api, faceThumbUrl } from '@/api/client'
-import type { FacePack, FacePackFace, Player } from '@/api/types'
+import type { FacePack, FacePackFace, Player, ScannedFace } from '@/api/types'
 import { matches } from '@/components/common/list'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,12 +33,15 @@ export function FacePicker({
   browsing,
   onBrowse,
   unsupported = false,
+  pickExtras,
 }: {
   player: Player
   browsing: BrowsedFace | null
   onBrowse: (face: BrowsedFace | null) => void
   /** the face being looked at does not convert: it cannot be picked */
   unsupported?: boolean
+  /** what "use this face" also sets: the face options and appearance chosen while looking at it */
+  pickExtras?: { face?: Partial<ScannedFace>; appearance?: Record<string, number> }
 }) {
   const { t } = useI18n()
   const { updatePlayer } = useProject()
@@ -81,7 +84,11 @@ export function FacePicker({
     setPicking(true)
     try {
       const { face } = await api.pickFace(browsing.folder, browsing.face.id, player.uid)
-      updatePlayer(player.uid, { generic: false, face })
+      updatePlayer(player.uid, {
+        generic: false,
+        face: { ...face, ...pickExtras?.face },
+        ...(pickExtras?.appearance && { appearance: { ...player.appearance, ...pickExtras.appearance } }),
+      })
       onBrowse(null)
       toast.success(t('faces.copied', { id: face.source_id }))
     } catch (e) {
