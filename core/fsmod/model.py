@@ -12,8 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # project file format: bump it whenever the layout changes (older files are converted when read, and an app that
 # predates the new number refuses the file instead of dropping what it does not know). 3 = teams in several leagues,
 # players in several teams and the game's own entries (original_id); 4 = street kits with a list of pieces per part;
-# 5 = world_tour (players of the friendly match); 6 = boots (the user's and edited game boots) and Player.boots
-CONTRACT_VERSION = 6
+# 5 = world_tour (players of the friendly match); 6 = boots (the user's and edited game boots) and Player.boots;
+# 7 = goalkeeper gloves (the user's and edited game gloves) and Player.glove
+CONTRACT_VERSION = 7
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
 Channel = Annotated[int, Field(ge=0, le=255)]
@@ -27,6 +28,7 @@ TakerRole = Literal['penalty', 'free_kick', 'long_free_kick', 'left_corner', 'ri
 PlayerRef = Union[str, int]  # project player uid, or playerid of one of the game's own players
 ShoeSurface = Literal['street', 'turf', 'indoor']  # pitch surfaces with a boot of their own (fsmod.boots)
 BOOT_FILES = ('mesh', 'texture')  # the pack's files of a Boot (project folder paths, as the user sent them)
+GloveRef = Union[str, int]  # uid of a new Glove of the project, or the code of one of the game's gloves
 
 
 class Entity(BaseModel):
@@ -170,6 +172,10 @@ class Player(Entity):
     # boot per pitch surface: uid of a new Boot of the project; a surface left out (or whose boot is hidden) = the
     # game boot of its appearance code (fsmod.boots.SURFACE_FIELDS; an edited game boot goes by its code there too)
     boots: dict[ShoeSurface, str] = {}
+    # goalkeeper glove the user picked (Accessories tab): a new Glove's uid or a game glove's code. None = not
+    # picked: gkglovetypecode stays as the appearance/template has it. A picked glove makes him a goalkeeper
+    # (preferredposition1, fsmod.gloves.preferred_position): the game only shows a goalkeeper's own glove
+    glove: Optional[GloveRef] = None
     hidden: bool = False  # left out of the patch (its id stays reserved), e.g. not ready yet
 
     @model_validator(mode='before')
@@ -225,6 +231,29 @@ class Boot(Entity):
     @property
     def has_files(self):
         return bool(self.mesh and self.texture)
+
+
+class Glove(Entity):
+    """A goalkeeper glove of the project (fsmod.gloves): a new one (a pack texture file, a code of its own given by the
+    build) or one of the game's gloves the user edits (original_id = its code: a new file replaces the game's for every
+    goalkeeper wearing it; name and credits only exist in the app)."""
+    uid: str
+    name: str = ''
+    credits: Optional[str] = None  # who made it (shown in the app only)
+    code: Optional[int] = None  # new glove: its code in the game (gloves.free_codes); None or no longer valid =
+    # given by the build
+    texture: Optional[str] = None  # the pack's gkglove_<id>_textures.rx3 (project folder path, as sent)
+    thumbnail: Optional[str] = None  # picture in the app (image path); None = drawn from the file
+    hidden: bool = False  # left out of the patch, e.g. not complete yet
+    original_id: Optional[int] = None  # the game's glove this entry edits (its code); None = new glove
+
+    @property
+    def is_original(self):
+        return self.original_id is not None
+
+    @property
+    def has_files(self):
+        return bool(self.texture)
 
 
 class Lineup(BaseModel):
@@ -343,11 +372,12 @@ class WorldTour(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3, 4, 5, 6] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5, 6, 7] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []
     boots: list[Boot] = []
+    gloves: list[Glove] = []
     originals: OriginalChanges = OriginalChanges()
     game_patches: GamePatches = GamePatches()
     world_tour: WorldTour = WorldTour()
@@ -412,11 +442,15 @@ class Project(Entity):
         world_tour = WorldTour(**{side: [s for s in getattr(self.world_tour, side) if s.player not in left_out_players]
                                   for side in FRIENDLY_TEAM_SIZES})
         boots = [b for b in self.boots if not b.hidden]  # a player's surface with a hidden boot keeps his code
+        gloves = [g for g in self.gloves if not g.hidden]  # a player with a hidden glove keeps his code
         return self.model_copy(update={'leagues': leagues, 'teams': teams, 'players': players, 'world_tour': world_tour,
-                                       'boots': boots})
+                                       'boots': boots, 'gloves': gloves})
 
     def boot(self, uid):
         return next((b for b in self.boots if b.uid == uid), None)
+
+    def glove(self, uid):
+        return next((g for g in self.gloves if g.uid == uid), None)
 
     def to_json(self):
         return self.model_dump(mode='json', exclude_none=True)

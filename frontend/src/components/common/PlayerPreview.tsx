@@ -40,6 +40,8 @@ export interface PreviewAppearance {
   /** a pack boot of the project (converted by the backend) instead of the game boot shoetypecode */
   shoe?: { glb: string; texture: string }
   gkglovetypecode: number
+  /** a glove of the project (its converted color map) instead of the game glove gkglovetypecode */
+  glove?: string
   height: number // cm; the game scales the whole player by it (validated in game, 165 x 200 cm)
 }
 
@@ -422,7 +424,7 @@ function Body({ a, outfit }: { a: PreviewAppearance; outfit: PreviewOutfit }) {
         <BodyPart part="shoes" code={a.shoetypecode} texture={`/api/preview/shoe/${a.shoetypecode}.png`} roughness={0.5} />
       )}
       {/* every player can play in goal, so the gloves are always shown */}
-      <BodyPart part="gloves" code={0} texture={`/api/preview/glove/${a.gkglovetypecode}.png`} roughness={0.6} />
+      <BodyPart part="gloves" code={0} texture={a.glove ?? `/api/preview/glove/${a.gkglovetypecode}.png`} roughness={0.6} />
     </group>
   )
 }

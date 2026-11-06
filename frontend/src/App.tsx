@@ -12,6 +12,8 @@ import { logClientError } from '@/lib/clientLog'
 import { ThemeProvider } from '@/lib/theme'
 import { BootEditPage } from '@/pages/BootEditPage'
 import { BootsPage } from '@/pages/BootsPage'
+import { GloveEditPage } from '@/pages/GloveEditPage'
+import { GlovesPage } from '@/pages/GlovesPage'
 import { LeagueEditPage } from '@/pages/LeagueEditPage'
 import { LeaguesPage } from '@/pages/LeaguesPage'
 import { PatchesPage } from '@/pages/PatchesPage'
@@ -66,6 +68,8 @@ function Gate() {
           <Route path="players/:uid" element={<PlayerEditPage />} />
           <Route path="boots" element={<BootsPage />} />
           <Route path="boots/:uid" element={<BootEditPage />} />
+          <Route path="gloves" element={<GlovesPage />} />
+          <Route path="gloves/:uid" element={<GloveEditPage />} />
           <Route path="stadiums" element={<StadiumsPage />} />
           <Route path="world-tour" element={<WorldTourPage />} />
           <Route path="patches" element={<PatchesPage />} />

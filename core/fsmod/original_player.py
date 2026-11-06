@@ -14,9 +14,9 @@ from . import photo
 from .model import OriginalPlayerSnapshot, Player, TeamLink
 
 EDITABLE_FIELDS = ('first_name', 'last_name', 'display_name', 'jersey_name', 'height', 'weight', 'birthdate', 'foot',
-                   'skills', 'appearance', 'fields', 'generic', 'face', 'boots')
-SNAPSHOT_DEFAULTS = {'boots': {}}  # fields snapshots taken by older versions do not have
-FIELDS = ('nationality',)  # players columns an original entry carries in Player.fields
+                   'skills', 'appearance', 'fields', 'generic', 'face', 'boots', 'glove')
+SNAPSHOT_DEFAULTS = {'boots': {}, 'glove': None}  # fields snapshots taken by older versions do not have
+FIELDS = ('nationality', 'preferredposition1')  # players columns an original entry carries in Player.fields
 
 
 def sha1(data):
@@ -49,7 +49,8 @@ def load(game, catalog, playerid, uid, save_image):
         teams=[TeamLink(**link) for link in catalog.player_links(playerid)],
         generic=info['generic_head'], height=info['height'], weight=info['weight'], birthdate=info['birthdate'],
         foot=info['foot'], skills=dict(info['skills']), appearance=dict(info['appearance']),
-        fields={'nationality': info['nationality']}, photo=photo_path)
+        fields={'nationality': info['nationality'], 'preferredposition1': info['preferred_position']},
+        photo=photo_path)
     pl.loaded = OriginalPlayerSnapshot(player=snapshot_fields(pl), images=images)
     return pl
 

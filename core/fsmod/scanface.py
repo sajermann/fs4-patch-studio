@@ -1087,9 +1087,12 @@ def resize_texture(d, t, w, h):
 
 def sharp_textures(tex, src_tex, limit=SHARP_MAX):
     """New hair textures RX3b with hair_coeff and hair_cm at the pack's resolution (largest side at most `limit`)
-    instead of the template's 256/512: curl atlases 2048 px wide squeezed into 256 turn the curls into a blur."""
-    for name in ('hair_coeff', 'hair_cm'):
-        t, s = rx3tex.by_name(tex, name), rx3tex.by_name(src_tex, name)
+    instead of the template's 256/512: curl atlases 2048 px wide squeezed into 256 turn the curls into a blur.
+    The pack's textures are taken by position, like convert_textures (0 = coeff, 1 = cm): some packs name them
+    with the file extension ('hair_coeff.dds')."""
+    src_textures = rx3tex.textures(src_tex)
+    for index, name in enumerate(('hair_coeff', 'hair_cm')):
+        t, s = rx3tex.by_name(tex, name), src_textures[index]
         scale = min(1.0, limit / max(s['w'], s['h']))
         w, h = int(s['w'] * scale), int(s['h'] * scale)
         if w * h <= t['w'] * t['h']:

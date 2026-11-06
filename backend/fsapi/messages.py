@@ -80,6 +80,13 @@ ISSUE_TEXT = {
     'boot_street_original': 'Uma chuteira original vai para a rua conforme o código dela.',
     'original_boot_not_found': 'A chuteira {id} não existe no jogo.',
     'original_boot_edited_twice': 'A chuteira original {id} já está sendo editada por outra entrada do projeto.',
+    'glove_hidden': 'A luva {glove} está fora do patch: o goleiro fica com a luva do código que ele já tinha.',
+    'glove_not_found': 'Luva não encontrada.',
+    'glove_file_not_found': 'Arquivo da luva não encontrado ({path}).',
+    'glove_texture_missing': 'Envie o arquivo da luva (gkglove_<id>_textures.rx3).',
+    'glove_slots_full': 'As {max} vagas de luva nova já estão ocupadas: deixe esta fora do patch ou exclua outra.',
+    'original_glove_not_found': 'A luva {id} não existe no jogo.',
+    'original_glove_edited_twice': 'A luva original {id} já está sendo editada por outra entrada do projeto.',
 }
 
 

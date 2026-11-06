@@ -12,7 +12,7 @@ from typing import Optional
 
 from PIL import Image
 
-from . import boots, builder, kit, original_league, original_team, scanface
+from . import boots, builder, gloves, kit, original_league, original_team, scanface
 from .catalog import POSITIONS, SKILLS
 from .model import FRIENDLY_TEAM_SIZES, REAL_KIT_FILES
 
@@ -43,12 +43,17 @@ def validate(project, catalog, assets_dir):
     # teams taken out of their league (no league) are left out of the patch: said once, not validated
     without_league = [tm.uid for tm in project.teams if not tm.leagues and not tm.hidden]
     every_boot = {b.uid: b for b in project.boots}
+    every_glove = {g.uid: g for g in project.gloves}
     project = project.visible()  # hidden leagues/teams are left out of the patch: not validated
     issues = [Issue('team_without_league', 'warning', uid, 'leagues', {}) for uid in without_league]
     # a player whose boot is out of the patch keeps the game boot of his code on that surface
     issues += [Issue('boot_hidden', 'warning', p.uid, f'boots.{surface}', {'boot': every_boot[uid].name})
                for p in project.players for surface, uid in p.boots.items()
                if uid in every_boot and every_boot[uid].hidden]
+    # a player whose glove is out of the patch keeps his glove code (he stays a goalkeeper)
+    issues += [Issue('glove_hidden', 'warning', p.uid, 'glove', {'glove': every_glove[p.glove].name})
+               for p in project.players if isinstance(p.glove, str) and p.glove in every_glove
+               and every_glove[p.glove].hidden]
 
     def error(code, entity=None, field_name=None, **params):
         issues.append(Issue(code, 'error', entity, field_name, params))
@@ -154,7 +159,7 @@ def validate(project, catalog, assets_dir):
             check_range(tm.uid, f'real_kits.{slot}.collar', real.collar, kit.COLLARS[0], kit.COLLARS[-1])
 
     seen = set()
-    for entity in [*project.leagues, *project.teams, *project.players, *project.boots]:
+    for entity in [*project.leagues, *project.teams, *project.players, *project.boots, *project.gloves]:
         if entity.uid in seen:
             error('duplicate_uid', entity.uid, 'uid')
         seen.add(entity.uid)
@@ -504,6 +509,37 @@ def validate(project, catalog, assets_dir):
                 error('boot_not_found', p.uid, f'boots.{surface}')
             elif surface == 'street' and not b.street:
                 error('boot_not_street', p.uid, f'boots.{surface}', boot=b.name)
+
+    # ---- goalkeeper gloves (hidden ones are left out of the patch: not validated)
+    glove_codes = set(gloves.game_codes(catalog.game))
+    free_gloves = len(gloves.free_codes(catalog.game))
+    new_count, edited_gloves = 0, {}
+    for g in project.gloves:
+        if not g.name.strip():
+            error('required', g.uid, 'name')
+        if g.texture and not os.path.isfile(os.path.join(assets_dir, g.texture)):
+            error('glove_file_not_found', g.uid, 'texture', path=g.texture)
+        elif not g.texture and not g.is_original:
+            error('glove_texture_missing', g.uid, 'texture')  # an edited game glove may keep the game's file
+        if g.is_original:
+            if g.original_id not in glove_codes:
+                error('original_glove_not_found', g.uid, 'original_id', id=g.original_id)
+            elif g.original_id in edited_gloves:
+                error('original_glove_edited_twice', g.uid, 'original_id', id=g.original_id)
+            edited_gloves[g.original_id] = g
+        else:
+            new_count += 1
+            if new_count > free_gloves:
+                error('glove_slots_full', g.uid, 'hidden', max=free_gloves)
+    visible_gloves = {g.uid: g for g in project.gloves}
+    for p in project.players:
+        if isinstance(p.glove, int):
+            if p.glove not in glove_codes:
+                error('glove_not_found', p.uid, 'glove')
+        elif p.glove is not None:
+            g = visible_gloves.get(p.glove)
+            if (g is None and (p.glove not in every_glove or every_glove[p.glove].is_original)) or                     (g is not None and g.is_original):
+                error('glove_not_found', p.uid, 'glove')
     return issues
 
 

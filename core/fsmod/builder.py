@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from . import (big, boots, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, original_league,
+from . import (big, boots, chunk, crest, dbcrc, gamepatches, gloves, kit, leaguelogo, locale, model, original_league,
                original_player, original_team, photo, preview, rx3tex, scanface, t3db, world_tour)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
@@ -121,6 +121,7 @@ class BuildResult:
     assigned_team_ids: dict = field(default_factory=dict)  # {team uid: teamid} given during this build
     assigned_player_ids: dict = field(default_factory=dict)  # {player uid: playerid} given during this build
     assigned_boot_codes: dict = field(default_factory=dict)  # {boot uid: code} given during this build
+    assigned_glove_codes: dict = field(default_factory=dict)  # {glove uid: code} given during this build
     loose: dict = field(default_factory=dict)  # {internal name: bytes} written as loose files under Game/
     log: list = field(default_factory=list)
 
@@ -348,6 +349,28 @@ def assign_boot_codes(project, game):
             raise BuildError(f'{b.name}: no free {"street " if b.street else ""}boot code left', b.uid)
         used.add(code)
         out[b.uid] = code
+    return out
+
+
+def assign_glove_codes(project, game):
+    """{glove uid: code} for the new gloves of the project whose code is missing or no longer free (gloves.free_codes;
+    no two gloves share one). Codes stay with the glove once written back. Raises BuildError when no code is left."""
+    pool = gloves.free_codes(game)
+    news = [g for g in project.gloves if not g.is_original]
+    keep, used = set(), set()
+    for g in news:  # the first glove with a fitting code keeps it
+        if g.code in pool and g.code not in used:
+            used.add(g.code)
+            keep.add(g.uid)
+    out = {}
+    for g in news:
+        if g.uid in keep:
+            continue
+        code = next((c for c in pool if c not in used), None)
+        if code is None:
+            raise BuildError(f'{g.name}: no free glove code left ({len(pool)} in all)', g.uid)
+        used.add(code)
+        out[g.uid] = code
     return out
 
 
@@ -754,10 +777,72 @@ def _build_boots(db, game, project, assets_dir, player_ids, entries, result, say
                 db.put(players, players.records[k], boots.SURFACE_FIELDS[surface], code)
 
 
-def build(project, game, assets_dir, log=None, progress=None, boot_converter=None):
+def _build_gloves(db, game, project, assets_dir, player_ids, entries, result, say, converter=None):
+    """New gloves worn by a player get a code (assign_glove_codes) and loose files (inside data8 the game shows them
+    broken); edited game gloves with a file of their own replace the game's inside its archive; each player who picked
+    a glove gets its code. Runs before the World Tour (its clones copy the player rows)."""
+    news = {g.uid: g for g in project.gloves if not g.is_original}
+    edited = [g for g in project.gloves if g.is_original and g.has_files]
+    picked = [pl for pl in project.players if pl.glove is not None]
+    if not news and not edited and not picked:
+        return
+    worn = {pl.glove for pl in picked if pl.glove in news and news[pl.glove].has_files}
+    converter = converter or gloves.Converter(game)
+    result.assigned_glove_codes = assign_glove_codes(project, game)
+    codes = {uid: result.assigned_glove_codes.get(uid, g.code) for uid, g in news.items()}
+
+    def convert(glove, code):
+        try:
+            with open(os.path.join(assets_dir, glove.texture), 'rb') as f:
+                texture = f.read()
+        except OSError as e:
+            raise BuildError(f'{glove.name}: cannot read the glove file: {e}', glove.uid) from e
+        try:
+            return converter.files(texture, code)
+        except gloves.GloveError as e:
+            raise BuildError(f'{glove.name}: {e}', glove.uid) from e
+
+    for g in edited:
+        say(f'glove {g.original_id} (game glove) "{g.name}": files replaced')
+        for name, data in convert(g, g.original_id).items():
+            entries[_archive_of(game, name), name] = chunk.chunkzip(data)
+    for uid in sorted(worn, key=lambda u: codes[u]):
+        say(f'glove {codes[uid]} "{news[uid].name}"')
+        for name, data in convert(news[uid], codes[uid]).items():
+            result.loose[name] = chunk.chunkzip(data)
+    game_codes = set(gloves.game_codes(game))
+    players = db.table('players')
+    for pl in picked:
+        code = codes[pl.glove] if pl.glove in worn else pl.glove if isinstance(pl.glove, int) else None
+        if code is None or (isinstance(pl.glove, int) and code not in game_codes):
+            continue  # a hidden (or file-less) glove: he keeps his code
+        pid = pl.original_id if pl.is_original else player_ids.get(pl.uid)
+        for k in (db.rows('players', 'playerid', pid) if pid is not None else []):
+            db.put(players, players.records[k], gloves.FIELD, code)
+
+
+def _set_preferred_positions(db, project, player_ids, say):
+    """players.preferredposition1 of every project player by the app's rule (gloves.preferred_position): goalkeeper
+    with a picked glove, else his most common team position. An original player keeps the game's unless the rule
+    makes him a goalkeeper or takes him out of goal."""
+    players = db.table('players')
+    for pl in project.players:
+        pid = pl.original_id if pl.is_original else player_ids.get(pl.uid)
+        for k in (db.rows('players', 'playerid', pid) if pid is not None else []):
+            row = players.records[k]
+            current = db.get(players, row, 'preferredposition1')
+            position = gloves.preferred_position(pl, current if pl.is_original else None)
+            if current != position:
+                db.put(players, row, 'preferredposition1', position)
+                if pl.is_original:
+                    say(f'original player {pid} "{pl.shown_name}": preferred position {position}')
+
+
+def build(project, game, assets_dir, log=None, progress=None, boot_converter=None, glove_converter=None):
     """Builds the mod. assets_dir = folder that image paths (crests) are relative to. Hidden leagues/teams are
     left out (Project.visible); their ids stay reserved. progress(step, done, total) is called as the build goes
-    (steps: BUILD_STEPS, then write_patch's). boot_converter: a boots.Converter to reuse (keeps its conversions)."""
+    (steps: BUILD_STEPS, then write_patch's). boot_converter / glove_converter: a boots.Converter /
+    gloves.Converter to reuse (keeps its conversions)."""
     result = BuildResult(database=b'', entries={})
     every = project
     project = project.visible()
@@ -1121,6 +1206,8 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
     step('images', len(jobs), len(jobs))
 
     _build_boots(db, game, project, assets_dir, player_ids, entries, result, say, boot_converter)
+    _build_gloves(db, game, project, assets_dir, player_ids, entries, result, say, glove_converter)
+    _set_preferred_positions(db, project, player_ids, say)
     apply_original_changes(db, project.originals)
     try:
         world_tour.apply(db, game, project, player_ids, result.loose, entries, texts, say)

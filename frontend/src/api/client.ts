@@ -3,7 +3,10 @@ import type {
   BasePlayer,
   Boot,
   BootImport,
+  Glove,
+  GloveImport,
   OriginalBoot,
+  OriginalGlove,
   League,
   BuildProgress,
   BuildResponse,
@@ -176,6 +179,35 @@ export const api = {
     return { name, blob: await res.blob() }
   },
 
+  /** The game's own goalkeeper gloves. */
+  originalGloves: () => request<OriginalGlove[]>('/api/originals/gloves'),
+  /** Starts editing one of the game's gloves: the entry without a file of its own (the game's stays). */
+  editOriginalGlove: (code: number, uid: string) =>
+    request<Glove>(`/api/originals/gloves/${code}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),
+  /** A glove's pack file (checked) or picture, under a provisional name until the project is saved. */
+  uploadGloveFile: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<ImageUpload>('/api/gloves/files', { method: 'POST', body: form })
+  },
+  uploadGloveThumbnail: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<ImageUpload>('/api/gloves/thumbnail', { method: 'POST', body: form })
+  },
+  /** Gloves of a shared zip; nothing is saved (one glove fills the form, many are added by the caller). */
+  importGloves: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<GloveImport>('/api/gloves/import', { method: 'POST', body: form })
+  },
+  /** Zip of saved gloves to share: { file name, contents }. */
+  exportGloves: async (uids: string[], many = false) => {
+    const res = await send('/api/gloves/export', json('POST', { uids, many }))
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'gloves.zip'
+    return { name, blob: await res.blob() }
+  },
+
   /** Provisional path until the project is saved, when the image gets the fixed name of its entity. */
   uploadImage: (file: File) => {
     const form = new FormData()
@@ -260,6 +292,23 @@ export const bootPreviewUrls = (mesh: string, texture: string) => {
   const qs = new URLSearchParams({ mesh, texture })
   return { glb: withRevision(`/api/preview/boot.glb?${qs}`), texture: withRevision(`/api/preview/boot.png?${qs}`) }
 }
+
+/** List picture of one of the game's gloves. */
+export const originalGloveThumbUrl = (code: number) => `/api/originals/gloves/${code}.webp`
+
+/** List picture of a project glove: its own picture, or the glove drawn from its file (none: no picture yet). */
+export const gloveThumbUrl = (glove: Pick<Glove, 'thumbnail' | 'texture'>) =>
+  glove.thumbnail
+    ? withRevision(`/api/gloves/thumb.webp?${new URLSearchParams({ image: glove.thumbnail })}`)
+    : glove.texture
+      ? withRevision(`/api/gloves/thumb.webp?${new URLSearchParams({ texture: glove.texture })}`)
+      : undefined
+
+/** Color map of a project glove as the game will show it (the 3D preview's texture). */
+export const glovePreviewUrl = (texture: string) => withRevision(`/api/preview/glove.png?${new URLSearchParams({ texture })}`)
+
+/** Color map of one of the game's gloves. */
+export const gameGlovePreviewUrl = (code: number) => `/api/preview/glove/${code}.png`
 
 /** Saves a downloaded file (blob) with its name. */
 export function saveBlob(name: string, blob: Blob) {

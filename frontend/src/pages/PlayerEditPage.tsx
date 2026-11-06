@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Copy, DatabaseZap, Dices, Eraser, LoaderCircle, RotateCcw, Trash2, User } from 'lucide-react'
+import { AlertTriangle, Copy, DatabaseZap, Dices, Eraser, Info, LoaderCircle, RotateCcw, Trash2, User } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError, photoPreviewUrl, scannedFaceQuery, type FaceSource } from '@/api/client'
@@ -37,6 +37,8 @@ import { GOALKEEPER_POSITION, backName, previewAppearance, teamPreviewKit } from
 import { useEntryOfPath } from '@/lib/members'
 import { linkedTeam, teamKey, teamPath } from '@/lib/players'
 import { PlayerBoots } from '@/components/common/PlayerBoots'
+import { PlayerGloves } from '@/components/common/PlayerGloves'
+import { preferredPosition } from '@/lib/gloves'
 import { PlayerTeamsCard } from '@/components/common/PlayerTeams'
 import { cn } from '@/lib/utils'
 import { usePlayerDefaults, useProject, useWasEdited } from '@/state/project'
@@ -161,6 +163,7 @@ function DataTab({ player }: { player: Player }) {
               </SelectContent>
             </Select>
           </Field>
+          <PreferredPosition player={player} />
           <div className="flex items-center gap-2 sm:col-span-2">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -179,6 +182,28 @@ function DataTab({ player }: { player: Player }) {
       <PhotoCard player={player} />
     </div>
     <PlayerTeamsCard player={player} />
+    </div>
+  )
+}
+
+/** The player's preferred position, worked out by the app (lib/gloves preferredPosition) and never typed: GK when a
+ * glove is picked (only goalkeepers wear their own glove), otherwise his most common position in his teams. */
+function PreferredPosition({ player }: { player: Player }) {
+  const { t } = useI18n()
+  const lookups = useLookups()
+  const { position, byGlove } = preferredPosition(player)
+  return (
+    <div className="space-y-1.5">
+      <Label>{t('playerEdit.preferredPosition')}</Label>
+      <p className="flex h-9 items-center gap-1.5 text-sm">
+        <span className="font-medium">{lookups.position.get(position) ?? position}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Info className={cn('size-4 shrink-0', byGlove ? 'text-amber-600 dark:text-amber-500' : 'text-muted-foreground')} />
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs">{t(byGlove ? 'playerEdit.preferredPositionGlove' : 'playerEdit.preferredPositionHint')}</TooltipContent>
+        </Tooltip>
+      </p>
     </div>
   )
 }
@@ -327,7 +352,7 @@ function AppearanceTab({ player }: { player: Player }) {
   const catalog = useCatalog().data
   const options = catalog?.appearance ?? {}
   const defaults = usePlayerDefaults(player.uid)
-  const preview = previewAppearance(player, defaults, catalog, draft.boots)
+  const preview = previewAppearance(player, defaults, catalog, draft.boots, draft.gloves)
   const [browsing, setBrowsingFace] = useState<BrowsedFace | null>(null)
   // options of the face being looked at: shown and previewed at once, set on the player only by "use this face"
   const [browseOptions, setBrowseOptions] = useState<BrowseFaceOptions>(NEW_FACE_OPTIONS)
@@ -525,7 +550,8 @@ function AppearanceTab({ player }: { player: Player }) {
         <CardContent className="grid gap-x-6 gap-y-4 sm:grid-cols-[repeat(2,11.5rem)]">
           {Object.keys(APPEARANCE_LABELS)
             // boots: Accessories tab (one per pitch surface)
-            .filter((code) => code !== 'shoetypecode' && options[code] && (generic || FACE_MODE_CODES.includes(code)))
+            // boots and the goalkeeper glove: Accessories tab
+            .filter((code) => !['shoetypecode', 'gkglovetypecode'].includes(code) && options[code] && (generic || FACE_MODE_CODES.includes(code)))
             .map((code) => (
               <Field key={code} label={t((!generic && FACE_MODE_LABELS[code]) || APPEARANCE_LABELS[code])} entity={player.uid} field={`appearance.${code}`}>
                 {/* looking at a real face: its hair color is kept here until "use this face" */}
@@ -716,7 +742,10 @@ export function PlayerEditPage() {
           <AppearanceTab player={player} />
         </TabsContent>
         <TabsContent value="accessories">
-          <PlayerBoots key={player.uid} player={player} />
+          <div className="space-y-4">
+            <PlayerBoots key={player.uid} player={player} />
+            <PlayerGloves key={`g-${player.uid}`} player={player} />
+          </div>
         </TabsContent>
       </Tabs>
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>

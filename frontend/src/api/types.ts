@@ -136,6 +136,9 @@ export interface Player {
   face?: ScannedFace // used when generic is false
   /** boot per pitch surface: uid of a new Boot of the project; a surface left out = the appearance code */
   boots?: Partial<Record<ShoeSurface, string>>
+  /** goalkeeper glove picked in the Accessories tab: a new Glove's uid or a game glove's code; none = not picked
+   * (gkglovetypecode stays as it is). A picked glove makes him a goalkeeper (lib/gloves preferredPosition). */
+  glove?: string | number | null
   hidden?: boolean // left out of the patch (its id stays reserved)
 }
 
@@ -169,6 +172,33 @@ export interface OriginalBoot {
 }
 
 /** Boots of a shared zip (manifest.json), each with a new uid and its files as provisional uploads. */
+/** A goalkeeper glove of the project: a new one (a FIFA 16 pack file, its code given by the build) or one of the
+ * game's gloves the user edits (original_id = its code; a new file replaces the game's for every goalkeeper wearing
+ * it). The file is a project path, kept as the user sent it. */
+export interface Glove {
+  uid: string
+  name: string
+  credits?: string
+  code?: number | null // new glove: its code in the game, given by the build
+  texture?: string // the pack's gkglove_<id>_textures.rx3
+  thumbnail?: string // picture in the app (image path); none = drawn from the file
+  hidden?: boolean // left out of the patch
+  original_id?: number | null // the game's glove this entry edits (its code)
+}
+
+/** One of the game's gloves. */
+export interface OriginalGlove {
+  code: number
+  players: number // how many of the game's players have its code (only goalkeepers wear it in a match)
+}
+
+/** Gloves of a shared zip (manifest.json), each with a new uid and its files as provisional uploads. */
+export interface GloveImport {
+  kind: 'one' | 'many'
+  gloves: Glove[]
+  problems: { index: number; name: string; field: 'texture' | 'thumbnail'; code: string; message: string }[]
+}
+
 export interface BootImport {
   kind: 'one' | 'many'
   boots: Boot[]
@@ -253,11 +283,12 @@ export interface WorldTour {
 }
 
 export interface Project {
-  version: 6
+  version: 7
   leagues: League[]
   teams: Team[]
   players: Player[]
   boots?: Boot[]
+  gloves?: Glove[]
   originals?: OriginalChanges
   game_patches?: GamePatches
   world_tour?: WorldTour
@@ -419,6 +450,7 @@ export interface Catalog {
   template_street: Record<string, Partial<Record<KitKind, Record<StreetPartName, StreetSlot[]>>>>
   ranges: Record<'height' | 'weight' | 'number', [number, number]>
   boots: { street_slots: number; surface_fields: Record<ShoeSurface, string> }
+  gloves: { slots: number } // free codes for new gloves
 }
 
 export interface ImageUpload {
@@ -431,6 +463,7 @@ export interface BuildResponse {
   assigned_team_ids: Record<string, number>
   assigned_player_ids: Record<string, number>
   assigned_boot_codes: Record<string, number>
+  assigned_glove_codes: Record<string, number>
   patch: PatchStatus
 }
 

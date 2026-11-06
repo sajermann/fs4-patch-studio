@@ -1,5 +1,5 @@
-import { bootPreviewUrls } from '@/api/client'
-import type { Boot, Catalog, KitKind, Player, PlayerDefaults, RealKitSlot, RGB, StreetPart, StreetPartName, StreetPiece, Team } from '@/api/types'
+import { bootPreviewUrls, glovePreviewUrl } from '@/api/client'
+import type { Boot, Catalog, Glove, KitKind, Player, PlayerDefaults, RealKitSlot, RGB, StreetPart, StreetPartName, StreetPiece, Team } from '@/api/types'
 import type { PreviewAppearance, PreviewKit, PreviewOutfit } from '@/components/common/PlayerPreview'
 import { fullKit } from '@/lib/teams'
 
@@ -50,11 +50,17 @@ export function previewAppearance(
   defaults: PlayerDefaults | undefined,
   catalog: Catalog | undefined,
   boots?: Boot[],
+  gloves?: Glove[],
 ): PreviewAppearance {
   const options = catalog?.appearance ?? {}
   // the street boot (shoetypecode) is the one the preview wears; a pack boot of the project shows converted
   const pack = boots?.find((b) => b.uid === player?.boots?.street && !b.hidden && b.mesh && b.texture)
   const code = (key: string) => player?.appearance[key] ?? defaults?.appearance[key] ?? options[key]?.[0] ?? 0
+  // the glove picked in the Accessories tab: a project glove, or a game glove by code (an edited one with its file)
+  const picked = player?.glove
+  const gloveCode = typeof picked === 'number' ? picked : code('gkglovetypecode')
+  const ownGlove = typeof picked === 'string' ? gloves?.find((g) => g.uid === picked && !g.hidden && g.texture) : undefined
+  const gloveTexture = ownGlove?.texture ?? gloves?.find((g) => g.original_id === gloveCode && g.texture)?.texture
   return {
     headtypecode: code('headtypecode'),
     hairtypecode: code('hairtypecode'),
@@ -70,7 +76,8 @@ export function previewAppearance(
     socklengthcode: code('socklengthcode'),
     shoetypecode: code('shoetypecode'),
     shoe: pack ? bootPreviewUrls(pack.mesh!, pack.texture!) : undefined,
-    gkglovetypecode: code('gkglovetypecode'),
+    gkglovetypecode: gloveCode,
+    glove: gloveTexture ? glovePreviewUrl(gloveTexture) : undefined,
     height: player?.height ?? defaults?.height ?? 180,
   }
 }

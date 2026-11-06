@@ -33,15 +33,19 @@ class InstallError(Exception):
     pass
 
 
-def build_patch(project, store, game, patch_dir, log=None, progress=None, boot_converter=None):
-    """Builds the patch from the saved project. Ids and boot codes given by the build are written back.
+def build_patch(project, store, game, patch_dir, log=None, progress=None, boot_converter=None, glove_converter=None):
+    """Builds the patch from the saved project. Ids and boot/glove codes given by the build are written back.
     progress(step, done, total): see builder.BUILD_STEPS."""
-    result = builder.build(project, game, store.folder, log=log, progress=progress, boot_converter=boot_converter)
+    result = builder.build(project, game, store.folder, log=log, progress=progress, boot_converter=boot_converter,
+                           glove_converter=glove_converter)
     if (result.assigned_league_ids or result.assigned_team_ids or result.assigned_player_ids
-            or result.assigned_boot_codes):
+            or result.assigned_boot_codes or result.assigned_glove_codes):
         for boot in project.boots:
             if boot.uid in result.assigned_boot_codes:
                 boot.code = result.assigned_boot_codes[boot.uid]
+        for glove in project.gloves:
+            if glove.uid in result.assigned_glove_codes:
+                glove.code = result.assigned_glove_codes[glove.uid]
         for league in project.leagues:
             if league.uid in result.assigned_league_ids:
                 league.league_id = result.assigned_league_ids[league.uid]

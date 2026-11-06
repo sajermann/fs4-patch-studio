@@ -8,7 +8,7 @@ import datetime
 from collections import Counter
 from functools import cached_property
 
-from . import boots, builder, locale, preview
+from . import boots, builder, gloves, locale, preview
 from .game import LOCALE_ENTRIES, LOCALE_FILES
 from .original_team import STREET_PARTS
 
@@ -219,6 +219,7 @@ class Catalog:
                 'birthdate': _days_to_iso(get(t, r, 'birthdate')),
                 'foot': 'left' if get(t, r, 'preferredfoot') == 2 else 'right',
                 'nationality': get(t, r, 'nationality'),
+                'preferred_position': get(t, r, 'preferredposition1'),
                 'generic_head': get(t, r, 'headclasscode') == 1,
                 'skills': {k: get(t, r, f) for k, f in builder.SKILL_FIELDS.items()},
                 'appearance': {f: get(t, r, f) for f in APPEARANCE_FIELDS}})
@@ -277,6 +278,14 @@ class Catalog:
             for code in {self.db.get(t, r, f) for f in boots.SURFACE_FIELDS.values()}:
                 wearers[code] += 1
         return [{'code': c, 'street': boots.street_ok(c), 'players': wearers[c]} for c in boots.game_codes(self.game)]
+
+    @cached_property
+    def game_gloves(self):
+        """The game's own gloves: [{code, players (how many of the game's players have its code; only goalkeepers
+        wear it in a match)}], by code."""
+        t = self.db.table('players')
+        wearers = Counter(self.db.get(t, r, gloves.FIELD) for r in t.records)
+        return [{'code': c, 'players': wearers[c]} for c in gloves.game_codes(self.game)]
 
     @cached_property
     def positions(self):

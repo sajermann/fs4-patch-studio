@@ -20,12 +20,13 @@ from . import settings  # noqa: F401  (puts core on sys.path)
 from .messages import issue_json
 from . import diagnostics, ea_players, game_setup
 from .boot_service import BootService, BootZipError
+from .glove_service import GloveService, GloveZipError
 from .dialogs import browse_folder, open_file, save_file
 from .faces import FaceError, FaceService
 from .original_images import OriginalImages
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
 from .project_store import BackupError, ProjectFileError, ProjectStore, file_slug, migrate_folder
-from fsmod import (boots, builder, kit, kitprint, model, original_league, original_player, original_team, photo,
+from fsmod import (boots, builder, gloves, kit, kitprint, model, original_league, original_player, original_team, photo,
                    player_generator, preview, scanface, validation)
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
@@ -67,6 +68,7 @@ class AppState:
         self.faces = FaceService(self.game)
         self.original_images = OriginalImages(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.boots = BootService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
+        self.gloves = GloveService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self._catalog = None
 
     def upgrade_project(self):
@@ -162,7 +164,8 @@ def create_app(state=None):
         return ([lg.uid for lg in project.leagues if lg.is_original and original_league.untouched(lg, folder)]
                 + [t.uid for t in project.teams if t.is_original and original_team.untouched(t, folder, c)]
                 + [p.uid for p in project.players if p.is_original and original_player.untouched(p, folder, c)]
-                + [b.uid for b in project.boots if boots.untouched(b)])
+                + [b.uid for b in project.boots if boots.untouched(b)]
+                + [g.uid for g in project.gloves if gloves.untouched(g)])
 
     def state_of(project, untouched=True):
         """What the UI shows next to the project: issues, inherited values, untouched original entries and the
@@ -281,6 +284,7 @@ def create_app(state=None):
         project.teams = [t for t in project.teams if t.uid not in drop]
         project.players = [p for p in project.players if p.uid not in drop]
         project.boots = [b for b in project.boots if b.uid not in drop]
+        project.gloves = [g for g in project.gloves if g.uid not in drop]
         state.store.save(project)
         return {'project': project.to_json(), **state_of(project, untouched=False),
                 'patch': patch_status(state.store, state.patch_dir)}
@@ -435,6 +439,7 @@ def create_app(state=None):
                 'hair_colors': {code: preview.hair_color(code) for code in c.appearance_options['haircolorcode']},
                 'lineup_modes': c.lineup_modes,
                 'street_options': c.street_options,
+                'gloves': {'slots': len(gloves.free_codes(state.game))},
                 'boots': {'street_slots': len(boots.free_street_codes(state.game)),
                           'surface_fields': boots.SURFACE_FIELDS},
                 'street_arms': preview.STREET_ARMS,
@@ -623,6 +628,136 @@ def create_app(state=None):
         state.boots.write_zip(picked, state.store.folder, buf, many)
         slug = file_slug(picked[0].name).encode('ascii', 'ignore').decode() or picked[0].uid
         name = 'boots.zip' if many else f'boot-{slug}.zip'
+        return Response(buf.getvalue(), media_type='application/zip',
+                        headers={'Content-Disposition': f'attachment; filename="{name}"'})
+
+    # ---------------------------------------------------------------- gloves
+    GLOVE_ERROR_TEXT = {
+        'glove_file_too_big': 'Arquivo grande demais para uma luva.',
+        'glove_texture_not_pc': 'O arquivo não é de um pack de PC (FIFA 16): envie o gkglove_<id>_textures.rx3 do pack.',
+        'glove_texture_invalid': 'Arquivo de luva inválido: envie o gkglove_<id>_textures.rx3 do pack.',
+        'glove_thumbnail_invalid': 'Miniatura inválida (use PNG, JPG ou WebP).',
+        'glove_thumbnail_too_big': 'Miniatura grande demais (máximo 5 MB).',
+        'glove_zip_file_missing': 'O arquivo citado no manifest não está no zip.',
+    }
+    GLOVE_ZIP_ERROR_TEXT = {
+        'not_a_zip': 'O arquivo não é um zip.',
+        'zip_not_flat': 'O zip só pode ter o manifest.json e os arquivos soltos (sem pastas).',
+        'no_manifest': 'O zip não tem o manifest.json.',
+        'zip_too_big': 'O zip é grande demais.',
+        'invalid_manifest': 'O manifest.json não está no formato de luvas do app.',
+        'zip_too_new': 'Esse zip foi feito por uma versão mais nova do app: atualize o app para importar.',
+    }
+
+    def glove_failure(e):
+        return HTTPException(400, {'code': e.code, 'message': GLOVE_ERROR_TEXT.get(e.code, e.code)})
+
+    def glove_file(path):
+        try:
+            full = state.store.glove_file_path(path)
+        except ValueError:
+            raise HTTPException(400, 'invalid glove file path')
+        if not os.path.isfile(full):
+            raise HTTPException(404)
+        with open(full, 'rb') as f:
+            return f.read()
+
+    def game_glove_code(code):
+        if code not in gloves.game_codes(state.game):
+            raise HTTPException(404, {'code': 'original_glove_not_found', 'message': f'Luva {code} não existe.'})
+
+    @app.get('/api/originals/gloves')
+    def original_gloves():
+        """The game's own gloves: code and how many of the game's players have it."""
+        return state.catalog().game_gloves
+
+    @app.get('/api/originals/gloves/{code}.webp')
+    def original_glove_thumbnail(code: int):
+        state.catalog()
+        game_glove_code(code)
+        return Response(state.gloves.game_thumbnail(code), media_type='image/webp', headers=ORIGINAL_IMAGE_CACHE)
+
+    @app.post('/api/originals/gloves/{code}/edit')
+    def edit_original_glove(code: int, uid: str = Query(pattern=UID_PATTERN)):
+        """Starts editing one of the game's gloves: the entry comes back with the app's name and credits for it and
+        no file of its own (the game's stay until the user sends a new one)."""
+        state.catalog()
+        game_glove_code(code)
+        return gloves.original_entry(code, uid).model_dump(mode='json', exclude_none=True)
+
+    @app.post('/api/gloves/files')
+    async def upload_glove_file(file: UploadFile = File(...)):
+        """Stores a glove's pack file (checked) under a provisional name; saving the project gives it the glove's."""
+        data = await file.read()
+        try:
+            state.gloves.check(data)
+        except gloves.GloveError as e:
+            raise glove_failure(e)
+        return {'path': state.store.save_glove_file(file.filename, data)}
+
+    @app.post('/api/gloves/thumbnail')
+    async def upload_glove_thumbnail(file: UploadFile = File(...)):
+        data = await file.read()
+        try:
+            state.gloves.check_thumbnail(file.filename, data)
+        except gloves.GloveError as e:
+            raise glove_failure(e)
+        return {'path': state.store.save_image(file.filename, data)}
+
+    @app.get('/api/gloves/thumb.webp')
+    def glove_thumbnail(texture: str | None = None, image: str | None = None):
+        """Small picture of a project glove for the lists: its thumbnail, or the glove drawn from its file."""
+        try:
+            if image:
+                with open(project_image(image), 'rb') as f:
+                    data = state.gloves.thumbnail(image=f.read())
+            elif texture:
+                data = state.gloves.thumbnail(texture=glove_file(texture))
+            else:
+                raise HTTPException(404)
+        except gloves.GloveError as e:
+            raise glove_failure(e)
+        return Response(data, media_type='image/webp', headers=NO_CACHE)
+
+    @app.get('/api/preview/glove.png')
+    def glove_png(texture: str):
+        """Color map of the user's glove as the game will show it (the 3D preview's texture)."""
+        try:
+            return Response(state.gloves.color_png(glove_file(texture)), media_type='image/png', headers=NO_CACHE)
+        except gloves.GloveError as e:
+            raise glove_failure(e)
+
+    @app.post('/api/gloves/import')
+    def import_gloves(file: UploadFile = File(...)):
+        """Gloves of a shared zip (glove_service): each with a new uid and its files as provisional uploads. Nothing
+        is saved: one glove fills the form, many are added by the client (and saved)."""
+        try:
+            kind, items, problems = state.gloves.read_zip(file.file, state.store.save_glove_file,
+                                                          state.store.save_image)
+        except GloveZipError as e:
+            raise HTTPException(400, {'code': 'invalid_glove_zip', 'reason': e.code,
+                                      'message': GLOVE_ZIP_ERROR_TEXT.get(e.code, e.code)})
+        return {'kind': kind, 'gloves': items,
+                'problems': [{**p, 'message': GLOVE_ERROR_TEXT.get(p['code'], p['code'])} for p in problems]}
+
+    class GloveExport(BaseModel):
+        uids: list[str] = Field(min_length=1)
+        many: bool = False  # the many-gloves format even for one
+
+    @app.post('/api/gloves/export')
+    def export_gloves(req: GloveExport):
+        """Zip of saved gloves (new ones, and edited game gloves with a file of their own) to share."""
+        project = load_project()
+        by_uid = {g.uid: g for g in project.gloves}
+        picked = [by_uid[u] for u in req.uids if u in by_uid and (not by_uid[u].is_original or by_uid[u].has_files)]
+        if len(picked) != len(req.uids):
+            raise HTTPException(400, {'code': 'glove_not_exportable',
+                                      'message': 'Salve antes de baixar (e as originais só se tiverem arquivo novo).'})
+        many = req.many or len(picked) > 1
+        buf = io.BytesIO()
+        state.gloves.write_zip(picked, state.store.folder, buf, many)
+        slug = file_slug(picked[0].name).encode('ascii', 'ignore').decode() or picked[0].uid
+        name = 'gloves.zip' if many else f'glove-{slug}.zip'
         return Response(buf.getvalue(), media_type='application/zip',
                         headers={'Content-Disposition': f'attachment; filename="{name}"'})
 
@@ -977,7 +1112,7 @@ def create_app(state=None):
 
             try:
                 result = build_patch(project, state.store, state.game, state.patch_dir, log=log, progress=progress,
-                                     boot_converter=state.boots.converter)
+                                     boot_converter=state.boots.converter, glove_converter=state.gloves.converter)
             except builder.BuildError as e:
                 prog['error'] = str(e)
                 raise HTTPException(422, {'code': 'build_failed', 'entity': e.entity, 'message': str(e)})
@@ -990,6 +1125,7 @@ def create_app(state=None):
                 'assigned_team_ids': result.assigned_team_ids,
                 'assigned_player_ids': result.assigned_player_ids,
                 'assigned_boot_codes': result.assigned_boot_codes,
+                'assigned_glove_codes': result.assigned_glove_codes,
                 'patch': patch_status(state.store, state.patch_dir)}
 
     @app.get('/api/patch/progress')
