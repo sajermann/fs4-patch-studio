@@ -18,12 +18,13 @@ from pydantic import BaseModel, Field
 from . import settings  # noqa: F401  (puts core on sys.path)
 from .messages import issue_json
 from . import diagnostics, ea_players, game_setup
+from .boot_service import BootService, BootZipError
 from .dialogs import browse_folder, open_file, save_file
 from .faces import FaceError, FaceService
 from .original_images import OriginalImages
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
-from .project_store import BackupError, ProjectFileError, ProjectStore, migrate_folder
-from fsmod import (builder, kit, kitprint, model, original_league, original_player, original_team, photo,
+from .project_store import BackupError, ProjectFileError, ProjectStore, file_slug, migrate_folder
+from fsmod import (boots, builder, kit, kitprint, model, original_league, original_player, original_team, photo,
                    player_generator, preview, scanface, validation)
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
@@ -64,6 +65,7 @@ class AppState:
         self.originals = game_setup.Originals(folder, prints)
         self.faces = FaceService(self.game)
         self.original_images = OriginalImages(self.game, os.path.join(os.path.dirname(prints), 'cache'))
+        self.boots = BootService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self._catalog = None
 
     def upgrade_project(self):
@@ -158,7 +160,8 @@ def create_app(state=None):
         c, folder = state.catalog(), state.store.folder
         return ([lg.uid for lg in project.leagues if lg.is_original and original_league.untouched(lg, folder)]
                 + [t.uid for t in project.teams if t.is_original and original_team.untouched(t, folder, c)]
-                + [p.uid for p in project.players if p.is_original and original_player.untouched(p, folder, c)])
+                + [p.uid for p in project.players if p.is_original and original_player.untouched(p, folder, c)]
+                + [b.uid for b in project.boots if boots.untouched(b)])
 
     def state_of(project, untouched=True):
         """What the UI shows next to the project: issues, inherited values, untouched original entries and the
@@ -276,6 +279,7 @@ def create_app(state=None):
         project.leagues = [lg for lg in project.leagues if lg.uid not in drop]
         project.teams = [t for t in project.teams if t.uid not in drop]
         project.players = [p for p in project.players if p.uid not in drop]
+        project.boots = [b for b in project.boots if b.uid not in drop]
         state.store.save(project)
         return {'project': project.to_json(), **state_of(project, untouched=False),
                 'patch': patch_status(state.store, state.patch_dir)}
@@ -430,6 +434,8 @@ def create_app(state=None):
                 'hair_colors': {code: preview.hair_color(code) for code in c.appearance_options['haircolorcode']},
                 'lineup_modes': c.lineup_modes,
                 'street_options': c.street_options,
+                'boots': {'street_slots': len(boots.free_street_codes(state.game)),
+                          'surface_fields': boots.SURFACE_FIELDS},
                 'street_arms': preview.STREET_ARMS,
                 'street_full_length_bottoms': preview.STREET_FULL_LENGTH_BOTTOMS,
                 'template_street': {t['id']: c.template_street(t['id']) for t in c.teams if t['generic']},
@@ -477,6 +483,147 @@ def create_app(state=None):
         if not os.path.isfile(path):
             raise HTTPException(404)
         return FileResponse(path, headers=NO_CACHE)
+
+    # ---------------------------------------------------------------- boots
+    BOOT_ERROR_TEXT = {
+        'boot_file_too_big': 'Arquivo grande demais para uma chuteira.',
+        'boot_mesh_not_pc': 'A malha não é de um pack de PC (FIFA 14–16): envie o shoe_<id>.rx3 do pack.',
+        'boot_mesh_invalid': 'Arquivo de malha inválido: envie o shoe_<id>.rx3 do pack.',
+        'boot_mesh_not_boot': 'Esse arquivo não parece a malha de uma chuteira (sem os ossos do pé).',
+        'boot_texture_not_pc': 'A textura não é de um pack de PC (FIFA 14–16): envie o shoe_<id>_0_textures.rx3.',
+        'boot_texture_invalid': 'Arquivo de textura inválido: envie o shoe_<id>_0_textures.rx3 do pack.',
+        'boot_thumbnail_invalid': 'Miniatura inválida (use PNG, JPG ou WebP).',
+        'boot_thumbnail_too_big': 'Miniatura grande demais (máximo 5 MB).',
+        'boot_zip_file_missing': 'O arquivo citado no manifest não está no zip.',
+    }
+    BOOT_ZIP_ERROR_TEXT = {
+        'not_a_zip': 'O arquivo não é um zip.',
+        'zip_not_flat': 'O zip só pode ter o manifest.json e os arquivos soltos (sem pastas).',
+        'no_manifest': 'O zip não tem o manifest.json.',
+        'zip_too_big': 'O zip é grande demais.',
+        'invalid_manifest': 'O manifest.json não está no formato de chuteiras do app.',
+        'zip_too_new': 'Esse zip foi feito por uma versão mais nova do app: atualize o app para importar.',
+    }
+
+    def boot_failure(e):
+        return HTTPException(400, {'code': e.code, 'message': BOOT_ERROR_TEXT.get(e.code, e.code)})
+
+    def boot_file(path):
+        try:
+            full = state.store.boot_file_path(path)
+        except ValueError:
+            raise HTTPException(400, 'invalid boot file path')
+        if not os.path.isfile(full):
+            raise HTTPException(404)
+        with open(full, 'rb') as f:
+            return f.read()
+
+    def game_boot_code(code):
+        if code not in boots.game_codes(state.game):
+            raise HTTPException(404, {'code': 'original_boot_not_found', 'message': f'Chuteira {code} não existe.'})
+
+    @app.get('/api/originals/boots')
+    def original_boots():
+        """The game's own boots: code, whether it may go on the street, how many of the game's players wear it."""
+        return state.catalog().game_boots
+
+    @app.get('/api/originals/boots/{code}.webp')
+    def original_boot_thumbnail(code: int):
+        state.catalog()
+        game_boot_code(code)
+        return Response(state.boots.game_thumbnail(code), media_type='image/webp', headers=ORIGINAL_IMAGE_CACHE)
+
+    @app.post('/api/originals/boots/{code}/edit')
+    def edit_original_boot(code: int, uid: str = Query(pattern=UID_PATTERN)):
+        """Starts editing one of the game's boots: the entry comes back with the app's name and credits for it and
+        no files of its own (the game's stay until the user sends new ones)."""
+        state.catalog()
+        game_boot_code(code)
+        return boots.original_entry(code, uid).model_dump(mode='json', exclude_none=True)
+
+    @app.post('/api/boots/files')
+    async def upload_boot_file(kind: str = Query(pattern='^(mesh|texture)$'), file: UploadFile = File(...)):
+        """Stores a pack file of a boot (checked) under a provisional name; saving the project gives it the boot's."""
+        data = await file.read()
+        try:
+            state.boots.check(kind, data)
+        except boots.BootError as e:
+            raise boot_failure(e)
+        return {'path': state.store.save_boot_file(file.filename, data)}
+
+    @app.post('/api/boots/thumbnail')
+    async def upload_boot_thumbnail(file: UploadFile = File(...)):
+        data = await file.read()
+        try:
+            state.boots.check_thumbnail(file.filename, data)
+        except boots.BootError as e:
+            raise boot_failure(e)
+        return {'path': state.store.save_image(file.filename, data)}
+
+    @app.get('/api/boots/thumb.webp')
+    def boot_thumbnail(mesh: str | None = None, texture: str | None = None, image: str | None = None):
+        """Small picture of a project boot for the lists: its thumbnail, or the boot drawn from its files."""
+        try:
+            if image:
+                with open(project_image(image), 'rb') as f:
+                    data = state.boots.thumbnail(image=f.read())
+            elif mesh and texture:
+                data = state.boots.thumbnail(boot_file(mesh), boot_file(texture))
+            else:
+                raise HTTPException(404)
+        except boots.BootError as e:
+            raise boot_failure(e)
+        return Response(data, media_type='image/webp', headers=NO_CACHE)
+
+    @app.get('/api/preview/boot.glb')
+    def boot_glb(mesh: str, texture: str):
+        """The user's boot converted as the game will wear it (node 'shoes')."""
+        try:
+            return Response(state.boots.glb(boot_file(mesh), boot_file(texture)), media_type='model/gltf-binary',
+                            headers=NO_CACHE)
+        except boots.BootError as e:
+            raise boot_failure(e)
+
+    @app.get('/api/preview/boot.png')
+    def boot_png(mesh: str, texture: str):
+        try:
+            return Response(state.boots.color_png(boot_file(mesh), boot_file(texture)), media_type='image/png',
+                            headers=NO_CACHE)
+        except boots.BootError as e:
+            raise boot_failure(e)
+
+    @app.post('/api/boots/import')
+    def import_boots(file: UploadFile = File(...)):
+        """Boots of a shared zip (boot_service): each with a new uid and its files as provisional uploads. Nothing
+        is saved: one boot fills the form, many are added by the client (and saved)."""
+        try:
+            kind, items, problems = state.boots.read_zip(file.file, state.store.save_boot_file, state.store.save_image)
+        except BootZipError as e:
+            raise HTTPException(400, {'code': 'invalid_boot_zip', 'reason': e.code,
+                                      'message': BOOT_ZIP_ERROR_TEXT.get(e.code, e.code)})
+        return {'kind': kind, 'boots': items,
+                'problems': [{**p, 'message': BOOT_ERROR_TEXT.get(p['code'], p['code'])} for p in problems]}
+
+    class BootExport(BaseModel):
+        uids: list[str] = Field(min_length=1)
+        many: bool = False  # the many-boots format even for one
+
+    @app.post('/api/boots/export')
+    def export_boots(req: BootExport):
+        """Zip of saved boots (new ones, and edited game boots with files of their own) to share."""
+        project = load_project()
+        by_uid = {b.uid: b for b in project.boots}
+        picked = [by_uid[u] for u in req.uids if u in by_uid and (not by_uid[u].is_original or by_uid[u].has_files)]
+        if len(picked) != len(req.uids):
+            raise HTTPException(400, {'code': 'boot_not_exportable',
+                                      'message': 'Salve antes de baixar (e as originais só se tiverem arquivos novos).'})
+        many = req.many or len(picked) > 1
+        buf = io.BytesIO()
+        state.boots.write_zip(picked, state.store.folder, buf, many)
+        slug = file_slug(picked[0].name).encode('ascii', 'ignore').decode() or picked[0].uid
+        name = 'boots.zip' if many else f'boot-{slug}.zip'
+        return Response(buf.getvalue(), media_type='application/zip',
+                        headers={'Content-Disposition': f'attachment; filename="{name}"'})
 
     @app.get('/api/preview/kit.png')
     def kit_preview(jersey: str = Query(..., pattern=r'^\d{1,3},\d{1,3},\d{1,3}$'), crest: str | None = None):
@@ -812,7 +959,8 @@ def create_app(state=None):
                     prog['message'] = line
 
             try:
-                result = build_patch(project, state.store, state.game, state.patch_dir, log=log, progress=progress)
+                result = build_patch(project, state.store, state.game, state.patch_dir, log=log, progress=progress,
+                                     boot_converter=state.boots.converter)
             except builder.BuildError as e:
                 prog['error'] = str(e)
                 raise HTTPException(422, {'code': 'build_failed', 'entity': e.entity, 'message': str(e)})
@@ -824,6 +972,7 @@ def create_app(state=None):
         return {'log': result.log, 'assigned_league_ids': result.assigned_league_ids,
                 'assigned_team_ids': result.assigned_team_ids,
                 'assigned_player_ids': result.assigned_player_ids,
+                'assigned_boot_codes': result.assigned_boot_codes,
                 'patch': patch_status(state.store, state.patch_dir)}
 
     @app.get('/api/patch/progress')

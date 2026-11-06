@@ -1,6 +1,9 @@
 import type { PreviewKit } from '@/components/common/PlayerPreview'
 import type {
   BasePlayer,
+  Boot,
+  BootImport,
+  OriginalBoot,
   League,
   BuildProgress,
   BuildResponse,
@@ -144,6 +147,35 @@ export const api = {
     request<Player>(`/api/originals/players/${playerid}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),
   catalog: () => request<Catalog>('/api/catalog'),
 
+  /** The game's own boots. */
+  originalBoots: () => request<OriginalBoot[]>('/api/originals/boots'),
+  /** Starts editing one of the game's boots: the entry without files of its own (the game's stay). */
+  editOriginalBoot: (code: number, uid: string) =>
+    request<Boot>(`/api/originals/boots/${code}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),
+  /** A boot's pack file (checked) or picture, under a provisional name until the project is saved. */
+  uploadBootFile: (kind: 'mesh' | 'texture', file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<ImageUpload>(`/api/boots/files?kind=${kind}`, { method: 'POST', body: form })
+  },
+  uploadBootThumbnail: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<ImageUpload>('/api/boots/thumbnail', { method: 'POST', body: form })
+  },
+  /** Boots of a shared zip; nothing is saved (one boot fills the form, many are added by the caller). */
+  importBoots: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<BootImport>('/api/boots/import', { method: 'POST', body: form })
+  },
+  /** Zip of saved boots to share: { file name, contents }. */
+  exportBoots: async (uids: string[], many = false) => {
+    const res = await send('/api/boots/export', json('POST', { uids, many }))
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'boots.zip'
+    return { name, blob: await res.blob() }
+  },
+
   /** Provisional path until the project is saved, when the image gets the fixed name of its entity. */
   uploadImage: (file: File) => {
     const form = new FormData()
@@ -208,6 +240,35 @@ export const imageUrl = (path: string) => withRevision(`/api/${path}`)
 export const originalCrestUrl = (teamid: number) => `/api/originals/crests/${teamid}.webp`
 export const originalLeagueImageUrl = (leagueid: number) => `/api/originals/league-images/${leagueid}.webp`
 export const originalPhotoUrl = (playerid: number) => `/api/originals/photos/${playerid}.webp`
+
+/** List picture of one of the game's boots. */
+export const originalBootThumbUrl = (code: number) => `/api/originals/boots/${code}.webp`
+
+/** List picture of a project boot: its own picture, or the boot drawn from its files (none: no picture yet). */
+export const bootThumbUrl = (boot: Pick<Boot, 'thumbnail' | 'mesh' | 'texture'>) =>
+  boot.thumbnail
+    ? withRevision(`/api/boots/thumb.webp?${new URLSearchParams({ image: boot.thumbnail })}`)
+    : boot.mesh && boot.texture
+      ? withRevision(`/api/boots/thumb.webp?${new URLSearchParams({ mesh: boot.mesh, texture: boot.texture })}`)
+      : undefined
+
+/** The 3D preview's mesh and texture of a project boot (converted as the game wears it). */
+export const bootPreviewUrls = (mesh: string, texture: string) => {
+  const qs = new URLSearchParams({ mesh, texture })
+  return { glb: withRevision(`/api/preview/boot.glb?${qs}`), texture: withRevision(`/api/preview/boot.png?${qs}`) }
+}
+
+/** Saves a downloaded file (blob) with its name. */
+export function saveBlob(name: string, blob: Blob) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
 
 /** Player photo as the game shows it (square crop). */
 export const photoPreviewUrl = (path: string) => withRevision(`/api/preview/photo.png?${new URLSearchParams({ path })}`)

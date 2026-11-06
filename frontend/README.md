@@ -18,7 +18,7 @@ React + Vite + TypeScript + Tailwind + shadcn/ui. Code is English; the UI is tra
 
 Structure: `src/api` (types mirroring contract v2 + fetch client), `src/state` (project draft, live validation,
 React Query hooks), `src/components/layout` (shell, save / build patch / install), `src/components/common`
-(form helpers), `src/pages` (Ligas, Times, Jogadores, Configuração).
+(form helpers), `src/pages` (Ligas, Times, Jogadores, Chuteiras, Configuração).
 
 The project is edited as a draft in memory: "Salvar" (Ctrl+S) writes `database.json`; "Gerar patch" saves and builds
 `backend/patch`; validation runs on the backend (`POST /api/project/validate`) while editing.

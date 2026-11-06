@@ -10,6 +10,8 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { I18nProvider, translate, useI18n } from '@/i18n'
 import { logClientError } from '@/lib/clientLog'
 import { ThemeProvider } from '@/lib/theme'
+import { BootEditPage } from '@/pages/BootEditPage'
+import { BootsPage } from '@/pages/BootsPage'
 import { LeagueEditPage } from '@/pages/LeagueEditPage'
 import { LeaguesPage } from '@/pages/LeaguesPage'
 import { PatchesPage } from '@/pages/PatchesPage'
@@ -62,6 +64,8 @@ function Gate() {
           <Route path="teams/:uid" element={<TeamEditPage />} />
           <Route path="players" element={<PlayersPage />} />
           <Route path="players/:uid" element={<PlayerEditPage />} />
+          <Route path="boots" element={<BootsPage />} />
+          <Route path="boots/:uid" element={<BootEditPage />} />
           <Route path="stadiums" element={<StadiumsPage />} />
           <Route path="world-tour" element={<WorldTourPage />} />
           <Route path="patches" element={<PatchesPage />} />

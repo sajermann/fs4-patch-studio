@@ -8,7 +8,7 @@ import datetime
 from collections import Counter
 from functools import cached_property
 
-from . import builder, locale, preview
+from . import boots, builder, locale, preview
 from .game import LOCALE_ENTRIES, LOCALE_FILES
 from .original_team import STREET_PARTS
 
@@ -20,7 +20,8 @@ SKILLS = {'ATH': (1, 99), 'DEF': (1, 99), 'DRI': (1, 99), 'GK': (1, 99), 'PAS': 
           'SPE': (1, 99), 'TRI': (0, 4), 'overall': (1, 99)}
 APPEARANCE_FIELDS = ('headtypecode', 'hairtypecode', 'haircolorcode', 'skintonecode', 'skintypecode',
                      'facialhairtypecode', 'facialhaircolorcode', 'eyecolorcode', 'eyebrowcode', 'sideburnscode',
-                     'bodytypecode', 'shoetypecode', 'gkglovetypecode', 'jerseysleevelengthcode', 'socklengthcode')
+                     'bodytypecode', 'shoetypecode', 'gkglovetypecode', 'jerseysleevelengthcode', 'socklengthcode',
+                     'turf_shoe', 'indoor_shoe')
 FREE_AGENTS_TEAM = 111592
 
 
@@ -259,7 +260,23 @@ class Catalog:
         """{field: sorted values} used by the game's generic players (values known to render)."""
         t = self.db.table('players')
         generic = [r for r in t.records if self.db.get(t, r, 'headclasscode') == 1]
-        return {f: sorted({self.db.get(t, r, f) for r in generic}) for f in APPEARANCE_FIELDS}
+        out = {f: sorted({self.db.get(t, r, f) for r in generic}) for f in APPEARANCE_FIELDS}
+        # boots: any game boot works on any surface, but the street only takes boots.STREET_CODES
+        codes = boots.game_codes(self.game)
+        for surface, f in boots.SURFACE_FIELDS.items():
+            out[f] = [c for c in codes if surface != 'street' or boots.street_ok(c)]
+        return out
+
+    @cached_property
+    def game_boots(self):
+        """The game's own boots: [{code, street (may go on the street), players (how many of the game's players
+        wear it on any surface)}], by code."""
+        t = self.db.table('players')
+        wearers = Counter()
+        for r in t.records:
+            for code in {self.db.get(t, r, f) for f in boots.SURFACE_FIELDS.values()}:
+                wearers[code] += 1
+        return [{'code': c, 'street': boots.street_ok(c), 'players': wearers[c]} for c in boots.game_codes(self.game)]
 
     @cached_property
     def positions(self):

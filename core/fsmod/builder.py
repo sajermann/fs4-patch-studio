@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from . import (big, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, original_league,
+from . import (big, boots, chunk, crest, dbcrc, gamepatches, kit, leaguelogo, locale, model, original_league,
                original_player, original_team, photo, preview, rx3tex, scanface, t3db, world_tour)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
@@ -120,6 +120,7 @@ class BuildResult:
     assigned_league_ids: dict = field(default_factory=dict)  # {league uid: leagueid} given during this build
     assigned_team_ids: dict = field(default_factory=dict)  # {team uid: teamid} given during this build
     assigned_player_ids: dict = field(default_factory=dict)  # {player uid: playerid} given during this build
+    assigned_boot_codes: dict = field(default_factory=dict)  # {boot uid: code} given during this build
     loose: dict = field(default_factory=dict)  # {internal name: bytes} written as loose files under Game/
     log: list = field(default_factory=list)
 
@@ -324,6 +325,29 @@ def assign_player_ids(project, reserved):
             raise BuildError(f'{pl.shown_name}: no free playerid left', pl.uid)
         out[pl.uid] = pid
         used.add(pid)
+    return out
+
+
+def assign_boot_codes(project, game):
+    """{boot uid: code} for the new boots of the project whose code is missing or no longer fits (a street boot needs
+    a free street code, any other one a free code from boots.NEW_CODES; no two boots share one). Codes stay with the
+    boot once written back. Raises BuildError when a street boot finds no free street code."""
+    pools = {True: boots.free_street_codes(game), False: boots.free_new_codes(game)}
+    news = [b for b in project.boots if not b.is_original]
+    keep, used = set(), set()
+    for b in news:  # the first boot with a fitting code keeps it
+        if b.code in pools[b.street] and b.code not in used:
+            used.add(b.code)
+            keep.add(b.uid)
+    out = {}
+    for b in news:
+        if b.uid in keep:
+            continue
+        code = next((c for c in pools[b.street] if c not in used), None)
+        if code is None:
+            raise BuildError(f'{b.name}: no free {"street " if b.street else ""}boot code left', b.uid)
+        used.add(code)
+        out[b.uid] = code
     return out
 
 
@@ -680,10 +704,60 @@ def _rgb(value, what, entity):
 
 
 # ---------------------------------------------------------------- build
-def build(project, game, assets_dir, log=None, progress=None):
+def _read_boot(assets_dir, boot):
+    try:
+        with open(os.path.join(assets_dir, boot.mesh), 'rb') as f:
+            mesh = f.read()
+        with open(os.path.join(assets_dir, boot.texture), 'rb') as f:
+            texture = f.read()
+    except OSError as e:
+        raise BuildError(f'{boot.name}: cannot read the boot files: {e}', boot.uid) from e
+    return mesh, texture
+
+
+def _build_boots(db, game, project, assets_dir, player_ids, entries, result, say, converter=None):
+    """New boots worn by a player get a code (assign_boot_codes) and loose files; edited game boots with files of
+    their own replace the game's inside its archive; each player's boot columns point to his boots. Runs before the
+    World Tour (its clones copy the player rows)."""
+    news = {b.uid: b for b in project.boots if not b.is_original}
+    edited = [b for b in project.boots if b.is_original and b.has_files]
+    worn = {uid for pl in project.players for uid in pl.boots.values() if uid in news and news[uid].has_files}
+    if not worn and not edited:
+        return
+    converter = converter or boots.Converter(game)
+    result.assigned_boot_codes = assign_boot_codes(project, game)
+    codes = {uid: result.assigned_boot_codes.get(uid, b.code) for uid, b in news.items()}
+
+    def convert(boot, code):
+        try:
+            return converter.files(*_read_boot(assets_dir, boot), code)
+        except boots.BootError as e:
+            raise BuildError(f'{boot.name}: {e}', boot.uid) from e
+
+    for b in edited:
+        say(f'boot {b.original_id} (game boot) "{b.name}": files replaced')
+        for name, data in convert(b, b.original_id).items():
+            entries[_archive_of(game, name), name] = chunk.chunkzip(data)
+    for uid in sorted(worn, key=lambda u: codes[u]):
+        say(f'boot {codes[uid]} "{news[uid].name}"')
+        for name, data in convert(news[uid], codes[uid]).items():
+            result.loose[name] = chunk.chunkzip(data)
+    players = db.table('players')
+    for pl in project.players:
+        mine = {s: codes[uid] for s, uid in pl.boots.items() if uid in worn}
+        if not mine:
+            continue
+        pid = pl.original_id if pl.is_original else player_ids.get(pl.uid)
+        rows = db.rows('players', 'playerid', pid) if pid is not None else []
+        for k in rows:
+            for surface, code in mine.items():
+                db.put(players, players.records[k], boots.SURFACE_FIELDS[surface], code)
+
+
+def build(project, game, assets_dir, log=None, progress=None, boot_converter=None):
     """Builds the mod. assets_dir = folder that image paths (crests) are relative to. Hidden leagues/teams are
     left out (Project.visible); their ids stay reserved. progress(step, done, total) is called as the build goes
-    (steps: BUILD_STEPS, then write_patch's)."""
+    (steps: BUILD_STEPS, then write_patch's). boot_converter: a boots.Converter to reuse (keeps its conversions)."""
     result = BuildResult(database=b'', entries={})
     every = project
     project = project.visible()
@@ -834,6 +908,10 @@ def build(project, game, assets_dir, log=None, progress=None):
                 db.put(players, row, SKILL_FIELDS[skill], v)
             for f, v in {**pl.appearance, **pl.fields}.items():
                 db.put(players, row, f, v)
+            street = pl.appearance.get(boots.SURFACE_FIELDS['street'])
+            for surface in ('turf', 'indoor'):  # projects that only set the street boot: the same one everywhere
+                if street is not None and boots.SURFACE_FIELDS[surface] not in pl.appearance:
+                    db.put(players, row, boots.SURFACE_FIELDS[surface], street)
             if not pl.generic and pl.face is not None:
                 db.put(players, row, 'headclasscode', 0)
         except (BuildError, ValueError, KeyError) as e:
@@ -1042,6 +1120,7 @@ def build(project, game, assets_dir, log=None, progress=None):
         pool.shutdown(cancel_futures=True)
     step('images', len(jobs), len(jobs))
 
+    _build_boots(db, game, project, assets_dir, player_ids, entries, result, say, boot_converter)
     apply_original_changes(db, project.originals)
     try:
         world_tour.apply(db, game, project, player_ids, result.loose, entries, texts, say)

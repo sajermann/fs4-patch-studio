@@ -12,7 +12,7 @@ from typing import Optional
 
 from PIL import Image
 
-from . import builder, kit, original_league, original_team, scanface
+from . import boots, builder, kit, original_league, original_team, scanface
 from .catalog import POSITIONS, SKILLS
 from .model import FRIENDLY_TEAM_SIZES, REAL_KIT_FILES
 
@@ -42,8 +42,13 @@ INTERNAL_LEAGUES = {76, 2095}
 def validate(project, catalog, assets_dir):
     # teams taken out of their league (no league) are left out of the patch: said once, not validated
     without_league = [tm.uid for tm in project.teams if not tm.leagues and not tm.hidden]
+    every_boot = {b.uid: b for b in project.boots}
     project = project.visible()  # hidden leagues/teams are left out of the patch: not validated
     issues = [Issue('team_without_league', 'warning', uid, 'leagues', {}) for uid in without_league]
+    # a player whose boot is out of the patch keeps the game boot of his code on that surface
+    issues += [Issue('boot_hidden', 'warning', p.uid, f'boots.{surface}', {'boot': every_boot[uid].name})
+               for p in project.players for surface, uid in p.boots.items()
+               if uid in every_boot and every_boot[uid].hidden]
 
     def error(code, entity=None, field_name=None, **params):
         issues.append(Issue(code, 'error', entity, field_name, params))
@@ -149,7 +154,7 @@ def validate(project, catalog, assets_dir):
             check_range(tm.uid, f'real_kits.{slot}.collar', real.collar, kit.COLLARS[0], kit.COLLARS[-1])
 
     seen = set()
-    for entity in [*project.leagues, *project.teams, *project.players]:
+    for entity in [*project.leagues, *project.teams, *project.players, *project.boots]:
         if entity.uid in seen:
             error('duplicate_uid', entity.uid, 'uid')
         seen.add(entity.uid)
@@ -462,6 +467,43 @@ def validate(project, catalog, assets_dir):
             if slot.player in picked:
                 error('world_tour_player_repeated', None, where, id=slot.player)
             picked.add(slot.player)
+
+    # ---- boots (hidden ones are left out of the patch: not validated)
+    game_codes = set(boots.game_codes(catalog.game))
+    free_street = len(boots.free_street_codes(catalog.game))
+    street_count, edited_boots = 0, {}
+    for b in project.boots:
+        if not b.name.strip():
+            error('required', b.uid, 'name')
+        for name in ('mesh', 'texture'):
+            path = getattr(b, name)
+            if path and not os.path.isfile(os.path.join(assets_dir, path)):
+                error('boot_file_not_found', b.uid, name, path=path)
+            elif not path and (not b.is_original or b.has_files or b.mesh or b.texture):
+                error(f'boot_{name}_missing', b.uid, name)  # an edited game boot may keep the game's files
+        if b.is_original:
+            if b.original_id not in game_codes:
+                error('original_boot_not_found', b.uid, 'original_id', id=b.original_id)
+            elif b.original_id in edited_boots:
+                error('original_boot_edited_twice', b.uid, 'original_id', id=b.original_id)
+            edited_boots[b.original_id] = b
+            if b.street:
+                error('boot_street_original', b.uid, 'street')
+        elif b.street:
+            street_count += 1
+            if street_count > free_street:
+                error('boot_street_full', b.uid, 'street', max=free_street)
+    visible_boots = {b.uid: b for b in project.boots}
+    for p in project.players:
+        for surface, uid in p.boots.items():
+            b = visible_boots.get(uid)
+            if b is None:
+                if uid not in every_boot or every_boot[uid].is_original:
+                    error('boot_not_found', p.uid, f'boots.{surface}')
+            elif b.is_original:
+                error('boot_not_found', p.uid, f'boots.{surface}')
+            elif surface == 'street' and not b.street:
+                error('boot_not_street', p.uid, f'boots.{surface}', boot=b.name)
     return issues
 
 

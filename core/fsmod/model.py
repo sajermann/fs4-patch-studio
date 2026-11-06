@@ -12,8 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # project file format: bump it whenever the layout changes (older files are converted when read, and an app that
 # predates the new number refuses the file instead of dropping what it does not know). 3 = teams in several leagues,
 # players in several teams and the game's own entries (original_id); 4 = street kits with a list of pieces per part;
-# 5 = world_tour (players of the friendly match)
-CONTRACT_VERSION = 5
+# 5 = world_tour (players of the friendly match); 6 = boots (the user's and edited game boots) and Player.boots
+CONTRACT_VERSION = 6
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
 Channel = Annotated[int, Field(ge=0, le=255)]
@@ -25,6 +25,8 @@ REAL_KIT_FILES = ('thumbnail', 'jersey', 'shorts')  # image fields of a RealKit
 StreetPartName = Literal['top', 'bottom', 'socks']
 TakerRole = Literal['penalty', 'free_kick', 'long_free_kick', 'left_corner', 'right_corner']
 PlayerRef = Union[str, int]  # project player uid, or playerid of one of the game's own players
+ShoeSurface = Literal['street', 'turf', 'indoor']  # pitch surfaces with a boot of their own (fsmod.boots)
+BOOT_FILES = ('mesh', 'texture')  # the pack's files of a Boot (project folder paths, as the user sent them)
 
 
 class Entity(BaseModel):
@@ -164,6 +166,9 @@ class Player(Entity):
     fields: dict[str, int] = {}  # any other column of the players table (advanced)
     photo: Optional[str] = None  # menu photo, image path relative to the project folder
     face: Optional[ScannedFace] = None  # used when generic is False
+    # boot per pitch surface: uid of a new Boot of the project; a surface left out (or whose boot is hidden) = the
+    # game boot of its appearance code (fsmod.boots.SURFACE_FIELDS; an edited game boot goes by its code there too)
+    boots: dict[ShoeSurface, str] = {}
     hidden: bool = False  # left out of the patch (its id stays reserved), e.g. not ready yet
 
     @model_validator(mode='before')
@@ -193,6 +198,32 @@ class Player(Entity):
         """What a lineup, captain or taker names this player by: the uid of a new player, the playerid of an
         original one (the game's players are named by playerid, edited or not)."""
         return self.original_id if self.is_original else self.uid
+
+
+class Boot(Entity):
+    """A boot of the project (fsmod.boots): a new one (pack files, a code of its own given by the build) or one of the
+    game's boots the user edits (original_id = its code: new files replace the game's for every player wearing it;
+    name and credits only exist in the app)."""
+    uid: str
+    name: str = ''
+    credits: Optional[str] = None  # who made it (shown in the app only)
+    street: bool = False  # may go on the street: takes one of the few free street codes (new boots only; a game
+    # boot goes on the street when its code is in boots.STREET_CODES)
+    code: Optional[int] = None  # new boot: its code in the game (boots.NEW_CODES, or a free STREET_CODES one when
+    # street); None or no longer valid = given by the build
+    mesh: Optional[str] = None  # the pack's shoe_<id>.rx3 (project folder path, as sent)
+    texture: Optional[str] = None  # the pack's shoe_<id>_0_textures.rx3
+    thumbnail: Optional[str] = None  # picture in the app (image path); None = drawn from the files
+    hidden: bool = False  # left out of the patch, e.g. not complete yet
+    original_id: Optional[int] = None  # the game's boot this entry edits (its code); None = new boot
+
+    @property
+    def is_original(self):
+        return self.original_id is not None
+
+    @property
+    def has_files(self):
+        return bool(self.mesh and self.texture)
 
 
 class Lineup(BaseModel):
@@ -311,10 +342,11 @@ class WorldTour(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3, 4, 5] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5, 6] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []
+    boots: list[Boot] = []
     originals: OriginalChanges = OriginalChanges()
     game_patches: GamePatches = GamePatches()
     world_tour: WorldTour = WorldTour()
@@ -378,7 +410,12 @@ class Project(Entity):
         left_out_players = {p.uid for p in self.players if not p.is_original} - {p.uid for p in players}
         world_tour = WorldTour(**{side: [s for s in getattr(self.world_tour, side) if s.player not in left_out_players]
                                   for side in FRIENDLY_TEAM_SIZES})
-        return self.model_copy(update={'leagues': leagues, 'teams': teams, 'players': players, 'world_tour': world_tour})
+        boots = [b for b in self.boots if not b.hidden]  # a player's surface with a hidden boot keeps his code
+        return self.model_copy(update={'leagues': leagues, 'teams': teams, 'players': players, 'world_tour': world_tour,
+                                       'boots': boots})
+
+    def boot(self, uid):
+        return next((b for b in self.boots if b.uid == uid), None)
 
     def to_json(self):
         return self.model_dump(mode='json', exclude_none=True)

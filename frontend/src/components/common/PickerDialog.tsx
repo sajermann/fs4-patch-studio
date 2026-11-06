@@ -34,6 +34,7 @@ export function PickerDialog<K extends string | number>({
   notice,
   empty,
   disabled,
+  actionLabel,
   onPick,
 }: {
   open: boolean
@@ -48,6 +49,7 @@ export function PickerDialog<K extends string | number>({
   notice?: ReactNode // a line above the list (e.g. why nothing can be added)
   empty: string
   disabled?: boolean // every Add button (e.g. the target is full)
+  actionLabel?: string // text of the item buttons (default: Add)
   onPick: (key: K) => unknown
 }) {
   const { t } = useI18n()
@@ -97,7 +99,7 @@ export function PickerDialog<K extends string | number>({
                         onClick={() => void pick(item.key)}
                       >
                         {busy === item.key && <LoaderCircle className="animate-spin" />}
-                        {t('common.add')}
+                        {actionLabel ?? t('common.add')}
                       </Button>
                     </li>
                   ))}

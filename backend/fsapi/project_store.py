@@ -1,9 +1,10 @@
-"""The user's project on disk: <project_dir>/database.json + <project_dir>/images/ + <project_dir>/faces/.
+"""The user's project on disk: <project_dir>/database.json + images/ + faces/ + boots/.
 
 The JSON is the only source of truth of the app; it is never deduced from game files.
-Images: an upload gets a provisional name (UPLOAD_PREFIX) and keeps it while the project is not saved, so
-"Discard" can go back to the previous image; saving gives every image the fixed name of its entity
-(image_fields) and deletes the images and faces nothing uses any more.
+Images and boot files: an upload gets a provisional name (UPLOAD_PREFIX) and keeps it while the project is not
+saved, so "Discard" can go back to the previous file; saving gives every file the fixed name of its entity
+(image_fields, boot_file_fields) and deletes the images, faces and boot files nothing uses any more. Files are kept
+as the user sent them (conversions only happen for the preview and the patch).
 """
 import hashlib
 import json
@@ -19,6 +20,8 @@ PROJECT_FILE = 'database.json'
 LEGACY_PROJECT_FILE = 'projeto.json'  # name used before 24/10/2026, renamed on start (upgrade)
 IMAGES_DIR = 'images'
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
+BOOTS_DIR = 'boots'  # the pack files of the project's boots (boot-<uid>.rx3, boot-<uid>_textures.rx3)
+BOOT_EXTENSION = '.rx3'
 UPLOAD_PREFIX = 'upload-'  # provisional name of an upload until the project is saved
 BACKUP_MAX_BYTES = 2 * 1024 ** 3  # uncompressed size accepted when restoring a backup zip
 
@@ -60,6 +63,15 @@ def image_fields(project):
                 yield real, part, f'teams/kits/team-{file_slug(tm.uid)}-{slot}-{part}'
     for pl in project.players:
         yield pl, 'photo', f'players/player-{file_slug(pl.uid)}'
+    for b in project.boots:
+        yield b, 'thumbnail', f'boots/boot-{file_slug(b.uid)}'
+
+
+def boot_file_fields(project):
+    """(boot, field, fixed file name under boots/) of every boot file slot of the project."""
+    for b in project.boots:
+        yield b, 'mesh', f'boot-{file_slug(b.uid)}{BOOT_EXTENSION}'
+        yield b, 'texture', f'boot-{file_slug(b.uid)}_textures{BOOT_EXTENSION}'
 
 
 def migrate_folder(old, new):
@@ -90,6 +102,10 @@ class ProjectStore:
     @property
     def images_dir(self):
         return os.path.join(self.folder, IMAGES_DIR)
+
+    @property
+    def boots_dir(self):
+        return os.path.join(self.folder, BOOTS_DIR)
 
     def exists(self):
         return os.path.exists(self.path)
@@ -160,6 +176,7 @@ class ProjectStore:
         deleting the images and faces it no longer uses."""
         os.makedirs(self.folder, exist_ok=True)
         self._settle_images(project)
+        self._settle_boot_files(project)
         tmp = self.path + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(project.to_json(), f, ensure_ascii=False, indent=2)
@@ -193,6 +210,29 @@ class ProjectStore:
                 os.replace(tmp, target)
             setattr(entity, field, f'{IMAGES_DIR}/{name}')
 
+    def _settle_boot_files(self, project):
+        """Like _settle_images for the boots' pack files (boots/boot-<uid>.rx3, boots/boot-<uid>_textures.rx3)."""
+        pending = []
+        for boot, field, name in boot_file_fields(project):
+            relative = getattr(boot, field)
+            if not relative:
+                continue
+            try:
+                source = self.boot_file_path(relative)
+            except ValueError:
+                continue
+            if os.path.isfile(source):
+                pending.append((boot, field, name, _read(source)))
+        for boot, field, name, data in pending:
+            target = os.path.join(self.boots_dir, name)
+            os.makedirs(self.boots_dir, exist_ok=True)
+            if not (os.path.isfile(target) and os.path.getsize(target) == len(data) and _read(target) == data):
+                tmp = target + '.tmp'
+                with open(tmp, 'wb') as f:
+                    f.write(data)
+                os.replace(tmp, target)
+            setattr(boot, field, f'{BOOTS_DIR}/{name}')
+
     def _delete_unused(self, project):
         """Images (uploads included) and real-face folders that the saved project does not reference."""
         used = {os.path.normcase(os.path.join(self.folder, *getattr(e, f).split('/')))
@@ -206,6 +246,13 @@ class ProjectStore:
         for root, dirs, files in os.walk(self.images_dir, topdown=False):
             if root != self.images_dir and not os.listdir(root):
                 os.rmdir(root)  # a kind folder left empty
+        used = {os.path.normcase(os.path.join(self.folder, *getattr(b, f).split('/')))
+                for b, f, _ in boot_file_fields(project) if getattr(b, f)}
+        if os.path.isdir(self.boots_dir):
+            for name in os.listdir(self.boots_dir):
+                path = os.path.join(self.boots_dir, name)
+                if os.path.isfile(path) and os.path.normcase(path) not in used:
+                    os.remove(path)
         faces = os.path.join(self.folder, scanface.PROJECT_DIR)
         with_face = {p.uid for p in project.players if p.face}
         if os.path.isdir(faces):
@@ -233,7 +280,27 @@ class ProjectStore:
                 files = scanface.read_files(scanface.project_face_dir(self.folder, player.uid), player.face.source_id)
                 for kind in sorted(files):
                     h.update(files[kind])
+        for boot, field, _ in boot_file_fields(project):
+            relative = getattr(boot, field)
+            if relative and os.path.isfile(os.path.join(self.folder, relative)):
+                h.update(_read(os.path.join(self.folder, relative)))
         return h.hexdigest()
+
+    def save_boot_file(self, filename, data):
+        """Stores an uploaded boot file (.rx3) under boots/ with a provisional name and returns its project-relative
+        path; it gets the fixed name of its boot when the project is saved."""
+        name = f'{UPLOAD_PREFIX}{uuid.uuid4().hex[:12]}{BOOT_EXTENSION}'
+        os.makedirs(self.boots_dir, exist_ok=True)
+        with open(os.path.join(self.boots_dir, name), 'wb') as f:
+            f.write(data)
+        return f'{BOOTS_DIR}/{name}'
+
+    def boot_file_path(self, relative):
+        """Absolute path of a project boot file, refusing anything outside boots/."""
+        full = os.path.abspath(os.path.join(self.folder, relative))
+        if not full.startswith(os.path.abspath(self.boots_dir) + os.sep):
+            raise ValueError('invalid boot file path')
+        return full
 
     def save_image(self, filename, data):
         """Stores an uploaded image under images/ with a provisional name and returns its project-relative path;
@@ -248,11 +315,11 @@ class ProjectStore:
         return f'{IMAGES_DIR}/{name}'
 
     def write_backup(self, out):
-        """Zip of the whole project folder (database.json, images/, faces/) into the binary file `out`."""
+        """Zip of the whole project folder (database.json, images/, faces/, boots/) into the binary file `out`."""
         with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
             if self.exists():
                 z.write(self.path, PROJECT_FILE)
-            for sub in (IMAGES_DIR, scanface.PROJECT_DIR):
+            for sub in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR):
                 for root, _, files in os.walk(os.path.join(self.folder, sub)):
                     for name in files:
                         if not name.endswith('.tmp'):
@@ -282,7 +349,8 @@ class ProjectStore:
                 parts = rel.split('/')
                 if '..' in parts or rel.startswith('/') or ':' in rel or '\\' in rel:
                     raise BackupError('unsafe_path', info.filename)
-                if rel in (PROJECT_FILE, LEGACY_PROJECT_FILE) or                         (len(parts) > 1 and parts[0] in (IMAGES_DIR, scanface.PROJECT_DIR)):
+                if rel in (PROJECT_FILE, LEGACY_PROJECT_FILE) or \
+                        (len(parts) > 1 and parts[0] in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR)):
                     picked.append((info, rel))
             if sum(i.file_size for i, _ in picked) > BACKUP_MAX_BYTES:
                 raise BackupError('too_big')

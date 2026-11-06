@@ -1,4 +1,5 @@
-import type { Catalog, KitKind, Player, PlayerDefaults, RealKitSlot, RGB, StreetPart, StreetPartName, StreetPiece, Team } from '@/api/types'
+import { bootPreviewUrls } from '@/api/client'
+import type { Boot, Catalog, KitKind, Player, PlayerDefaults, RealKitSlot, RGB, StreetPart, StreetPartName, StreetPiece, Team } from '@/api/types'
 import type { PreviewAppearance, PreviewKit, PreviewOutfit } from '@/components/common/PlayerPreview'
 import { fullKit } from '@/lib/teams'
 
@@ -44,8 +45,15 @@ export function teamPreviewKit(team: Team | undefined, slot: RealKitSlot, wearer
 export const backName = (p: { jersey_name?: string | null; last_name: string }) => p.jersey_name || p.last_name
 
 /** Values the 3D preview shows for a player: own value, else the template's, else the first valid code. */
-export function previewAppearance(player: Player | undefined, defaults: PlayerDefaults | undefined, catalog: Catalog | undefined): PreviewAppearance {
+export function previewAppearance(
+  player: Player | undefined,
+  defaults: PlayerDefaults | undefined,
+  catalog: Catalog | undefined,
+  boots?: Boot[],
+): PreviewAppearance {
   const options = catalog?.appearance ?? {}
+  // the street boot (shoetypecode) is the one the preview wears; a pack boot of the project shows converted
+  const pack = boots?.find((b) => b.uid === player?.boots?.street && !b.hidden && b.mesh && b.texture)
   const code = (key: string) => player?.appearance[key] ?? defaults?.appearance[key] ?? options[key]?.[0] ?? 0
   return {
     headtypecode: code('headtypecode'),
@@ -61,6 +69,7 @@ export function previewAppearance(player: Player | undefined, defaults: PlayerDe
     jerseysleevelengthcode: code('jerseysleevelengthcode'),
     socklengthcode: code('socklengthcode'),
     shoetypecode: code('shoetypecode'),
+    shoe: pack ? bootPreviewUrls(pack.mesh!, pack.texture!) : undefined,
     gkglovetypecode: code('gkglovetypecode'),
     height: player?.height ?? defaults?.height ?? 180,
   }

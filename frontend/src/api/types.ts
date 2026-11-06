@@ -134,7 +134,45 @@ export interface Player {
   fields: Record<string, number>
   photo?: string
   face?: ScannedFace // used when generic is false
+  /** boot per pitch surface: uid of a new Boot of the project; a surface left out = the appearance code */
+  boots?: Partial<Record<ShoeSurface, string>>
   hidden?: boolean // left out of the patch (its id stays reserved)
+}
+
+/** Pitch surfaces with a boot of their own: street = shoetypecode, turf (society) = turf_shoe, indoor (futsal) =
+ * indoor_shoe. The street only takes some codes (Boot.street / OriginalBoot.street). */
+export type ShoeSurface = 'street' | 'turf' | 'indoor'
+export const SHOE_SURFACES: ShoeSurface[] = ['street', 'turf', 'indoor']
+export const SURFACE_FIELDS: Record<ShoeSurface, string> = { street: 'shoetypecode', turf: 'turf_shoe', indoor: 'indoor_shoe' }
+
+/** A boot of the project: a new one (pack files, its code given by the build) or one of the game's boots the user
+ * edits (original_id = its code; new files replace the game's for every player wearing it). Files are project
+ * paths, kept as the user sent them. */
+export interface Boot {
+  uid: string
+  name: string
+  credits?: string
+  street?: boolean // may go on the street (takes one of the few free street codes; new boots only)
+  code?: number | null // new boot: its code in the game, given by the build
+  mesh?: string // the pack's shoe_<id>.rx3
+  texture?: string // the pack's shoe_<id>_0_textures.rx3
+  thumbnail?: string // picture in the app (image path); none = drawn from the files
+  hidden?: boolean // left out of the patch
+  original_id?: number | null // the game's boot this entry edits (its code)
+}
+
+/** One of the game's boots. */
+export interface OriginalBoot {
+  code: number
+  street: boolean // may go on the street (codes 500-619)
+  players: number // how many of the game's players wear it, on any surface
+}
+
+/** Boots of a shared zip (manifest.json), each with a new uid and its files as provisional uploads. */
+export interface BootImport {
+  kind: 'one' | 'many'
+  boots: Boot[]
+  problems: { index: number; name: string; field: 'mesh' | 'texture' | 'thumbnail'; code: string; message: string }[]
 }
 
 /** Real face from a FIFA 14 pack; its files are copied into the project (faces/<player uid>/). */
@@ -215,10 +253,11 @@ export interface WorldTour {
 }
 
 export interface Project {
-  version: 5
+  version: 6
   leagues: League[]
   teams: Team[]
   players: Player[]
+  boots?: Boot[]
   originals?: OriginalChanges
   game_patches?: GamePatches
   world_tour?: WorldTour
@@ -379,6 +418,7 @@ export interface Catalog {
   street_full_length_bottoms: number[] // trousers: legs and socks are hidden under them
   template_street: Record<string, Partial<Record<KitKind, Record<StreetPartName, StreetSlot[]>>>>
   ranges: Record<'height' | 'weight' | 'number', [number, number]>
+  boots: { street_slots: number; surface_fields: Record<ShoeSurface, string> }
 }
 
 export interface ImageUpload {
@@ -390,6 +430,7 @@ export interface BuildResponse {
   assigned_league_ids: Record<string, number>
   assigned_team_ids: Record<string, number>
   assigned_player_ids: Record<string, number>
+  assigned_boot_codes: Record<string, number>
   patch: PatchStatus
 }
 

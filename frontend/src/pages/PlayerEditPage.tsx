@@ -36,6 +36,7 @@ import { computeOverall } from '@/lib/skills'
 import { GOALKEEPER_POSITION, backName, previewAppearance, teamPreviewKit } from '@/lib/preview'
 import { useEntryOfPath } from '@/lib/members'
 import { linkedTeam, teamKey, teamPath } from '@/lib/players'
+import { PlayerBoots } from '@/components/common/PlayerBoots'
 import { PlayerTeamsCard } from '@/components/common/PlayerTeams'
 import { cn } from '@/lib/utils'
 import { usePlayerDefaults, useProject, useWasEdited } from '@/state/project'
@@ -322,7 +323,7 @@ function AppearanceTab({ player }: { player: Player }) {
   const catalog = useCatalog().data
   const options = catalog?.appearance ?? {}
   const defaults = usePlayerDefaults(player.uid)
-  const preview = previewAppearance(player, defaults, catalog)
+  const preview = previewAppearance(player, defaults, catalog, draft.boots)
   const [browsing, setBrowsing] = useState<BrowsedFace | null>(null)
   const generic = player.generic
   // the converter paints the scalp with the player's hair color (fsmod.scanface)
@@ -471,7 +472,8 @@ function AppearanceTab({ player }: { player: Player }) {
         )}
         <CardContent className="grid gap-x-6 gap-y-4 sm:grid-cols-[repeat(2,11.5rem)]">
           {Object.keys(APPEARANCE_LABELS)
-            .filter((code) => options[code] && (generic || FACE_MODE_CODES.includes(code)))
+            // boots: Accessories tab (one per pitch surface)
+            .filter((code) => code !== 'shoetypecode' && options[code] && (generic || FACE_MODE_CODES.includes(code)))
             .map((code) => (
               <Field key={code} label={t((!generic && FACE_MODE_LABELS[code]) || APPEARANCE_LABELS[code])} entity={player.uid} field={`appearance.${code}`}>
                 <Stepper
@@ -640,6 +642,7 @@ export function PlayerEditPage() {
           <TabsTrigger value="data">{t('teamEdit.tabData')}</TabsTrigger>
           <TabsTrigger value="skills">{t('base.skills')}</TabsTrigger>
           <TabsTrigger value="appearance">{t('playerEdit.tabLook')}</TabsTrigger>
+          <TabsTrigger value="accessories">{t('playerEdit.tabAccessories')}</TabsTrigger>
         </TabsList>
         <TabsContent value="data">
           <DataTab player={player} />
@@ -649,6 +652,9 @@ export function PlayerEditPage() {
         </TabsContent>
         <TabsContent value="appearance">
           <AppearanceTab player={player} />
+        </TabsContent>
+        <TabsContent value="accessories">
+          <PlayerBoots key={player.uid} player={player} />
         </TabsContent>
       </Tabs>
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>

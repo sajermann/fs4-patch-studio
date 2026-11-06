@@ -37,6 +37,8 @@ export interface PreviewAppearance {
   jerseysleevelengthcode: number
   socklengthcode: number
   shoetypecode: number
+  /** a pack boot of the project (converted by the backend) instead of the game boot shoetypecode */
+  shoe?: { glb: string; texture: string }
   gkglovetypecode: number
   height: number // cm; the game scales the whole player by it (validated in game, 165 x 200 cm)
 }
@@ -132,7 +134,7 @@ function cached<T>(url: string, load: () => Promise<T>): Promise<T> {
 }
 
 /** True while some preview asset is loading, after a short delay (fast loads do not blink the badge). */
-function useLoading(delayMs = 200) {
+export function useLoading(delayMs = 200) {
   const busy = useSyncExternalStore(subscribePending, () => pending > 0)
   const [shown, setShown] = useState(false)
   useEffect(() => {
@@ -143,7 +145,7 @@ function useLoading(delayMs = 200) {
 }
 
 /** Geometries of a GLB by node name (a node name may repeat). */
-function loadMeshes(url: string) {
+export function loadMeshes(url: string) {
   return cached(url, async () => {
     const gltf = await gltfLoader.loadAsync(versioned(url))
     const out: Record<string, THREE.BufferGeometry[]> = {}
@@ -161,7 +163,7 @@ function loadMeshes(url: string) {
 
 /** color = false for data textures (masks, opacity); channel = UV set the texture is sampled with; repeat = UVs
  * outside 0..1 wrap around (scanned faces map the right eye at u -2..-1; clamped, it showed only the white). */
-function loadTexture(url: string, color = true, channel = 0, repeat = false) {
+export function loadTexture(url: string, color = true, channel = 0, repeat = false) {
   return cached(url, async () => {
     const texture = await textureLoader.loadAsync(versioned(url))
     if (repeat) texture.wrapS = texture.wrapT = THREE.RepeatWrapping
@@ -175,7 +177,7 @@ function loadTexture(url: string, color = true, channel = 0, repeat = false) {
 }
 
 /** Value of load() for key; keeps returning the previous value while a new key loads. */
-function useLoaded<T>(key: string | null, load: () => Promise<T>): T | undefined {
+export function useLoaded<T>(key: string | null, load: () => Promise<T>): T | undefined {
   const [state, setState] = useState<{ key: string; value: T }>()
   const loadRef = useRef(load)
   useEffect(() => {
@@ -305,6 +307,22 @@ function BodyPart({ part, code, texture, roughness, collar = 0 }: { part: string
   )
 }
 
+/** A pack boot of the project, converted by the backend as the build does (node 'shoes'). */
+function PackShoes({ glb, texture }: { glb: string; texture: string }) {
+  const loaded = useLoaded(`${glb}|${texture}`, () => Promise.all([loadMeshes(glb), loadTexture(texture)]))
+  if (!loaded) return null
+  const [meshes, map] = loaded
+  return (
+    <group>
+      {(meshes.shoes ?? []).map((g, i) => (
+        <mesh key={i} geometry={g}>
+          <meshStandardMaterial map={map} roughness={0.5} metalness={0} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
 const srgb = (c: RGB) => new THREE.Color().setRGB(c[0] / 255, c[1] / 255, c[2] / 255, THREE.SRGBColorSpace)
 
 const NO_CREST = new THREE.DataTexture(new Uint8Array(4), 1, 1)
@@ -398,7 +416,11 @@ function Body({ a, outfit }: { a: PreviewAppearance; outfit: PreviewOutfit }) {
   return (
     <group>
       {clothes}
-      <BodyPart part="shoes" code={a.shoetypecode} texture={`/api/preview/shoe/${a.shoetypecode}.png`} roughness={0.5} />
+      {a.shoe ? (
+        <PackShoes glb={a.shoe.glb} texture={a.shoe.texture} />
+      ) : (
+        <BodyPart part="shoes" code={a.shoetypecode} texture={`/api/preview/shoe/${a.shoetypecode}.png`} roughness={0.5} />
+      )}
       {/* every player can play in goal, so the gloves are always shown */}
       <BodyPart part="gloves" code={0} texture={`/api/preview/glove/${a.gkglovetypecode}.png`} roughness={0.6} />
     </group>

@@ -5,9 +5,9 @@ import { LoadError } from '@/components/layout/LoadError'
 import { useI18n } from '@/i18n'
 import { lineupsWithout, takersWithout } from '@/lib/lineup'
 import { linkOf, teamsWithout } from '@/lib/players'
-import type { Issue, League, OriginalSquadLink, Player, PlayerDefaults, Project, Team } from '@/api/types'
+import type { Boot, Issue, League, OriginalSquadLink, Player, PlayerDefaults, Project, Team } from '@/api/types'
 
-const EMPTY: Project = { version: 5, leagues: [], teams: [], players: [] }
+const EMPTY: Project = { version: 6, leagues: [], teams: [], players: [], boots: [] }
 const VALIDATE_DELAY_MS = 400
 
 /** A new entry's uid: starts with a letter (never all digits, the addresses of the game's teams/players). */
@@ -35,14 +35,21 @@ interface ProjectContextValue {
   updateLeague: (uid: string, patch: Partial<League>) => void
   updateTeam: (uid: string, patch: Partial<Team>) => void
   updatePlayer: (uid: string, patch: Partial<Player>) => void
+  updateBoot: (uid: string, patch: Partial<Boot>) => void
   addLeague: (league: League) => void
   addTeam: (team: Team) => void
   addPlayer: (player: Player) => void
-  /** an original league/team/player loaded from the game, shown as it is until something changes (see `opened`) */
-  openOriginal: (entry: { league: League } | { team: Team } | { player: Player }) => void
+  addBoots: (boots: Boot[]) => void
+  /** an original league/team/player/boot loaded from the game, shown as it is until something changes (see `opened`) */
+  openOriginal: (entry: { league: League } | { team: Team } | { player: Player } | { boot: Boot }) => void
   removeLeague: (uid: string) => void
   removeTeam: (uid: string, squad?: OriginalSquadLink[]) => void
   removePlayer: (uid: string) => void
+  /** deleting new boots also takes them off the players wearing them; an edited game boot goes back to the game's */
+  removeBoots: (uids: string[]) => void
+  /** takes a new boot off players (all of them by default): each one is back to the game boot he had on those
+   * surfaces, or his default */
+  takeOffBoot: (uid: string, players?: string[]) => void
   save: () => Promise<void>
   discard: () => void
 }
@@ -56,16 +63,28 @@ interface Opened {
   leagues: League[]
   teams: Team[]
   players: Player[]
+  boots: Boot[]
 }
-const NONE: Opened = { leagues: [], teams: [], players: [] }
+/** The project with the boots `gone` taken off its players (only `players`, when given). */
+const takeOff = (p: Project, gone: Set<string>, players?: Set<string>): Project => ({
+  ...p,
+  players: p.players.map((pl) =>
+    (!players || players.has(pl.uid)) && pl.boots && Object.values(pl.boots).some((u) => u && gone.has(u))
+      ? { ...pl, boots: Object.fromEntries(Object.entries(pl.boots).filter(([, u]) => !u || !gone.has(u))) }
+      : pl,
+  ),
+})
+
+const NONE: Opened ={ leagues: [], teams: [], players: [], boots: [] }
 
 const withOpened = (draft: Project, opened: Opened): Project =>
-  opened.leagues.length || opened.teams.length || opened.players.length
+  opened.leagues.length || opened.teams.length || opened.players.length || opened.boots.length
     ? {
         ...draft,
         leagues: [...draft.leagues, ...opened.leagues],
         teams: [...draft.teams, ...opened.teams],
         players: [...draft.players, ...opened.players],
+        boots: [...(draft.boots ?? []), ...opened.boots],
       }
     : draft
 
@@ -79,9 +98,10 @@ function splitOpened(next: Project, opened: Opened): { draft: Project; opened: O
   const leagues = split(next.leagues, opened.leagues)
   const teams = split(next.teams, opened.teams)
   const players = split(next.players, opened.players)
+  const boots = split(next.boots ?? [], opened.boots)
   return {
-    draft: { ...next, leagues: leagues.project, teams: teams.project, players: players.project },
-    opened: { leagues: leagues.opened, teams: teams.opened, players: players.opened },
+    draft: { ...next, leagues: leagues.project, teams: teams.project, players: players.project, boots: boots.project },
+    opened: { leagues: leagues.opened, teams: teams.opened, players: players.opened, boots: boots.opened },
   }
 }
 
@@ -95,7 +115,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const setDraftState = useCallback((d: Project) => setState((s) => ({ ...s, draft: d })), [])
   const view = useMemo(() => withOpened(state.draft, state.opened), [state])
   const openedUids = useMemo(
-    () => new Set([...state.opened.leagues, ...state.opened.teams, ...state.opened.players].map((e) => e.uid)),
+    () =>
+      new Set([...state.opened.leagues, ...state.opened.teams, ...state.opened.players, ...state.opened.boots].map((e) => e.uid)),
     [state.opened],
   )
   const [saved, setSaved] = useState<string>(JSON.stringify(EMPTY))
@@ -209,9 +230,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       updateLeague: (uid, patch) => setDraft((p) => ({ ...p, leagues: replace(p.leagues, uid, patch) })),
       updateTeam: (uid, patch) => setDraft((p) => ({ ...p, teams: replace(p.teams, uid, patch) })),
       updatePlayer: (uid, patch) => setDraft((p) => ({ ...p, players: replace(p.players, uid, patch) })),
+      updateBoot: (uid, patch) => setDraft((p) => ({ ...p, boots: replace(p.boots ?? [], uid, patch) })),
       addLeague: (league) => setDraft((p) => ({ ...p, leagues: [...p.leagues, league] })),
       addTeam: (team) => setDraft((p) => ({ ...p, teams: [...p.teams, team] })),
       addPlayer: (player) => setDraft((p) => ({ ...p, players: [...p.players, player] })),
+      addBoots: (boots) => setDraft((p) => ({ ...p, boots: [...(p.boots ?? []), ...boots] })),
       // once per original: a second load of the same one (two pages asking at once) is ignored
       openOriginal: (entry) =>
         setState((s) => {
@@ -224,6 +247,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
             return view.teams.some((t) => t.original_id === entry.team.original_id)
               ? s
               : { ...s, opened: { ...s.opened, teams: [...s.opened.teams, entry.team] } }
+          if ('boot' in entry)
+            return (view.boots ?? []).some((b) => b.original_id === entry.boot.original_id)
+              ? s
+              : { ...s, opened: { ...s.opened, boots: [...s.opened.boots, entry.boot] } }
           return view.players.some((p) => p.original_id === entry.player.original_id)
             ? s
             : { ...s, opened: { ...s.opened, players: [...s.opened.players, entry.player] } }
@@ -268,6 +295,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
             lineups: lineupsWithout(t, uid),
           })),
         })),
+      removeBoots: (uids) =>
+        setDraft((p) => {
+          const gone = new Set(uids)
+          return { ...takeOff(p, gone), boots: (p.boots ?? []).filter((b) => !gone.has(b.uid)) }
+        }),
+      takeOffBoot: (uid, players) => setDraft((p) => takeOff(p, new Set([uid]), players && new Set(players))),
       save,
       discard: () => {
         setDraftState(JSON.parse(saved))

@@ -14,7 +14,8 @@ from . import photo
 from .model import OriginalPlayerSnapshot, Player, TeamLink
 
 EDITABLE_FIELDS = ('first_name', 'last_name', 'display_name', 'jersey_name', 'height', 'weight', 'birthdate', 'foot',
-                   'skills', 'appearance', 'fields', 'generic', 'face')
+                   'skills', 'appearance', 'fields', 'generic', 'face', 'boots')
+SNAPSHOT_DEFAULTS = {'boots': {}}  # fields snapshots taken by older versions do not have
 FIELDS = ('nationality',)  # players columns an original entry carries in Player.fields
 
 
@@ -85,7 +86,7 @@ def changes(pl, assets_dir):
     loaded = pl.loaded or OriginalPlayerSnapshot()
     before, now = loaded.player, snapshot_fields(pl)
     out = Changes()
-    out.fields = {f for f in EDITABLE_FIELDS if now.get(f) != before.get(f)}
+    out.fields = {f for f in EDITABLE_FIELDS if now.get(f) != before.get(f, SNAPSHOT_DEFAULTS.get(f))}
     out.photo = image_sha1(assets_dir, pl.photo) != loaded.images.get('photo')
     return out
 

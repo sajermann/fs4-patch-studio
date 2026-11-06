@@ -70,6 +70,16 @@ ISSUE_TEXT = {
     'face_files_missing': 'Arquivos da face {id} não encontrados na pasta do projeto; escolha a face de novo.',
     'player_id_out_of_range': 'Id do jogador {value} fora da faixa de ids novos ({low} a {high}).',
     'player_id_taken': 'O id {value} já é de outro jogador do projeto.',
+    'boot_hidden': 'A chuteira {boot} está fora do patch: neste piso fica a chuteira do jogo do jogador.',
+    'boot_not_found': 'Chuteira não encontrada.',
+    'boot_not_street': 'A chuteira {boot} não está marcada para a rua (a rua só aceita algumas vagas).',
+    'boot_file_not_found': 'Arquivo da chuteira não encontrado ({path}).',
+    'boot_mesh_missing': 'Envie a malha da chuteira (shoe_<id>.rx3).',
+    'boot_texture_missing': 'Envie a textura da chuteira (shoe_<id>_0_textures.rx3).',
+    'boot_street_full': 'As {max} vagas de chuteira de rua já estão ocupadas.',
+    'boot_street_original': 'Uma chuteira original vai para a rua conforme o código dela.',
+    'original_boot_not_found': 'A chuteira {id} não existe no jogo.',
+    'original_boot_edited_twice': 'A chuteira original {id} já está sendo editada por outra entrada do projeto.',
 }
 
 
