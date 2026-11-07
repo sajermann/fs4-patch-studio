@@ -22,6 +22,7 @@ import math
 import os
 import shutil
 import struct
+import zlib
 
 from PIL import Image, ImageChops, ImageFilter
 
@@ -90,7 +91,12 @@ def read_files(folder, face_id):
         if os.path.isfile(path):
             with open(path, 'rb') as fh:
                 data = fh.read()
-            out[kind] = chunk.decode(data) if data[:4] == b'chun' else data
+            if data[:4] == b'chun':
+                try:
+                    data = chunk.decode(data)
+                except (zlib.error, ValueError, struct.error) as e:  # truncated download, broken pack
+                    raise FaceFormatError(f'{os.path.basename(path)}: damaged compressed file ({e})') from e
+            out[kind] = data
     return out
 
 
@@ -160,6 +166,18 @@ def positions(d, e, k):
     off, n, typ = decl(d, e, k)['p0']
     fmt = e + ('3f' if typ == 'f32' else '3e')
     return [struct.unpack_from(fmt, d, o + 16 + i * stride + off) for i in range(count)]
+
+
+def check_positions(src):
+    """ValueError when a mesh of the pack has vertex positions that are not numbers (NaN/inf): they would be
+    copied as they are into the game's files (seen in the eyes of a pack's head)."""
+    for kind in ('head', 'hair', 'hairlod'):
+        d = src.get(kind)
+        if not d:
+            continue
+        for k in range(len(of_type(d, '<', VERTICES))):
+            if not all(math.isfinite(v) for p in positions(d, '<', k) for v in p):
+                raise ValueError(f'{kind}: mesh {k} has vertex positions that are not numbers (NaN)')
 
 
 def _closest_on_triangle(p, a, b, c):
@@ -1214,6 +1232,7 @@ def _convert(tpl, src, new_id, hair_color, template=TEMPLATE, paint=True, hair_m
     if not 0 <= hair_thickness <= HAIR_THICKNESS_MAX:
         raise ValueError(f'hair thickness out of range: {hair_thickness}')
     src = {**src, 'head': head_mesh_first(src['head'])}
+    check_positions(src)
     old, new = str(template), str(new_id)
     name = {kind: f.format(new) for kind, f in FILES.items()}
     offset = align_offset(tpl['head'], src['head'])

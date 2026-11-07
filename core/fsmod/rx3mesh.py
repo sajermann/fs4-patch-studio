@@ -86,9 +86,11 @@ def meshes(d):
     ibs = [o for t, o, _, _ in secs if t == INDICES]
     mesh_names = [n for n in names(d) if n.endswith('.FxRenderableSimple')]
     out = []
-    for i, (decl, (vo, vs), io) in enumerate(zip(decls, vbs, ibs)):
+    for i, (decl, (vo, _), io) in enumerate(zip(decls, vbs, ibs)):
         _, count, stride, _ = struct.unpack(e + 'IIII', d[vo:vo + 16])
-        raw = d[vo + 16:vo + vs]
+        # the buffer's own count, not the section table's size: some packs leave a stale (smaller) size in the
+        # table while the whole buffer is there (scanface reads it the same way)
+        raw = d[vo + 16:vo + 16 + count * stride]
         attrs = {name: _read(raw, count, stride, off, n, typ, e) for name, off, n, typ in decl}
         n_idx, idx_size = struct.unpack(e + 'I', d[io + 4:io + 8])[0], d[io + 8]
         fmt = e + ('%dH' % n_idx if idx_size == 2 else '%dI' % n_idx)

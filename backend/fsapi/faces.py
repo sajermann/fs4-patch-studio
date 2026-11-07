@@ -87,7 +87,10 @@ class FaceService:
             raise _unsupported(key, e) from e
 
     def _pack_files(self, assets, face_id):
-        files = facepack.read_face(assets, face_id)
+        try:
+            files = facepack.read_face(assets, face_id)
+        except scanface.FaceFormatError as e:
+            raise _unsupported((assets, face_id), e) from e
         if any(k not in files for k in scanface.REQUIRED):
             raise FaceError('face_not_found', f'Face {face_id} não encontrada no pack.', 404)
         return files
@@ -106,7 +109,10 @@ class FaceService:
             base = scanface.project_face_dir(project_folder, player_uid)
         else:
             base = self.assets(folder)
-        files = scanface.read_files(base, face_id)
+        try:
+            files = scanface.read_files(base, face_id)
+        except scanface.FaceFormatError as e:
+            raise _unsupported((base, face_id), e) from e
         if any(k not in files for k in scanface.REQUIRED):
             raise FaceError('face_not_found', f'Face {face_id} não encontrada.', 404)
         return (base, face_id, _stamp(base, face_id)), files

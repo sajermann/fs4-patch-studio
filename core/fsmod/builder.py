@@ -708,10 +708,10 @@ def _edited_kit_files(game, tid, kind_n, shorts_path, crest_img):
 
 def _face_files(pl, pid, hair_color_code, game, assets_dir, templates):
     """{loose file name: bytes} of a player's real face converted for its playerid."""
-    files = scanface.read_files(scanface.project_face_dir(assets_dir, pl.uid), pl.face.source_id)
     if not templates:
         templates.update(scanface.template_files(game))
     try:
+        files = scanface.read_files(scanface.project_face_dir(assets_dir, pl.uid), pl.face.source_id)
         converted = scanface.convert(templates, files, pid, preview.hair_color(hair_color_code),
                                      paint=pl.face.paint_scalp, hair_mode=pl.face.hair_mode,
                                      hair_thickness=pl.face.hair_thickness)
