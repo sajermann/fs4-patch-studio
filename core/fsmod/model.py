@@ -13,8 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # predates the new number refuses the file instead of dropping what it does not know). 3 = teams in several leagues,
 # players in several teams and the game's own entries (original_id); 4 = street kits with a list of pieces per part;
 # 5 = world_tour (players of the friendly match); 6 = boots (the user's and edited game boots) and Player.boots;
-# 7 = goalkeeper gloves (the user's and edited game gloves) and Player.glove
-CONTRACT_VERSION = 7
+# 7 = goalkeeper gloves (the user's and edited game gloves) and Player.glove; 8 = balls (the user's and edited game
+# balls) and the ball of each stadium (originals.stadium_balls)
+CONTRACT_VERSION = 8
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
 Channel = Annotated[int, Field(ge=0, le=255)]
@@ -29,6 +30,8 @@ PlayerRef = Union[str, int]  # project player uid, or playerid of one of the gam
 ShoeSurface = Literal['street', 'turf', 'indoor']  # pitch surfaces with a boot of their own (fsmod.boots)
 BOOT_FILES = ('mesh', 'texture')  # the pack's files of a Boot (project folder paths, as the user sent them)
 GloveRef = Union[str, int]  # uid of a new Glove of the project, or the code of one of the game's gloves
+BallRef = Union[str, int]  # uid of a new Ball of the project, or the id of one of the game's balls
+BALL_FILES = ('mesh', 'texture')  # the pack's files of a Ball (project folder paths, as the user sent them)
 
 
 class Entity(BaseModel):
@@ -256,6 +259,30 @@ class Glove(Entity):
         return bool(self.texture)
 
 
+class Ball(Entity):
+    """A ball of the project (fsmod.balls): a new one (pack files, an id of its own given by the build) or one of the
+    game's balls the user edits (original_id = its id: new files replace the game's for every stadium using it; name
+    and credits only exist in the app). Stadiums pick it in originals.stadium_balls."""
+    uid: str
+    name: str = ''
+    credits: Optional[str] = None  # who made it (shown in the app only)
+    code: Optional[int] = None  # new ball: its id in the game (balls.free_ids); None or no longer valid = given by
+    # the build
+    mesh: Optional[str] = None  # the pack's ball_<id>.rx3 (project folder path, as sent)
+    texture: Optional[str] = None  # the pack's ball_<id>_textures.rx3
+    thumbnail: Optional[str] = None  # picture in the app (image path); None = drawn from the files
+    hidden: bool = False  # left out of the patch, e.g. not complete yet
+    original_id: Optional[int] = None  # the game's ball this entry edits (its id); None = new ball
+
+    @property
+    def is_original(self):
+        return self.original_id is not None
+
+    @property
+    def has_files(self):
+        return bool(self.mesh and self.texture)
+
+
 class Lineup(BaseModel):
     """Starting lineup of one game mode (fs4lineup in data8): it seeds a new save. A mode is
     (players, goalkeeper); a team without a lineup for a mode gets the game's own pick."""
@@ -341,6 +368,9 @@ class OriginalChanges(BaseModel):
     hidden_teams: list[int] = []  # teamids taken out of their league
     team_locks: dict[int, bool] = {}  # teamid -> locked; only teams the game can lock (catalog.lockable_team_ids)
     stadium_locks: dict[int, bool] = {}  # stadiumid -> locked; only lockable stadiums (catalog.stadiums)
+    # stadiumid (one row of stadiums: a stadium or one of its country versions) -> its ball: a new Ball's uid or a
+    # game ball's id; only the rows the user changed
+    stadium_balls: dict[int, BallRef] = {}
 
 
 class GamePatches(BaseModel):
@@ -372,12 +402,13 @@ class WorldTour(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3, 4, 5, 6, 7] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5, 6, 7, 8] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []
     boots: list[Boot] = []
     gloves: list[Glove] = []
+    balls: list[Ball] = []
     originals: OriginalChanges = OriginalChanges()
     game_patches: GamePatches = GamePatches()
     world_tour: WorldTour = WorldTour()
@@ -443,14 +474,18 @@ class Project(Entity):
                                   for side in FRIENDLY_TEAM_SIZES})
         boots = [b for b in self.boots if not b.hidden]  # a player's surface with a hidden boot keeps his code
         gloves = [g for g in self.gloves if not g.hidden]  # a player with a hidden glove keeps his code
+        balls = [b for b in self.balls if not b.hidden]  # a stadium with a hidden ball keeps the game's
         return self.model_copy(update={'leagues': leagues, 'teams': teams, 'players': players, 'world_tour': world_tour,
-                                       'boots': boots, 'gloves': gloves})
+                                       'boots': boots, 'gloves': gloves, 'balls': balls})
 
     def boot(self, uid):
         return next((b for b in self.boots if b.uid == uid), None)
 
     def glove(self, uid):
         return next((g for g in self.gloves if g.uid == uid), None)
+
+    def ball(self, uid):
+        return next((b for b in self.balls if b.uid == uid), None)
 
     def to_json(self):
         return self.model_dump(mode='json', exclude_none=True)

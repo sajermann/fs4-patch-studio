@@ -87,6 +87,14 @@ ISSUE_TEXT = {
     'glove_slots_full': 'As {max} vagas de luva nova já estão ocupadas: deixe esta fora do patch ou exclua outra.',
     'original_glove_not_found': 'A luva {id} não existe no jogo.',
     'original_glove_edited_twice': 'A luva original {id} já está sendo editada por outra entrada do projeto.',
+    'ball_file_not_found': 'Arquivo da bola não encontrado ({path}).',
+    'ball_files_missing': 'Envie os dois arquivos da bola (ball_<id>.rx3 e ball_<id>_textures.rx3).',
+    'ball_slots_full': 'As {max} vagas de bola nova já estão ocupadas: deixe esta fora do patch ou exclua outra.',
+    'original_ball_not_found': 'A bola {id} não existe no jogo.',
+    'original_ball_edited_twice': 'A bola original {id} já está sendo editada por outra entrada do projeto.',
+    'stadium_ball_hidden': 'Esta bola está fora do patch: o estádio {stadium} fica com a bola do jogo.',
+    'stadium_ball_not_found': 'A bola escolhida para o estádio {id} não existe.',
+    'stadium_not_found': 'O estádio {id} não existe no jogo.',
 }
 
 

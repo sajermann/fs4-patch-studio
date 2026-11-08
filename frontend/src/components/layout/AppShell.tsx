@@ -1,4 +1,17 @@
-import { AlertTriangle, Footprints, Globe, Hand, Landmark, Loader2, Puzzle, Settings, Shield, Trophy, Users } from 'lucide-react'
+import {
+  AlertTriangle,
+  Footprints,
+  Globe,
+  Hand,
+  Landmark,
+  Loader2,
+  Puzzle,
+  Settings,
+  Shield,
+  Trophy,
+  Users,
+  Volleyball,
+} from 'lucide-react'
 import { APP_NAME, APP_VERSION, AUTHOR_GITHUB, AUTHOR_NAME, REPO_URL } from '@/lib/about'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useI18n, type MessageKey } from '@/i18n'
@@ -16,6 +29,7 @@ const NAV: { to: string; label: MessageKey; icon: typeof Trophy }[] = [
   { to: '/players', label: 'nav.players', icon: Users },
   { to: '/boots', label: 'nav.boots', icon: Footprints },
   { to: '/gloves', label: 'nav.gloves', icon: Hand },
+  { to: '/balls', label: 'nav.balls', icon: Volleyball },
   { to: '/stadiums', label: 'nav.stadiums', icon: Landmark },
   { to: '/world-tour', label: 'nav.worldTour', icon: Globe },
   { to: '/patches', label: 'nav.patches', icon: Puzzle },
@@ -84,6 +98,7 @@ export function AppShell() {
     '/players': draft.players.filter((e) => !opened.has(e.uid)).length,
     '/boots': (draft.boots ?? []).filter((e) => !opened.has(e.uid)).length,
     '/gloves': (draft.gloves ?? []).filter((e) => !opened.has(e.uid)).length,
+    '/balls': (draft.balls ?? []).filter((e) => !opened.has(e.uid)).length,
     '/stadiums': stadiums?.length ?? 0,
     '/world-tour': (draft.world_tour?.dark?.length ?? 0) + (draft.world_tour?.white?.length ?? 0),
     '/patches': Object.values(draft.game_patches ?? {}).filter(Boolean).length,

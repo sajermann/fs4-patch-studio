@@ -199,6 +199,35 @@ export interface GloveImport {
   problems: { index: number; name: string; field: 'texture' | 'thumbnail'; code: string; message: string }[]
 }
 
+/** A ball of the project: a new one (FIFA 16 pack files, its id given by the build) or one of the game's balls the
+ * user edits (original_id = its id; new files replace the game's for every stadium using it). Files are project
+ * paths, kept as the user sent them. Stadiums pick it in originals.stadium_balls. */
+export interface Ball {
+  uid: string
+  name: string
+  credits?: string
+  code?: number | null // new ball: its id in the game, given by the build
+  mesh?: string // the pack's ball_<id>.rx3
+  texture?: string // the pack's ball_<id>_textures.rx3
+  thumbnail?: string // picture in the app (image path); none = drawn from the files
+  hidden?: boolean // left out of the patch
+  original_id?: number | null // the game's ball this entry edits (its id)
+}
+
+/** One of the game's balls. */
+export interface OriginalBall {
+  id: number
+  name: string | null // the game's name for it (most street balls have none)
+  stadiums: number // how many stadium rows (stadiums and country versions) use it in the game
+}
+
+/** Balls of a shared zip (manifest.json), each with a new uid and its files as provisional uploads. */
+export interface BallImport {
+  kind: 'one' | 'many'
+  balls: Ball[]
+  problems: { index: number; name: string; field: 'mesh' | 'texture' | 'thumbnail'; code: string; message: string }[]
+}
+
 export interface BootImport {
   kind: 'one' | 'many'
   boots: Boot[]
@@ -261,6 +290,8 @@ export interface OriginalChanges {
   hidden_teams?: number[]
   team_locks?: Record<string, boolean>
   stadium_locks?: Record<string, boolean>
+  /** stadiumid (a stadium or one of its country versions) -> its ball: a new Ball's uid or a game ball's id */
+  stadium_balls?: Record<string, string | number>
 }
 
 /** Optional changes to the game's own scripts (fsmod.gamepatches); all off by default. */
@@ -283,12 +314,13 @@ export interface WorldTour {
 }
 
 export interface Project {
-  version: 7
+  version: 8
   leagues: League[]
   teams: Team[]
   players: Player[]
   boots?: Boot[]
   gloves?: Glove[]
+  balls?: Ball[]
   originals?: OriginalChanges
   game_patches?: GamePatches
   world_tour?: WorldTour
@@ -400,10 +432,40 @@ export interface OriginalTeam {
   crest: boolean // has a menu crest (GET /api/originals/crests/<id>.webp); the game's internal teams have none
 }
 
-export interface OriginalStadium {
+/** One row of the game's stadiums table: a stadium, or one of its country versions. region: renderingregionid
+ * (1-7 = US, England, France, Italy, Germany, Spain, Canada; -1 = a stadium without versions). */
+export interface StadiumVersion {
   id: number
+  region: number
+  ball: number // the game's ball (balltype)
+  menu: boolean // hitpitchdefault: the row the game's menus list and an ordinary match loads
+}
+
+/** A stadium of the game (its rows grouped), as GET /api/originals/stadiums gives it. */
+export interface OriginalStadium {
+  id: number // the first row's stadiumid
   name: string
-  locked: boolean
+  versions: StadiumVersion[]
+  in_menu: boolean // listed in the game's menus (one of its rows is flagged)
+  lockable_id: number | null // the row the game can lock (the lock switch), none = always unlocked
+  locked: boolean // locked in the game
+  filters: number[] // match setups that offer it (Catalog.stadium_filters ids)
+  surface: number
+  pitch_size: number
+  goal_type: number
+  walls: boolean
+  capacity: number
+  times: number[] // times of day (1 = day, 3 and 4 = night)
+  free_roam: boolean // not a match venue (adidas Z5 free roam)
+}
+
+/** A match setup (fifaStadiumFilter): which stadiums the game offers for it. */
+export interface StadiumFilter {
+  id: number
+  numplayersonpitch: number
+  goalieon: number
+  isfutsal: number
+  islastmanstanding: number
 }
 
 /** One player of an original team's squad as the game has it (GET /api/originals/teams/{id}/squad). */
@@ -451,6 +513,8 @@ export interface Catalog {
   ranges: Record<'height' | 'weight' | 'number', [number, number]>
   boots: { street_slots: number; surface_fields: Record<ShoeSurface, string> }
   gloves: { slots: number } // free codes for new gloves
+  balls: { slots: number } // free ids for new balls
+  stadium_filters: StadiumFilter[]
 }
 
 export interface ImageUpload {
@@ -464,6 +528,7 @@ export interface BuildResponse {
   assigned_player_ids: Record<string, number>
   assigned_boot_codes: Record<string, number>
   assigned_glove_codes: Record<string, number>
+  assigned_ball_codes: Record<string, number>
   patch: PatchStatus
 }
 

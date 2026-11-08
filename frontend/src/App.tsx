@@ -10,6 +10,8 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { I18nProvider, translate, useI18n } from '@/i18n'
 import { logClientError } from '@/lib/clientLog'
 import { ThemeProvider } from '@/lib/theme'
+import { BallEditPage } from '@/pages/BallEditPage'
+import { BallsPage } from '@/pages/BallsPage'
 import { BootEditPage } from '@/pages/BootEditPage'
 import { BootsPage } from '@/pages/BootsPage'
 import { GloveEditPage } from '@/pages/GloveEditPage'
@@ -21,6 +23,7 @@ import { PlayerEditPage } from '@/pages/PlayerEditPage'
 import { PlayersPage } from '@/pages/PlayersPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { SetupPage } from '@/pages/SetupPage'
+import { StadiumPage } from '@/pages/StadiumPage'
 import { StadiumsPage } from '@/pages/StadiumsPage'
 import { WorldTourPage } from '@/pages/WorldTourPage'
 import { TeamEditPage } from '@/pages/TeamEditPage'
@@ -70,7 +73,10 @@ function Gate() {
           <Route path="boots/:uid" element={<BootEditPage />} />
           <Route path="gloves" element={<GlovesPage />} />
           <Route path="gloves/:uid" element={<GloveEditPage />} />
+          <Route path="balls" element={<BallsPage />} />
+          <Route path="balls/:uid" element={<BallEditPage />} />
           <Route path="stadiums" element={<StadiumsPage />} />
+          <Route path="stadiums/:id" element={<StadiumPage />} />
           <Route path="world-tour" element={<WorldTourPage />} />
           <Route path="patches" element={<PatchesPage />} />
           <Route path="settings" element={<SettingsPage />} />

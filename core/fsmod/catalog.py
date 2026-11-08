@@ -8,7 +8,7 @@ import datetime
 from collections import Counter
 from functools import cached_property
 
-from . import boots, builder, gloves, locale, preview
+from . import balls, boots, builder, gloves, locale, preview
 from .game import LOCALE_ENTRIES, LOCALE_FILES
 from .original_team import STREET_PARTS
 
@@ -23,6 +23,7 @@ APPEARANCE_FIELDS = ('headtypecode', 'hairtypecode', 'haircolorcode', 'skintonec
                      'bodytypecode', 'shoetypecode', 'gkglovetypecode', 'jerseysleevelengthcode', 'socklengthcode',
                      'turf_shoe', 'indoor_shoe')
 FREE_AGENTS_TEAM = 111592
+STADIUM_NO_TIME = 5  # stadiums.timeofday1-4: an empty slot
 
 
 def _days_to_iso(days):
@@ -286,6 +287,74 @@ class Catalog:
         t = self.db.table('players')
         wearers = Counter(self.db.get(t, r, gloves.FIELD) for r in t.records)
         return [{'code': c, 'players': wearers[c]} for c in gloves.game_codes(self.game)]
+
+    @cached_property
+    def game_balls(self):
+        """The game's own balls: [{id, name (the game's text; None for most of the street balls), stadiums (how many rows
+        of stadiums use it: stadiums and country versions)}]."""
+        t = self.db.table('stadiums')
+        used = Counter(self.db.get(t, r, balls.FIELD) for r in t.records)
+        return [{'id': i, 'name': (self.texts.get(f'BallName_{i}') or '').strip() or None, 'stadiums': used[i]}
+                for i in balls.game_ids(self.game)]
+
+    @cached_property
+    def _stadium_rows(self):
+        t = self.db.table('stadiums')
+        fields = [f.name for f in t.fields]
+        return [{f: self.db.get(t, r, f) for f in fields} for r in t.records]
+
+    @cached_property
+    def stadium_ids(self):
+        return {r['stadiumid'] for r in self._stadium_rows}
+
+    @cached_property
+    def stadium_filters(self):
+        """fifaStadiumFilter: the match setups and which stadiums each one offers (by goal type, pitch size and
+        walls; validated against the game's menus): [{id, players, goalkeeper, futsal, last_man_standing}]."""
+        t = self.db.table('fifaStadiumFilter')
+        rows = [{f.name: self.db.get(t, r, f.name) for f in t.fields} for r in t.records]
+        return sorted(rows, key=lambda f: f['id'])
+
+    def _stadium_name(self, row):
+        """Shown name of a stadiums row: its locale text (some only per time of day), else the database name."""
+        sid = row['stadiumid']
+        keys = [f'StadiumName_{sid}'] + [f'StadiumName_{sid}_{row[f"timeofday{k}"]}' for k in range(1, 5)]
+        return (next((self.texts[k] for k in keys if self.texts.get(k)), None) or row['name'] or str(sid)).strip()
+
+    @cached_property
+    def all_stadiums(self):
+        """Every stadium of the game: the rows of `stadiums` grouped by renderingbaseid (one stadium, with one row per
+        country version when it has them, renderingregionid 1-7), in name order:
+        [{id (the first row's stadiumid), name, versions: [{id, region, ball, menu}], in_menu, lockable_id, locked, filters,
+        surface, pitch_size, goal_type, walls, capacity, times, free_roam}]. menu = stadiums.hitpitchdefault: the one row
+        the game's menus list and an ordinary match loads (validated in game); a stadium without it is not in the menus."""
+        lockable = self._unlockables[builder.UNLOCKABLE_STADIUM]
+        groups = {}
+        for r in sorted(self._stadium_rows, key=lambda r: r['stadiumid']):
+            groups.setdefault(r['renderingbaseid'], []).append(r)
+        out = []
+        for rows in groups.values():
+            first = rows[0]
+            sid = first['stadiumid']
+            locks = [r['stadiumid'] for r in rows if r['stadiumid'] in lockable]
+            out.append({
+                'id': sid,
+                'name': self._stadium_name(first),
+                'versions': [{'id': r['stadiumid'], 'region': r['renderingregionid'], 'ball': r[balls.FIELD],
+                              'menu': bool(r['hitpitchdefault'])} for r in rows],
+                'in_menu': any(r['hitpitchdefault'] for r in rows),
+                'lockable_id': locks[0] if locks else None,
+                'locked': lockable[locks[0]] if locks else False,
+                'filters': [f['id'] for f in self.stadium_filters
+                            if f['goaltypemin'] <= first['goaltype'] <= f['goaltypemax']
+                            and f['pitchsizemin'] <= first['pitchsize'] <= f['pitchsizemax']
+                            and first['wallson'] <= f['wallsonmax']],
+                'surface': first['surfacetype'], 'pitch_size': first['pitchsize'], 'goal_type': first['goaltype'],
+                'walls': bool(first['wallson']), 'capacity': first['capacity'],
+                'times': sorted({r[f'timeofday{k}'] for r in rows for k in range(1, 5)} - {STADIUM_NO_TIME}),
+                'free_roam': first['stadiumtype'] == 1,
+            })
+        return sorted(out, key=lambda s: (s['name'].lower(), s['id']))
 
     @cached_property
     def positions(self):

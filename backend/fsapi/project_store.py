@@ -1,9 +1,9 @@
-"""The user's project on disk: <project_dir>/database.json + images/ + faces/ + boots/ + gloves/.
+"""The user's project on disk: <project_dir>/database.json + images/ + faces/ + boots/ + gloves/ + balls/.
 
 The JSON is the only source of truth of the app; it is never deduced from game files.
-Images, boot and glove files: an upload gets a provisional name (UPLOAD_PREFIX) and keeps it while the project is not
+Images, boot, glove and ball files: an upload gets a provisional name (UPLOAD_PREFIX) and keeps it while the project is not
 saved, so "Discard" can go back to the previous file; saving gives every file the fixed name of its entity
-(image_fields, boot_file_fields, glove_file_fields) and deletes the images, faces, boot and glove files nothing
+(image_fields, boot_file_fields, glove_file_fields, ball_file_fields) and deletes the images, faces and pack files nothing
 uses any more. Files are kept
 as the user sent them (conversions only happen for the preview and the patch).
 """
@@ -24,6 +24,7 @@ IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
 BOOTS_DIR = 'boots'  # the pack files of the project's boots (boot-<uid>.rx3, boot-<uid>_textures.rx3)
 BOOT_EXTENSION = '.rx3'
 GLOVES_DIR = 'gloves'  # the pack files of the project's gloves (glove-<uid>_textures.rx3)
+BALLS_DIR = 'balls'  # the pack files of the project's balls (ball-<uid>.rx3, ball-<uid>_textures.rx3)
 UPLOAD_PREFIX = 'upload-'  # provisional name of an upload until the project is saved
 BACKUP_MAX_BYTES = 2 * 1024 ** 3  # uncompressed size accepted when restoring a backup zip
 
@@ -69,6 +70,8 @@ def image_fields(project):
         yield b, 'thumbnail', f'boots/boot-{file_slug(b.uid)}'
     for g in project.gloves:
         yield g, 'thumbnail', f'gloves/glove-{file_slug(g.uid)}'
+    for b in project.balls:
+        yield b, 'thumbnail', f'balls/ball-{file_slug(b.uid)}'
 
 
 def boot_file_fields(project):
@@ -84,7 +87,15 @@ def glove_file_fields(project):
         yield g, 'texture', f'glove-{file_slug(g.uid)}_textures{BOOT_EXTENSION}'
 
 
-PACK_FILES = ((BOOTS_DIR, boot_file_fields), (GLOVES_DIR, glove_file_fields))  # folder -> slots of pack files
+def ball_file_fields(project):
+    """(ball, field, fixed file name under balls/) of every ball file slot of the project."""
+    for b in project.balls:
+        yield b, 'mesh', f'ball-{file_slug(b.uid)}{BOOT_EXTENSION}'
+        yield b, 'texture', f'ball-{file_slug(b.uid)}_textures{BOOT_EXTENSION}'
+
+
+# folder -> slots of pack files
+PACK_FILES = ((BOOTS_DIR, boot_file_fields), (GLOVES_DIR, glove_file_fields), (BALLS_DIR, ball_file_fields))
 
 
 def migrate_folder(old, new):
@@ -340,6 +351,14 @@ class ProjectStore:
         """Absolute path of a project glove file, refusing anything outside gloves/."""
         return self._pack_file_path(GLOVES_DIR, relative)
 
+    def save_ball_file(self, filename, data):
+        """Stores an uploaded ball file (.rx3) under balls/ with a provisional name (like save_boot_file)."""
+        return self._save_pack_file(BALLS_DIR, data)
+
+    def ball_file_path(self, relative):
+        """Absolute path of a project ball file, refusing anything outside balls/."""
+        return self._pack_file_path(BALLS_DIR, relative)
+
     def save_image(self, filename, data):
         """Stores an uploaded image under images/ with a provisional name and returns its project-relative path;
         the image gets the fixed name of its entity when the project is saved."""
@@ -353,11 +372,11 @@ class ProjectStore:
         return f'{IMAGES_DIR}/{name}'
 
     def write_backup(self, out):
-        """Zip of the whole project folder (database.json, images/, faces/, boots/, gloves/) into the binary file `out`."""
+        """Zip of the whole project folder (database.json, images/, faces/, boots/, gloves/, balls/) into the binary file `out`."""
         with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
             if self.exists():
                 z.write(self.path, PROJECT_FILE)
-            for sub in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR):
+            for sub in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR, BALLS_DIR):
                 for root, _, files in os.walk(os.path.join(self.folder, sub)):
                     for name in files:
                         if not name.endswith('.tmp'):
@@ -388,7 +407,7 @@ class ProjectStore:
                 if '..' in parts or rel.startswith('/') or ':' in rel or '\\' in rel:
                     raise BackupError('unsafe_path', info.filename)
                 if rel in (PROJECT_FILE, LEGACY_PROJECT_FILE) or \
-                        (len(parts) > 1 and parts[0] in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR)):
+                        (len(parts) > 1 and parts[0] in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR, BALLS_DIR)):
                     picked.append((info, rel))
             if sum(i.file_size for i, _ in picked) > BACKUP_MAX_BYTES:
                 raise BackupError('too_big')

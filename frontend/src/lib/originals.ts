@@ -1,10 +1,10 @@
 import type { OriginalChanges, OriginalStadium, OriginalTeam } from '@/api/types'
 import { useProject } from '@/state/project'
 
-const EMPTY: Required<OriginalChanges> = { hidden_leagues: [], hidden_teams: [], team_locks: {}, stadium_locks: {} }
+const EMPTY: Required<OriginalChanges> = { hidden_leagues: [], hidden_teams: [], team_locks: {}, stadium_locks: {}, stadium_balls: {} }
 
 /** Hide / lock changes to the game's own leagues, teams and stadiums (project.originals). Locks are stored only
- * when they differ from the game. */
+ * when they differ from the game. A stadium's lock is the one of its lockable row (lockable_id). */
 export function useOriginalChanges() {
   const { draft, setDraft } = useProject()
   const changes = { ...EMPTY, ...draft.originals }
@@ -25,8 +25,9 @@ export function useOriginalChanges() {
     toggleTeam: (id: number) => update({ hidden_teams: toggle(changes.hidden_teams, id) }),
     teamLocked: (t: OriginalTeam) => changes.team_locks[t.id] ?? t.locked,
     setTeamLocked: (t: OriginalTeam, locked: boolean) => update({ team_locks: setLock(changes.team_locks, t.id, locked, t.locked) }),
-    stadiumLocked: (s: OriginalStadium) => changes.stadium_locks[s.id] ?? s.locked,
-    setStadiumLocked: (s: OriginalStadium, locked: boolean) =>
-      update({ stadium_locks: setLock(changes.stadium_locks, s.id, locked, s.locked) }),
+    stadiumLocked: (s: OriginalStadium) => (s.lockable_id == null ? false : (changes.stadium_locks[s.lockable_id] ?? s.locked)),
+    setStadiumLocked: (s: OriginalStadium, locked: boolean) => {
+      if (s.lockable_id != null) update({ stadium_locks: setLock(changes.stadium_locks, s.lockable_id, locked, s.locked) })
+    },
   }
 }

@@ -568,8 +568,12 @@ def test_players_base_record_converts_skills_and_nationality(env, tmp_path):
 
 def test_original_stadiums_and_changes_round_trip(env):
     c = env['client']
-    stadiums = c.get('/api/originals/stadiums').json()
+    every = c.get('/api/originals/stadiums').json()
+    assert len(every) == 42 and sum(len(s['versions']) for s in every) == 120
+    stadiums = [{'id': s['lockable_id'], 'locked': s['locked']} for s in every if s['lockable_id'] is not None]
     assert len(stadiums) == 22 and all(s['locked'] for s in stadiums)
+    five = {s['name'] for s in every if 11 in s['filters'] and not s['free_roam']}  # 5-a-side with goalkeeper
+    assert {'Underpass 2', 'The Dome', 'London', 'Paris: Notre Dame'} <= five and 'Futsal Centre' not in five
     teams = {t['id']: t for t in c.get('/api/originals/teams').json()}
     assert teams[112339]['lockable'] and teams[112339]['locked'] and not teams[241]['lockable']
     project, _ = palmeiras_v2(c)

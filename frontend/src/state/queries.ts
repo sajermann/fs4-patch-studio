@@ -19,6 +19,9 @@ export const useOriginalStadiums = () =>
 export const useOriginalBoots = () =>
   useQuery({ queryKey: ['originals', 'boots'], queryFn: api.originalBoots, ...forever, ...shownByShell })
 
+export const useOriginalBalls = () =>
+  useQuery({ queryKey: ['originals', 'balls'], queryFn: api.originalBalls, ...forever, ...shownByShell })
+
 export const useOriginalGloves = () =>
   useQuery({ queryKey: ['originals', 'gloves'], queryFn: api.originalGloves, ...forever, ...shownByShell })
 

@@ -3,9 +3,12 @@ import type {
   BasePlayer,
   Boot,
   BootImport,
+  Ball,
+  BallImport,
   Glove,
   GloveImport,
   OriginalBoot,
+  OriginalBall,
   OriginalGlove,
   League,
   BuildProgress,
@@ -179,6 +182,35 @@ export const api = {
     return { name, blob: await res.blob() }
   },
 
+  /** The game's own balls. */
+  originalBalls: () => request<OriginalBall[]>('/api/originals/balls'),
+  /** Starts editing one of the game's balls: the entry without files of its own (the game's stay). */
+  editOriginalBall: (id: number, uid: string) =>
+    request<Ball>(`/api/originals/balls/${id}/edit?${new URLSearchParams({ uid })}`, { method: 'POST' }),
+  /** A ball's pack file (checked; kind: mesh or texture) under a provisional name until the project is saved. */
+  uploadBallFile: (kind: 'mesh' | 'texture', file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<ImageUpload>(`/api/balls/files?${new URLSearchParams({ kind })}`, { method: 'POST', body: form })
+  },
+  uploadBallThumbnail: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<ImageUpload>('/api/balls/thumbnail', { method: 'POST', body: form })
+  },
+  /** Balls of a shared zip; nothing is saved (one ball fills the form, many are added by the caller). */
+  importBalls: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<BallImport>('/api/balls/import', { method: 'POST', body: form })
+  },
+  /** Zip of saved balls to share: { file name, contents }. */
+  exportBalls: async (uids: string[], many = false) => {
+    const res = await send('/api/balls/export', json('POST', { uids, many }))
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'balls.zip'
+    return { name, blob: await res.blob() }
+  },
+
   /** The game's own goalkeeper gloves. */
   originalGloves: () => request<OriginalGlove[]>('/api/originals/gloves'),
   /** Starts editing one of the game's gloves: the entry without a file of its own (the game's stays). */
@@ -292,6 +324,26 @@ export const bootPreviewUrls = (mesh: string, texture: string) => {
   const qs = new URLSearchParams({ mesh, texture })
   return { glb: withRevision(`/api/preview/boot.glb?${qs}`), texture: withRevision(`/api/preview/boot.png?${qs}`) }
 }
+
+/** List picture of one of the game's balls. */
+export const originalBallThumbUrl = (id: number) => `/api/originals/balls/${id}.webp`
+
+/** List picture of a project ball: its own picture, or the ball drawn from its files (none: no picture yet). */
+export const ballThumbUrl = (ball: Pick<Ball, 'thumbnail' | 'mesh' | 'texture'>) =>
+  ball.thumbnail
+    ? withRevision(`/api/balls/thumb.webp?${new URLSearchParams({ image: ball.thumbnail })}`)
+    : ball.mesh && ball.texture
+      ? withRevision(`/api/balls/thumb.webp?${new URLSearchParams({ mesh: ball.mesh, texture: ball.texture })}`)
+      : undefined
+
+/** The 3D preview's mesh and texture of a project ball (converted as the game will show it). */
+export const ballPreviewUrls = (mesh: string, texture: string) => {
+  const qs = new URLSearchParams({ mesh, texture })
+  return { glb: withRevision(`/api/preview/ball.glb?${qs}`), texture: withRevision(`/api/preview/ball.png?${qs}`) }
+}
+
+/** The 3D preview's mesh and texture of one of the game's balls. */
+export const gameBallPreviewUrls = (id: number) => ({ glb: `/api/preview/ball/${id}.glb`, texture: `/api/preview/ball/${id}.png` })
 
 /** List picture of one of the game's gloves. */
 export const originalGloveThumbUrl = (code: number) => `/api/originals/gloves/${code}.webp`

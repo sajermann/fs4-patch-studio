@@ -12,7 +12,7 @@ from typing import Optional
 
 from PIL import Image
 
-from . import boots, builder, gloves, kit, original_league, original_team, scanface
+from . import balls, boots, builder, gloves, kit, model, original_league, original_team, scanface
 from .catalog import POSITIONS, SKILLS
 from .model import FRIENDLY_TEAM_SIZES, REAL_KIT_FILES
 
@@ -44,6 +44,7 @@ def validate(project, catalog, assets_dir):
     without_league = [tm.uid for tm in project.teams if not tm.leagues and not tm.hidden]
     every_boot = {b.uid: b for b in project.boots}
     every_glove = {g.uid: g for g in project.gloves}
+    every_ball = {b.uid: b for b in project.balls}
     project = project.visible()  # hidden leagues/teams are left out of the patch: not validated
     issues = [Issue('team_without_league', 'warning', uid, 'leagues', {}) for uid in without_league]
     # a player whose boot is out of the patch keeps the game boot of his code on that surface
@@ -54,6 +55,10 @@ def validate(project, catalog, assets_dir):
     issues += [Issue('glove_hidden', 'warning', p.uid, 'glove', {'glove': every_glove[p.glove].name})
                for p in project.players if isinstance(p.glove, str) and p.glove in every_glove
                and every_glove[p.glove].hidden]
+    # a stadium whose ball is out of the patch keeps the game's ball
+    issues += [Issue('stadium_ball_hidden', 'warning', every_ball[ref].uid, 'hidden', {'stadium': sid})
+               for sid, ref in project.originals.stadium_balls.items()
+               if isinstance(ref, str) and ref in every_ball and every_ball[ref].hidden]
 
     def error(code, entity=None, field_name=None, **params):
         issues.append(Issue(code, 'error', entity, field_name, params))
@@ -159,7 +164,8 @@ def validate(project, catalog, assets_dir):
             check_range(tm.uid, f'real_kits.{slot}.collar', real.collar, kit.COLLARS[0], kit.COLLARS[-1])
 
     seen = set()
-    for entity in [*project.leagues, *project.teams, *project.players, *project.boots, *project.gloves]:
+    for entity in [*project.leagues, *project.teams, *project.players, *project.boots, *project.gloves,
+                   *project.balls]:
         if entity.uid in seen:
             error('duplicate_uid', entity.uid, 'uid')
         seen.add(entity.uid)
@@ -540,6 +546,46 @@ def validate(project, catalog, assets_dir):
             g = visible_gloves.get(p.glove)
             if (g is None and (p.glove not in every_glove or every_glove[p.glove].is_original)) or                     (g is not None and g.is_original):
                 error('glove_not_found', p.uid, 'glove')
+
+    # ---- balls (hidden ones are left out of the patch: not validated) and the ball of each stadium
+    ball_ids = set(balls.game_ids(catalog.game))
+    free_balls = len(balls.free_ids(catalog.game))
+    new_count, edited_balls = 0, {}
+    for b in project.balls:
+        if not b.name.strip():
+            error('required', b.uid, 'name')
+        for f in model.BALL_FILES:
+            path = getattr(b, f)
+            if path and not os.path.isfile(os.path.join(assets_dir, path)):
+                error('ball_file_not_found', b.uid, f, path=path)
+        if b.is_original:  # an edited game ball keeps the game's files, or takes both new ones
+            if bool(b.mesh) != bool(b.texture):
+                error('ball_files_missing', b.uid, 'texture' if b.mesh else 'mesh')
+            if b.original_id not in ball_ids:
+                error('original_ball_not_found', b.uid, 'original_id', id=b.original_id)
+            elif b.original_id in edited_balls:
+                error('original_ball_edited_twice', b.uid, 'original_id', id=b.original_id)
+            edited_balls[b.original_id] = b
+        else:
+            for f in model.BALL_FILES:
+                if not getattr(b, f):
+                    error('ball_files_missing', b.uid, f)
+            new_count += 1
+            if new_count > free_balls:
+                error('ball_slots_full', b.uid, 'hidden', max=free_balls)
+    visible_balls = {b.uid: b for b in project.balls}
+    stadium_ids = catalog.stadium_ids
+    for sid, ref in project.originals.stadium_balls.items():
+        field_name = f'originals.stadium_balls.{sid}'
+        if sid not in stadium_ids:
+            error('stadium_not_found', None, field_name, id=sid)
+        elif isinstance(ref, int):
+            if ref not in ball_ids:
+                error('stadium_ball_not_found', None, field_name, id=sid)
+        else:
+            b = visible_balls.get(ref)
+            if (b is None and (ref not in every_ball or every_ball[ref].is_original)) or (b is not None and b.is_original):
+                error('stadium_ball_not_found', None, field_name, id=sid)
     return issues
 
 

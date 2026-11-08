@@ -32,8 +32,8 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from . import (big, boots, chunk, crest, dbcrc, gamepatches, gloves, kit, leaguelogo, locale, model, original_league,
-               original_player, original_team, photo, preview, rx3tex, scanface, t3db, world_tour)
+from . import (balls, big, boots, chunk, crest, dbcrc, gamepatches, gloves, kit, leaguelogo, locale, model,
+               original_league, original_player, original_team, photo, preview, rx3tex, scanface, t3db, world_tour)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
 HIDDEN_LEAGUES = {382, 76, 2092, 2095, 2097}  # ids the league selector never shows
@@ -122,6 +122,7 @@ class BuildResult:
     assigned_player_ids: dict = field(default_factory=dict)  # {player uid: playerid} given during this build
     assigned_boot_codes: dict = field(default_factory=dict)  # {boot uid: code} given during this build
     assigned_glove_codes: dict = field(default_factory=dict)  # {glove uid: code} given during this build
+    assigned_ball_codes: dict = field(default_factory=dict)  # {ball uid: id} given during this build
     loose: dict = field(default_factory=dict)  # {internal name: bytes} written as loose files under Game/
     log: list = field(default_factory=list)
 
@@ -777,6 +778,76 @@ def _build_boots(db, game, project, assets_dir, player_ids, entries, result, say
                 db.put(players, players.records[k], boots.SURFACE_FIELDS[surface], code)
 
 
+def assign_ball_codes(project, game):
+    """{ball uid: id} for the new balls of the project whose id is missing or no longer free (balls.free_ids; no two
+    balls share one). Ids stay with the ball once written back. Raises BuildError when no id is left."""
+    pool = balls.free_ids(game)
+    news = [b for b in project.balls if not b.is_original]
+    keep, used = set(), set()
+    for b in news:  # the first ball with a fitting id keeps it
+        if b.code in pool and b.code not in used:
+            used.add(b.code)
+            keep.add(b.uid)
+    out = {}
+    for b in news:
+        if b.uid in keep:
+            continue
+        code = next((c for c in pool if c not in used), None)
+        if code is None:
+            raise BuildError(f'{b.name}: no free ball id left ({len(pool)} in all)', b.uid)
+        used.add(code)
+        out[b.uid] = code
+    return out
+
+
+def _build_balls(db, game, project, assets_dir, entries, result, say, converter=None):
+    """New balls some stadium uses get an id (assign_ball_codes) and loose files (inside data8 the game does not find
+    them); edited game balls with files of their own replace the game's inside its archive; each stadium row the user
+    gave a ball (originals.stadium_balls) gets its id. A stadium whose ball is hidden or unknown keeps the game's."""
+    news = {b.uid: b for b in project.balls if not b.is_original}
+    edited = [b for b in project.balls if b.is_original and b.has_files]
+    picked = project.originals.stadium_balls
+    if not news and not edited and not picked:
+        return
+    used = {ref for ref in picked.values() if ref in news and news[ref].has_files}
+    converter = converter or balls.Converter(game)
+    result.assigned_ball_codes = assign_ball_codes(project, game)
+    codes = {uid: result.assigned_ball_codes.get(uid, b.code) for uid, b in news.items()}
+
+    def convert(ball, ball_id):
+        data = []
+        for f in model.BALL_FILES:
+            try:
+                with open(os.path.join(assets_dir, getattr(ball, f)), 'rb') as fh:
+                    data.append(fh.read())
+            except OSError as e:
+                raise BuildError(f'{ball.name}: cannot read the ball file: {e}', ball.uid) from e
+        try:
+            return converter.files(*data, ball_id)
+        except balls.BallError as e:
+            raise BuildError(f'{ball.name}: {e}', ball.uid) from e
+
+    for b in edited:
+        say(f'ball {b.original_id} (game ball) "{b.name}": files replaced')
+        for name, data in convert(b, b.original_id).items():
+            entries[_archive_of(game, name), name] = chunk.chunkzip(data)
+    for uid in sorted(used, key=lambda u: codes[u]):
+        say(f'ball {codes[uid]} "{news[uid].name}"')
+        for name, data in convert(news[uid], codes[uid]).items():
+            result.loose[name] = chunk.chunkzip(data)
+    game_ids = set(balls.game_ids(game))
+    stadiums = db.table('stadiums')
+    for sid, ref in sorted(picked.items()):
+        ball_id = codes[ref] if ref in used else ref if isinstance(ref, int) and ref in game_ids else None
+        if ball_id is None:
+            continue  # a hidden (or file-less) ball: the stadium keeps the game's
+        rows = db.rows('stadiums', 'stadiumid', sid)
+        if not rows:
+            raise BuildError(f'stadium {sid} not found')
+        for k in rows:
+            db.put(stadiums, stadiums.records[k], balls.FIELD, ball_id)
+
+
 def _build_gloves(db, game, project, assets_dir, player_ids, entries, result, say, converter=None):
     """New gloves worn by a player get a code (assign_glove_codes) and loose files (inside data8 the game shows them
     broken); edited game gloves with a file of their own replace the game's inside its archive; each player who picked
@@ -838,11 +909,12 @@ def _set_preferred_positions(db, project, player_ids, say):
                     say(f'original player {pid} "{pl.shown_name}": preferred position {position}')
 
 
-def build(project, game, assets_dir, log=None, progress=None, boot_converter=None, glove_converter=None):
+def build(project, game, assets_dir, log=None, progress=None, boot_converter=None, glove_converter=None,
+          ball_converter=None):
     """Builds the mod. assets_dir = folder that image paths (crests) are relative to. Hidden leagues/teams are
     left out (Project.visible); their ids stay reserved. progress(step, done, total) is called as the build goes
-    (steps: BUILD_STEPS, then write_patch's). boot_converter / glove_converter: a boots.Converter /
-    gloves.Converter to reuse (keeps its conversions)."""
+    (steps: BUILD_STEPS, then write_patch's). boot_converter / glove_converter / ball_converter: a boots.Converter /
+    gloves.Converter / balls.Converter to reuse (keeps its conversions)."""
     result = BuildResult(database=b'', entries={})
     every = project
     project = project.visible()
@@ -1208,6 +1280,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
     _build_boots(db, game, project, assets_dir, player_ids, entries, result, say, boot_converter)
     _build_gloves(db, game, project, assets_dir, player_ids, entries, result, say, glove_converter)
     _set_preferred_positions(db, project, player_ids, say)
+    _build_balls(db, game, project, assets_dir, entries, result, say, ball_converter)
     apply_original_changes(db, project.originals)
     try:
         world_tour.apply(db, game, project, player_ids, result.loose, entries, texts, say)

@@ -198,7 +198,6 @@ def thumbnail(mesh_rx3b, color_rx3b, width=256, supersample=2):
     nrm = np.array(m['attrs']['n0'])[:, :3]
     idx = np.array(m['indices']).reshape(-1, 3)
     tex = np.asarray(rx3tex.to_image(color_rx3b, rx3tex.textures(color_rx3b)[0]).convert('RGB'))
-    th, tw = tex.shape[:2]
     tris = idx[(p[idx][:, :, 0] > 0).all(1)]  # right hand
     # seen from above: image x = x, image y = z (towards the viewer at the bottom), depth = y
     sx, sy, depth = p[:, 0], p[:, 2], p[:, 1]
@@ -213,6 +212,16 @@ def thumbnail(mesh_rx3b, color_rx3b, width=256, supersample=2):
     Y = pad + (sy - lo[1]) * scale
     light = np.array([0.3, 0.9, 0.4]) / np.linalg.norm([0.3, 0.9, 0.4])
     shade_v = 0.5 + 0.5 * np.clip(nrm @ light, 0, 1)
+    rgb, alpha = rasterize(X, Y, depth, uv, shade_v, tris, tex, size, h)
+    img = Image.fromarray(np.dstack([rgb.clip(0, 255).astype(np.uint8), alpha]), 'RGBA')
+    return img.resize((width, max(1, h // supersample)), Image.LANCZOS)
+
+
+def rasterize(X, Y, depth, uv, shade_v, tris, tex, width, height):
+    """(rgb float32 HxWx3, alpha uint8 HxW) of textured triangles drawn per pixel with a z-buffer (larger depth =
+    nearer). X, Y = image positions of the vertices, uv = their texture coordinates, shade_v = their light factor."""
+    size, h = width, height
+    th, tw = tex.shape[:2]
     rgb = np.zeros((h, size, 3), np.float32)
     alpha = np.zeros((h, size), np.uint8)
     zb = np.full((h, size), -np.inf)
@@ -244,8 +253,7 @@ def thumbnail(mesh_rx3b, color_rx3b, width=256, supersample=2):
         zb[py, px] = zz
         rgb[py, px] = texel * shade[:, None]
         alpha[py, px] = 255
-    img = Image.fromarray(np.dstack([rgb.clip(0, 255).astype(np.uint8), alpha]), 'RGBA')
-    return img.resize((width, max(1, h // supersample)), Image.LANCZOS)
+    return rgb, alpha
 
 
 def game_files(sources, code):
