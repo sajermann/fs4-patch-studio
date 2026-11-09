@@ -1,6 +1,7 @@
 import random
 
-from fsmod import appearance_thumbs, builder, catalog, player_generator, preview
+from fsmod import appearance_thumbs, body, builder, catalog, player_generator, preview
+from fsmod import model
 from fsmod.model import Project, Team
 
 
@@ -35,10 +36,30 @@ def test_hair_groups_cover_every_hair_once(game):
 
 
 def test_body_type_follows_the_height():
-    assert player_generator.body_codes(170) == (7, 8, 9)
-    assert player_generator.body_codes(171) == (1, 2, 3)
-    assert player_generator.body_codes(184) == (1, 2, 3)
-    assert player_generator.body_codes(185) == (4, 5, 6)
+    assert body.codes(170) == (7, 8, 9)
+    assert body.codes(171) == (1, 2, 3)
+    assert body.codes(184) == (1, 2, 3)
+    assert body.codes(185) == (4, 5, 6)
+
+
+def test_the_build_is_kept_when_the_height_class_changes():
+    assert [body.fit(code, 190) for code in range(1, 10)] == [4, 5, 6] * 3
+    assert [body.fit(code, 165) for code in range(1, 10)] == [7, 8, 9] * 3
+    assert body.fit(6, 178) == 3  # tall stocky at 178 cm: normal stocky
+
+
+def test_the_build_writes_the_body_type_of_the_player_s_height(game, tmp_path):
+    players = [{'uid': 'tall', 'first_name': 'A', 'last_name': 'Tall', 'height': 192, 'appearance': {'bodytypecode': 3}},
+               {'uid': 'short', 'first_name': 'B', 'last_name': 'Short', 'height': 166, 'appearance': {'bodytypecode': 1}},
+               {'uid': 'normal', 'first_name': 'C', 'last_name': 'Normal', 'height': 178, 'appearance': {'bodytypecode': 5}}]
+    data = {'version': model.CONTRACT_VERSION, 'players': players,
+            'world_tour': {'white': [{'player': p['uid'], 'mode': 'original'} for p in players]}}
+    result = builder.build(model.load(data), game, str(tmp_path))
+    db = builder.Db(result.database, game.meta)
+    table = db.table('players')
+    shown = {uid: db.get(table, table.records[db.rows('players', 'playerid', pid)[0]], 'bodytypecode')
+             for uid, pid in result.assigned_player_ids.items()}
+    assert shown == {'tall': 6, 'short': 7, 'normal': 2}  # same build, the class of the height
 
 
 def test_generated_players_are_coherent_and_keep_natural_looks(game):
@@ -48,7 +69,7 @@ def test_generated_players_are_coherent_and_keep_natural_looks(game):
     assert generated
     natural = c.generic_appearance_options
     for player in generated:
-        assert player.appearance['bodytypecode'] in player_generator.body_codes(player.height)
+        assert player.appearance['bodytypecode'] in body.codes(player.height)
         assert player.appearance['haircolorcode'] in natural['haircolorcode']
         assert player.appearance['hairtypecode'] in natural['hairtypecode']
 

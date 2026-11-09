@@ -1,7 +1,7 @@
 import { OrbitControls } from '@react-three/drei'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { LoaderCircle } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
@@ -43,6 +43,7 @@ export interface PreviewAppearance {
   /** a glove of the project (its converted color map) instead of the game glove gkglovetypecode */
   glove?: string
   height: number // cm; the game scales the whole player by it (validated in game, 165 x 200 cm)
+  bodytypecode: number // 1-9: height class x build; in game only the build shows (width), the height comes from `height`
 }
 
 export interface PreviewKit {
@@ -99,6 +100,43 @@ const VIEWS: Record<View, { camera: Vec3; target: Vec3 }> = {
 // this point ends at the player's height.
 const MODEL_HEIGHT_CM = 183.6
 const FOCUS_DISTANCE = 0.9 // max camera distance after a double click on a part
+// Width of the body (not the head) by build: bodytypecode 1-3, 4-6 and 7-9 are each lean, medium, stocky. The game
+// scales bones in its code (not in any data file); these are approximations from in-game prints, where the same
+// player at the same height is only thinner or wider: the body type does not change his height.
+const BUILD_WIDTH = [0.95, 1, 1.07]
+const buildWidth = (bodytypecode: number) => BUILD_WIDTH[(Math.max(bodytypecode, 1) - 1) % 3] ?? 1
+// Half the shoulder width in the reference pose (m): the torso and legs inside it get wider, the arms (and sleeves,
+// gloves) outside it only move out with the shoulder, so they do not get longer.
+const SHOULDER_X = 0.17
+const BuildWidthContext = createContext(1)
+const widenedCache = new WeakMap<THREE.BufferGeometry, Map<number, THREE.BufferGeometry>>()
+
+/** The geometry with the body's build applied (see SHOULDER_X); cached, the original stays untouched. */
+function widened(geometry: THREE.BufferGeometry, width: number) {
+  if (width === 1) return geometry
+  let byWidth = widenedCache.get(geometry)
+  if (!byWidth) widenedCache.set(geometry, (byWidth = new Map()))
+  let out = byWidth.get(width)
+  if (!out) {
+    out = geometry.clone()
+    const position = out.attributes.position as THREE.BufferAttribute
+    const shift = SHOULDER_X * (width - 1)
+    for (let i = 0; i < position.count; i++) {
+      const x = position.getX(i)
+      position.setX(i, Math.abs(x) <= SHOULDER_X ? x * width : x + Math.sign(x) * shift)
+      position.setZ(i, position.getZ(i) * width)
+    }
+    position.needsUpdate = true
+    out.computeBoundingSphere()
+    byWidth.set(width, out)
+  }
+  return out
+}
+
+const useWidened = () => {
+  const width = useContext(BuildWidthContext)
+  return (geometry: THREE.BufferGeometry) => widened(geometry, width)
+}
 
 // ------------------------------------------------------------------ loading (cached, no Suspense)
 
@@ -296,12 +334,13 @@ function HairMesh({ urls, hairColor }: { urls: HairUrls | null; hairColor: strin
 function BodyPart({ part, code, texture, roughness, collar = 0 }: { part: string; code: number; texture: string; roughness: number; collar?: number }) {
   const glb = `/api/preview/body/${part}/${code}.glb${collar ? `?collar=${collar}` : ''}`
   const loaded = useLoaded(`${glb}|${texture}`, () => Promise.all([loadMeshes(glb), loadTexture(texture)]))
+  const widen = useWidened()
   if (!loaded) return null
   const [meshes, map] = loaded
   return (
     <group>
       {(meshes[part] ?? []).map((g, i) => (
-        <mesh key={i} geometry={g}>
+        <mesh key={i} geometry={widen(g)}>
           <meshStandardMaterial map={map} roughness={roughness} metalness={0} side={THREE.DoubleSide} />
         </mesh>
       ))}
@@ -312,12 +351,13 @@ function BodyPart({ part, code, texture, roughness, collar = 0 }: { part: string
 /** A pack boot of the project, converted by the backend as the build does (node 'shoes'). */
 function PackShoes({ glb, texture }: { glb: string; texture: string }) {
   const loaded = useLoaded(`${glb}|${texture}`, () => Promise.all([loadMeshes(glb), loadTexture(texture)]))
+  const widen = useWidened()
   if (!loaded) return null
   const [meshes, map] = loaded
   return (
     <group>
       {(meshes.shoes ?? []).map((g, i) => (
-        <mesh key={i} geometry={g}>
+        <mesh key={i} geometry={widen(g)}>
           <meshStandardMaterial map={map} roughness={0.5} metalness={0} side={THREE.DoubleSide} />
         </mesh>
       ))}
@@ -374,11 +414,12 @@ function StreetPart({ part, mesh, piece, crest }: { part: 'top' | 'bottom' | 'so
     Promise.all([loadMeshes(glb), loadTexture(texture, false), crestUrl ? loadTexture(crestUrl) : Promise.resolve(undefined)]),
   )
   const material = useMaskMaterial(loaded?.[1], piece.colors, loaded?.[2])
+  const widen = useWidened()
   if (!loaded || !material) return null
   return (
     <group>
       {(loaded[0][mesh] ?? []).map((g, i) => (
-        <mesh key={i} geometry={g} material={material} />
+        <mesh key={i} geometry={widen(g)} material={material} />
       ))}
     </group>
   )
@@ -416,7 +457,7 @@ function Body({ a, outfit }: { a: PreviewAppearance; outfit: PreviewOutfit }) {
     )
   }
   return (
-    <group>
+    <BuildWidthContext.Provider value={buildWidth(a.bodytypecode)}>
       {clothes}
       {a.shoe ? (
         <PackShoes glb={a.shoe.glb} texture={a.shoe.texture} />
@@ -425,7 +466,7 @@ function Body({ a, outfit }: { a: PreviewAppearance; outfit: PreviewOutfit }) {
       )}
       {/* every player can play in goal, so the gloves are always shown */}
       <BodyPart part="gloves" code={0} texture={a.glove ?? `/api/preview/glove/${a.gkglovetypecode}.png`} roughness={0.6} />
-    </group>
+    </BuildWidthContext.Provider>
   )
 }
 

@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from . import (balls, big, boots, chunk, crest, dbcrc, gamepatches, gloves, kit, leaguelogo, locale, model,
+from . import (balls, big, body, boots, chunk, crest, dbcrc, gamepatches, gloves, kit, leaguelogo, locale, model,
                original_league, original_player, original_team, photo, preview, rx3tex, scanface, t3db, world_tour)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
@@ -641,6 +641,15 @@ def _archive_of(game, name):
     return f'data{loc[0]}.big' if loc else None
 
 
+def _fit_body_type(db, players, row):
+    """The row's body type in the height class of its height, keeping the build (fsmod.body): the user picks the
+    build, the height (own or inherited from the template player) picks the class."""
+    code = db.get(players, row, 'bodytypecode')
+    fitted = body.fit(code, db.get(players, row, 'height'))
+    if fitted != code:
+        db.put(players, row, 'bodytypecode', fitted)
+
+
 def _build_original_player(db, game, pl, assets_dir, nameid, face_templates, say):
     """Applies an original player entry (Player.original_id) to the game's own row, only where it differs from what
     was loaded (original_player.changes). Returns the jobs that make its files (photo, real face)."""
@@ -680,6 +689,9 @@ def _build_original_player(db, game, pl, assets_dir, nameid, face_templates, say
                     db.put(players, row, name, v)
         if ch.head:
             db.put(players, row, 'headclasscode', 1 if pl.generic else 0)
+        body_changed = pl.appearance.get('bodytypecode') != before.get('appearance', {}).get('bodytypecode')
+        if 'height' in f or body_changed:
+            _fit_body_type(db, players, row)  # the game's own combinations stay as they are until one of the two changes
     except (BuildError, ValueError, KeyError) as e:
         raise BuildError(f'{pl.shown_name}: {e}', pl.uid) from e
     jobs = []
@@ -1069,6 +1081,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
             for surface in ('turf', 'indoor'):  # projects that only set the street boot: the same one everywhere
                 if street is not None and boots.SURFACE_FIELDS[surface] not in pl.appearance:
                     db.put(players, row, boots.SURFACE_FIELDS[surface], street)
+            _fit_body_type(db, players, row)
             if not pl.generic and pl.face is not None:
                 db.put(players, row, 'headclasscode', 0)
         except (BuildError, ValueError, KeyError) as e:

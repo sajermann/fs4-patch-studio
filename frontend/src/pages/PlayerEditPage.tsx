@@ -30,6 +30,7 @@ import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { BackButton, useBack, useGoBack, useKeepBack, useTabParam } from '@/lib/back'
+import { BUILDS, bodyCode, buildOf, heightClass } from '@/lib/body'
 import { useI18n, type MessageKey, type TFunction } from '@/i18n'
 import { useCopy } from '@/lib/copy'
 import { APPEARANCE_LABELS, FOOT_LABELS, SKILL_LABELS } from '@/lib/labels'
@@ -461,6 +462,12 @@ function AppearanceTab({ player }: { player: Player }) {
     updatePlayer(player.uid, { appearance })
   }
   const lookCard = useHeightToViewportEnd()
+  // body type: the user picks the build, the height (Data tab) picks the class (lib/body)
+  const playerHeight = player.height ?? defaults?.height ?? 180
+  const bodyClass = heightClass(playerHeight)
+  const ownBody = player.appearance.bodytypecode
+  const inheritedBody = inheritedCode('bodytypecode')
+  const bodyLabel = (code: number) => `${t(`playerEdit.heightClass.${bodyClass}`)} · ${t(`playerEdit.build.${BUILDS[buildOf(code)]}`)}`
   const lookingHairColor = (code: string) => !!browsing && code === 'haircolorcode'
   // hair and beard pictures come in the color the player has
   const thumbnailVariant = (code: string) =>
@@ -624,7 +631,16 @@ function AppearanceTab({ player }: { player: Player }) {
             .filter((code) => BODY_CODES.includes(code) === body)
             .map((code) => (
               <Field key={code} label={fieldLabel(code)} entity={player.uid} field={`appearance.${code}`}>
-                {THUMBNAIL_CODES.includes(code) ? (
+                {code === 'bodytypecode' ? (
+                  <Stepper
+                    value={ownBody === undefined ? undefined : bodyCode(buildOf(ownBody), playerHeight)}
+                    options={BUILDS.map((_, build) => bodyCode(build, playerHeight))}
+                    onChange={(v) => set(code, v)}
+                    inherited={inheritedBody === undefined ? undefined : bodyCode(buildOf(inheritedBody), playerHeight)}
+                    label={bodyLabel}
+                    wide
+                  />
+                ) : THUMBNAIL_CODES.includes(code) ? (
                   <ThumbnailField
                     code={code}
                     /* looking at a real face: its hair color is kept here until "use this face" */
@@ -643,10 +659,7 @@ function AppearanceTab({ player }: { player: Player }) {
                   />
                 )}
                 {code === 'bodytypecode' && (
-                  <p className="mt-1 flex items-start gap-1 text-xs text-amber-600 dark:text-amber-500">
-                    <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-                    {t('playerEdit.bodyTypeWarning')}
-                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{t('playerEdit.bodyTypeHint')}</p>
                 )}
               </Field>
             ))}

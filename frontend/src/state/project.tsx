@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, bumpProjectImagesRevision } from '@/api/client'
 import { LoadError } from '@/components/layout/LoadError'
 import { useI18n } from '@/i18n'
+import { withFittedBody } from '@/lib/body'
 import { lineupsWithout, takersWithout } from '@/lib/lineup'
 import { linkOf, teamsWithout } from '@/lib/players'
 import type { Ball, Boot, Glove, Issue, League, OriginalSquadLink, Player, PlayerDefaults, Project, Team } from '@/api/types'
@@ -294,7 +295,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setDraft,
       updateLeague: (uid, patch) => setDraft((p) => ({ ...p, leagues: replace(p.leagues, uid, patch) })),
       updateTeam: (uid, patch) => setDraft((p) => ({ ...p, teams: replace(p.teams, uid, patch) })),
-      updatePlayer: (uid, patch) => setDraft((p) => ({ ...p, players: replace(p.players, uid, patch) })),
+      // a new height moves the player's body type to its height class (lib/body), from any screen that sets it
+      updatePlayer: (uid, patch) =>
+        setDraft((p) => ({ ...p, players: p.players.map((e) => (e.uid === uid ? { ...e, ...withFittedBody(e, patch) } : e)) })),
       updateBoot: (uid, patch) => setDraft((p) => ({ ...p, boots: replace(p.boots ?? [], uid, patch) })),
       updateGlove: (uid, patch) => setDraft((p) => ({ ...p, gloves: replace(p.gloves ?? [], uid, patch) })),
       updateBall: (uid, patch) => setDraft((p) => ({ ...p, balls: replace(p.balls ?? [], uid, patch) })),

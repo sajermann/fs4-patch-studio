@@ -79,6 +79,7 @@ export function previewAppearance(
     gkglovetypecode: gloveCode,
     glove: gloveTexture ? glovePreviewUrl(gloveTexture) : undefined,
     height: player?.height ?? defaults?.height ?? 180,
+    bodytypecode: code('bodytypecode'),
   }
 }
 

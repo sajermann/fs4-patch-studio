@@ -86,10 +86,21 @@ export function ColorInput({ value, onChange }: { value: RGB; onChange: (v: RGB)
 /** Steps through a list of game codes. Shows only the position in the list (the raw code means nothing to the
  * user); when the value is unset it shows the position of the inherited value, marked "padrão". Fixed width (184px). */
 /** "<position>/<total>" of a value in its options; the inherited one is muted and says "default". */
-export function OptionCount({ value, options, inherited }: { value: number | undefined; options: number[]; inherited?: number | null }) {
+/** label: the option's name instead of its position in the list ("n/total"). */
+export function OptionCount({ value, options, inherited, label }: {
+  value: number | undefined
+  options: number[]
+  inherited?: number | null
+  label?: (option: number) => string
+}) {
   const { t } = useI18n()
   const idx = value === undefined ? -1 : options.indexOf(value)
   const inheritedIdx = inherited === undefined || inherited === null ? -1 : options.indexOf(inherited)
+  if (label) {
+    if (idx >= 0) return <span>{label(options[idx])}</span>
+    if (inheritedIdx >= 0) return <span className="text-muted-foreground">{label(options[inheritedIdx])} <span className="text-xs">{t('common.default')}</span></span>
+    return <span className="text-muted-foreground">{t('common.default')}</span>
+  }
   if (value !== undefined) {
     return (
       <span className="tabular-nums">
@@ -116,11 +127,15 @@ export function Stepper({
   options,
   onChange,
   inherited,
+  label,
+  wide,
 }: {
   value: number | undefined
   options: number[]
   onChange: (v: number | undefined) => void
   inherited?: number | null
+  label?: (option: number) => string
+  wide?: boolean // the middle takes the free width (long labels)
 }) {
   const { t } = useI18n()
   const idx = value === undefined ? -1 : options.indexOf(value)
@@ -136,8 +151,8 @@ export function Stepper({
       <Button type="button" variant="outline" size="icon" onClick={() => go(-1)} aria-label={t('form.previous')}>
         <ChevronLeft />
       </Button>
-      <div className="w-28 min-w-0 shrink rounded-md border px-2 py-1.5 text-center text-sm whitespace-nowrap">
-        <OptionCount value={value} options={options} inherited={inherited} />
+      <div className={cn('min-w-0 shrink rounded-md border px-2 py-1.5 text-center text-sm whitespace-nowrap', wide ? 'flex-1 truncate' : 'w-28')}>
+        <OptionCount value={value} options={options} inherited={inherited} label={label} />
       </div>
       <Button type="button" variant="outline" size="icon" onClick={() => go(1)} aria-label={t('form.next')}>
         <ChevronRight />

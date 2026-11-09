@@ -6,7 +6,7 @@ import itertools
 import os
 import random
 
-from . import builder
+from . import body, builder
 from .catalog import SKILLS
 from .model import Player, TeamLink
 
@@ -15,8 +15,6 @@ NUMBERS = range(1, 100)  # what the roster screen accepts
 HEIGHTS = (165, 195)
 WEIGHTS = (60, 90)
 BIRTHDATES = (datetime.date(1980, 1, 1), datetime.date(1994, 12, 31))
-# bodytypecode = 3 height classes by 3 builds (lean, medium, stocky); the limits are where the game's own players change class
-SHORT_UP_TO, TALL_FROM = 170, 185
 
 
 def _taken_numbers(project, team, catalog):
@@ -32,16 +30,9 @@ def _taken_numbers(project, team, catalog):
     return taken
 
 
-def body_codes(height):
-    """The bodytypecode values that fit a height."""
-    if height <= SHORT_UP_TO:
-        return 7, 8, 9
-    return (4, 5, 6) if height >= TALL_FROM else (1, 2, 3)
-
-
 def _appearance(catalog, height, rng):
     look = {code: rng.choice(values) for code, values in catalog.generic_appearance_options.items() if values}
-    look['bodytypecode'] = rng.choice(body_codes(height))
+    look['bodytypecode'] = rng.choice(body.codes(height))
     return look
 
 
