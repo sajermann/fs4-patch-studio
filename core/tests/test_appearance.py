@@ -77,7 +77,8 @@ def test_generated_players_are_coherent_and_keep_natural_looks(game):
 def test_thumbnails_are_square_around_the_subject(game):
     for field, code, variant in (('hairtypecode', 100, 8), ('hairtypecode', 0, 1), ('haircolorcode', 11, 0),
                                  ('facialhairtypecode', 4, 2), ('facialhaircolorcode', 4, 0), ('eyecolorcode', 7, 0),
-                                 ('eyecolorcode', 1, 0), ('eyebrowcode', 2, 0)):
+                                 ('eyecolorcode', 1, 0), ('eyebrowcode', 2, 0), ('skintonecode', 2, 0),
+                                 ('skintonecode', 10, 0)):
         image = appearance_thumbs.thumbnail(game, field, code, variant)
         assert image.size == (128, 128), field
         assert image.mode == 'RGBA'
@@ -87,3 +88,8 @@ def test_thumbnails_are_square_around_the_subject(game):
 def test_codes_without_a_thumbnail(game):
     assert appearance_thumbs.thumbnail(game, 'hairtypecode', 27, 1) is None
     assert appearance_thumbs.thumbnail(game, 'eyecolorcode', 0) is None
+
+
+def test_every_offered_skin_tone_has_a_thumbnail(game):
+    for code in catalog.Catalog(game).appearance_options['skintonecode']:
+        assert appearance_thumbs.thumbnail(game, 'skintonecode', code) is not None, code

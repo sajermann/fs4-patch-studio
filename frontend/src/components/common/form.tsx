@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, ChevronRight, CircleAlert } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, CircleAlert, CircleHelp } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { imageUrl, originalCrestUrl } from '@/api/client'
 import type { Issue, OriginalTeam, RGB, Team } from '@/api/types'
@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import { issueText } from '@/lib/issues'
 import { useIssues, useWasEdited } from '@/state/project'
@@ -39,6 +40,7 @@ export function Field({
   entity,
   field,
   hint,
+  help,
   className,
   children,
 }: {
@@ -46,13 +48,25 @@ export function Field({
   entity?: string
   field?: string
   hint?: string
+  /** shown in a tooltip on a (?) icon next to the label */
+  help?: ReactNode
   className?: string
   children: ReactNode
 }) {
   const issues = useIssues(entity, field)
   return (
     <div className={cn('space-y-1.5', className)}>
-      <Label>{label}</Label>
+      <Label>
+        {label}
+        {help && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <CircleHelp className="size-3.5 shrink-0 cursor-help text-muted-foreground" />
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">{help}</TooltipContent>
+          </Tooltip>
+        )}
+      </Label>
       {children}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       {field && <FieldIssues issues={issues} />}

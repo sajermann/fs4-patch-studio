@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Copy, DatabaseZap, Dices, Eraser, Info, LoaderCircle, RotateCcw, Trash2, User } from 'lucide-react'
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import type { View as PreviewView } from '@/components/common/PlayerPreview'
 import { api, ApiError, photoPreviewUrl, scannedFaceQuery, type FaceSource } from '@/api/client'
 import { HAIR_MODES, HAIR_THICKNESS, THICK_HAIR_MODES, type HairMode, type Player } from '@/api/types'
 import { THUMBNAIL_CODES, ThumbnailField, ThumbnailPicker } from '@/components/common/AppearanceThumbnails'
@@ -384,7 +385,14 @@ function AppearanceTab({ player }: { player: Player }) {
   // options of the face being looked at: shown and previewed at once, set on the player only by "use this face"
   const [browseOptions, setBrowseOptions] = useState<BrowseFaceOptions>(NEW_FACE_OPTIONS)
   const [browseHair, setBrowseHair] = useState<{ key: string; code: number } | null>(null)
+  // touching a face option shows the Face view, a body option the Body view (PlayerPreview viewRequest)
+  const [viewRequest, setViewRequest] = useState<{ view: PreviewView; seq: number }>()
+  const showView = (view: PreviewView) => setViewRequest((r) => ({ view, seq: (r?.seq ?? 0) + 1 }))
+  // with a real face the skin tone colors only the body (the face brings its own skin): it goes with the body options
+  const isBodyCode = (code: string) => BODY_CODES.includes(code) || (!player.generic && code === 'skintonecode')
+  const viewOf = (code: string): PreviewView => (isBodyCode(code) ? 'body' : 'face')
   const setBrowsing = (face: BrowsedFace | null) => {
+    if (face) showView('face')
     setBrowsingFace(face)
     if (!face) {
       setBrowseOptions(NEW_FACE_OPTIONS)
@@ -422,6 +430,7 @@ function AppearanceTab({ player }: { player: Player }) {
         hair_thickness: player.face?.hair_thickness ?? HAIR_THICKNESS.default,
       }
   const setFaceOption = (patch: Partial<BrowseFaceOptions>) => {
+    showView('face')
     if (browsing) setBrowseOptions((o) => ({ ...o, ...patch }))
     else if (player.face) updatePlayer(player.uid, { face: { ...player.face, ...patch } })
   }
@@ -456,6 +465,7 @@ function AppearanceTab({ player }: { player: Player }) {
     name: backName(player),
   })
   const set = (code: string, value: number | undefined) => {
+    showView(viewOf(code))
     const appearance = { ...player.appearance }
     if (value === undefined) delete appearance[code]
     else appearance[code] = value
@@ -473,6 +483,7 @@ function AppearanceTab({ player }: { player: Player }) {
   const thumbnailVariant = (code: string) =>
     code === 'hairtypecode' ? hairColorCode : code === 'facialhairtypecode' ? (shownPlayer.appearance.facialhaircolorcode ?? inheritedCode('facialhaircolorcode') ?? 0) : 0
   const openPicker = (code: string) => {
+    showView(viewOf(code))
     const start = lookingHairColor(code) ? hairColorCode : (player.appearance[code] ?? inheritedCode(code))
     setPicking({ code, start, value: start })
   }
@@ -485,6 +496,7 @@ function AppearanceTab({ player }: { player: Player }) {
   }
   const fieldLabel = (code: string) => t((!generic && FACE_MODE_LABELS[code]) || APPEARANCE_LABELS[code])
   const randomize = () => {
+    showView('face')
     const appearance: Record<string, number> = {}
     for (const code of ['headtypecode', 'hairtypecode', 'haircolorcode', 'skintonecode', 'facialhairtypecode', 'eyecolorcode']) {
       const list = catalog?.appearance_natural?.[code] ?? options[code] ?? []
@@ -628,9 +640,15 @@ function AppearanceTab({ player }: { player: Player }) {
             // boots: Accessories tab (one per pitch surface)
             // boots and the goalkeeper glove: Accessories tab
             .filter((code) => !['shoetypecode', 'gkglovetypecode'].includes(code) && options[code] && (generic || FACE_MODE_CODES.includes(code)))
-            .filter((code) => BODY_CODES.includes(code) === body)
+            .filter((code) => isBodyCode(code) === body)
             .map((code) => (
-              <Field key={code} label={fieldLabel(code)} entity={player.uid} field={`appearance.${code}`}>
+              <Field
+                key={code}
+                label={fieldLabel(code)}
+                entity={player.uid}
+                field={`appearance.${code}`}
+                help={code === 'bodytypecode' ? t('playerEdit.bodyTypeHint') : undefined}
+              >
                 {code === 'bodytypecode' ? (
                   <Stepper
                     value={ownBody === undefined ? undefined : bodyCode(buildOf(ownBody), playerHeight)}
@@ -657,9 +675,6 @@ function AppearanceTab({ player }: { player: Player }) {
                     onChange={(v) => set(code, v)}
                     inherited={inheritedCode(code)}
                   />
-                )}
-                {code === 'bodytypecode' && (
-                  <p className="mt-1 text-xs text-muted-foreground">{t('playerEdit.bodyTypeHint')}</p>
                 )}
               </Field>
             ))}
@@ -694,6 +709,7 @@ function AppearanceTab({ player }: { player: Player }) {
                   appearance={preview}
                   outfit={{ kind: 'team', kit }}
                   face={scanned}
+                  viewRequest={viewRequest}
                   closeUpOnly={!!draft.game_patches?.close_up_heads}
                 />
               ))}

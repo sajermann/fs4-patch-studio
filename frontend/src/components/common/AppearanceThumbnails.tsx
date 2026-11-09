@@ -8,7 +8,7 @@ import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 /** Appearance codes the game has ready pictures of (fsmod.appearance_thumbs). */
-export const THUMBNAIL_CODES = ['hairtypecode', 'haircolorcode', 'facialhairtypecode', 'facialhaircolorcode', 'eyecolorcode', 'eyebrowcode']
+export const THUMBNAIL_CODES = ['hairtypecode', 'haircolorcode', 'skintonecode', 'facialhairtypecode', 'facialhaircolorcode', 'eyecolorcode', 'eyebrowcode']
 
 const ALL = 'all'
 

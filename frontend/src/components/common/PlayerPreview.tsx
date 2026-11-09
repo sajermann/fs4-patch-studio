@@ -529,6 +529,9 @@ interface SceneProps {
 
 function Scene({ appearance, outfit, face, distance, goal, setGoal, initialView, initialScale }: SceneProps) {
   const focus = useFocus(setGoal)
+  // r3f copies the target prop into the controls on every render: a new vector each time pulled the camera back to
+  // the initial view's target whenever an option changed (e.g. a body option in the Body view aimed at the face)
+  const [initialTarget] = useState(() => presetGoal(initialView, initialScale).target)
   return (
     <>
       {/* no tone mapping (Canvas flat): the game's textures already carry their shading; ACES made it too dark */}
@@ -552,7 +555,7 @@ function Scene({ appearance, outfit, face, distance, goal, setGoal, initialView,
         {/* also in the face view: the collar hides the cut at the bottom of the neck */}
         <Body a={appearance} outfit={outfit} />
       </group>
-      <OrbitControls makeDefault target={presetGoal(initialView, initialScale).target} minDistance={0.25} maxDistance={6} />
+      <OrbitControls makeDefault target={initialTarget} minDistance={0.25} maxDistance={6} />
       <CameraRig goal={goal} />
     </>
   )
@@ -570,12 +573,16 @@ export default function PlayerPreview({
   outfit,
   face,
   initialView = 'face',
+  viewRequest,
   closeUpOnly = false,
 }: {
   appearance: PreviewAppearance
   outfit: PreviewOutfit
   face?: PreviewScannedFace | null
   initialView?: View
+  /** the editor asks for a view (seq changes on each request); the camera moves only when the view changes, so a
+   * framing the user adjusted inside the same view is kept */
+  viewRequest?: { view: View; seq: number }
   /** the game always draws the close-up head (game patch close_up_heads): no near/far choice */
   closeUpOnly?: boolean
 }) {
@@ -589,6 +596,11 @@ export default function PlayerPreview({
   const choose = (v: View) => {
     setView(v)
     setGoal(presetGoal(v, scale))
+  }
+  const [lastRequest, setLastRequest] = useState(viewRequest?.seq)
+  if (viewRequest && viewRequest.seq !== lastRequest) {
+    setLastRequest(viewRequest.seq)
+    if (viewRequest.view !== view) choose(viewRequest.view)
   }
   // the face view keeps the head framed when the height changes
   const [lastScale, setLastScale] = useState(scale)

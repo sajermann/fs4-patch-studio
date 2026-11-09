@@ -10,6 +10,9 @@ like this:
   eyecolorcode         eye_color/<code - 1>                (the creator counts 0-6, the players table 1-7)
   eyebrowcode          eyebrows/eyebrows_0_0_<code>_0      (head 0, color 0, shape 0; the creator's 18 eyebrows are these
                                                             3 kinds by 6 shapes)
+  skintonecode         headshape/head_0_<code>             (the creator's head shape pictures: a bald head in each
+                                                            skin tone; they exist for exactly the 7 tones generics use,
+                                                            2, 4, 5, 6, 8, 9 and 10, by 9 shapes)
 """
 import io
 
@@ -27,6 +30,7 @@ _NAMES = {
     'facialhaircolorcode': lambda code, variant: f'facial_hair_color/{code}',
     'eyecolorcode': lambda code, variant: f'eye_color/{code - 1}',
     'eyebrowcode': lambda code, variant: f'eyebrows/eyebrows_0_0_{code}_0',
+    'skintonecode': lambda code, variant: f'headshape/head_0_{code}',
 }
 FIELDS = tuple(_NAMES)
 
