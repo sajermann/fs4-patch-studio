@@ -11,7 +11,7 @@ import shutil
 import uuid
 from functools import cached_property
 
-from fsmod import crest, leaguelogo, photo
+from fsmod import appearance_thumbs, crest, leaguelogo, photo
 from fsmod.game import GAME_DATA, PHOTOS_FILE
 
 SOURCES = ('data1.big', PHOTOS_FILE)  # menu crests, player photos
@@ -57,6 +57,11 @@ class OriginalImages:
             entry = self.game.read_entry(leaguelogo.asset_name('flag_small', countryid))
             return leaguelogo.read_image(entry[2])[0] if entry else None
         return self._cached('flags', countryid, load)
+
+    def appearance(self, field, code, variant=0):
+        """WebP bytes of the creator's thumbnail of an appearance code (fsmod.appearance_thumbs), or None."""
+        return self._cached(f'appearance2/{field}', f'{code}_{variant}',  # 2: the crop changed
+                            lambda: appearance_thumbs.thumbnail(self.game, field, code, variant))
 
     def _cached(self, kind, item_id, load):
         path = os.path.join(self.folder, kind, f'{item_id}.webp')

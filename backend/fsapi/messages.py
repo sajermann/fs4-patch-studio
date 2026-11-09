@@ -58,7 +58,7 @@ ISSUE_TEXT = {
     'invalid_position': 'Posição inválida.',
     'unknown_skill': 'Habilidade desconhecida.',
     'unknown_field': 'Campo desconhecido.',
-    'invalid_appearance': 'Código de visual que nenhum jogador genérico do jogo usa.',
+    'invalid_appearance': 'Opção de visual que o jogo não aceita neste jogador: escolha outra na aba Visual.',
     'invalid_street_piece': 'Peça do uniforme de rua que não existe no jogo.',
     'real_kit_missing': 'Sem uniforme real neste slot: vai o uniforme genérico (cor sólida + escudo).',
     'real_kit_file_required': 'Envie a camisa e o calção (sem os dois, o slot não é usado).',

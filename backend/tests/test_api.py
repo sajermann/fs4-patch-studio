@@ -872,3 +872,16 @@ def test_generate_players_completes_the_roster_of_a_new_team(env):
     regenerated = c.post(f'/api/teams/{team}/generate-players', json=project).json()
     assert [p['last_name'] for p in regenerated] == ['01', '04']
     assert c.post('/api/teams/unknown/generate-players', json=project).status_code == 404
+
+
+def test_appearance_thumbnails(env):
+    c = env['client']
+    r = c.get('/api/originals/appearance/hairtypecode/100.webp?variant=8')
+    assert r.status_code == 200 and r.headers['content-type'] == 'image/webp'
+    assert Image.open(io.BytesIO(r.content)).size == (128, 128)
+    assert c.get('/api/originals/appearance/hairtypecode/27.webp?variant=1').status_code == 404  # the game has none
+    assert c.get('/api/originals/appearance/headtypecode/10.webp').status_code == 404  # not a field with pictures
+    catalog = c.get('/api/catalog').json()
+    assert len(catalog['appearance']['haircolorcode']) == 12
+    assert 8 not in catalog['appearance_natural']['haircolorcode']
+    assert [g['key'] for g in catalog['hair_groups']][:2] == ['afro', 'very_short']

@@ -85,6 +85,32 @@ export function ColorInput({ value, onChange }: { value: RGB; onChange: (v: RGB)
 
 /** Steps through a list of game codes. Shows only the position in the list (the raw code means nothing to the
  * user); when the value is unset it shows the position of the inherited value, marked "padrão". Fixed width (184px). */
+/** "<position>/<total>" of a value in its options; the inherited one is muted and says "default". */
+export function OptionCount({ value, options, inherited }: { value: number | undefined; options: number[]; inherited?: number | null }) {
+  const { t } = useI18n()
+  const idx = value === undefined ? -1 : options.indexOf(value)
+  const inheritedIdx = inherited === undefined || inherited === null ? -1 : options.indexOf(inherited)
+  if (value !== undefined) {
+    return (
+      <span className="tabular-nums">
+        {idx + 1}
+        <span className="text-xs text-muted-foreground">/{options.length}</span>
+      </span>
+    )
+  }
+  if (inheritedIdx >= 0) {
+    return (
+      <span className="text-muted-foreground tabular-nums">
+        {inheritedIdx + 1}
+        <span className="text-xs">
+          /{options.length} {t('common.default')}
+        </span>
+      </span>
+    )
+  }
+  return <span className="text-muted-foreground">{t('common.default')}</span>
+}
+
 export function Stepper({
   value,
   options,
@@ -101,7 +127,8 @@ export function Stepper({
   const inheritedIdx = inherited === undefined || inherited === null ? -1 : options.indexOf(inherited)
   const go = (delta: number) => {
     if (!options.length) return
-    const next = idx < 0 ? (delta > 0 ? 0 : options.length - 1) : (idx + delta + options.length) % options.length
+    const from = idx >= 0 ? idx : inheritedIdx // on a default value, the next one after it
+    const next = from < 0 ? (delta > 0 ? 0 : options.length - 1) : (from + delta + options.length) % options.length
     onChange(options[next])
   }
   return (
@@ -109,22 +136,8 @@ export function Stepper({
       <Button type="button" variant="outline" size="icon" onClick={() => go(-1)} aria-label={t('form.previous')}>
         <ChevronLeft />
       </Button>
-      <div className="w-28 rounded-md border px-2 py-1.5 text-center text-sm whitespace-nowrap tabular-nums">
-        {value !== undefined ? (
-          <>
-            {idx + 1}
-            <span className="text-xs text-muted-foreground">/{options.length}</span>
-          </>
-        ) : inheritedIdx >= 0 ? (
-          <span className="text-muted-foreground">
-            {inheritedIdx + 1}
-            <span className="text-xs">
-              /{options.length} {t('common.default')}
-            </span>
-          </span>
-        ) : (
-          <span className="text-muted-foreground">{t('common.default')}</span>
-        )}
+      <div className="w-28 min-w-0 shrink rounded-md border px-2 py-1.5 text-center text-sm whitespace-nowrap">
+        <OptionCount value={value} options={options} inherited={inherited} />
       </div>
       <Button type="button" variant="outline" size="icon" onClick={() => go(1)} aria-label={t('form.next')}>
         <ChevronRight />

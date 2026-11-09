@@ -15,6 +15,8 @@ NUMBERS = range(1, 100)  # what the roster screen accepts
 HEIGHTS = (165, 195)
 WEIGHTS = (60, 90)
 BIRTHDATES = (datetime.date(1980, 1, 1), datetime.date(1994, 12, 31))
+# bodytypecode = 3 height classes by 3 builds (lean, medium, stocky); the limits are where the game's own players change class
+SHORT_UP_TO, TALL_FROM = 170, 185
 
 
 def _taken_numbers(project, team, catalog):
@@ -30,6 +32,19 @@ def _taken_numbers(project, team, catalog):
     return taken
 
 
+def body_codes(height):
+    """The bodytypecode values that fit a height."""
+    if height <= SHORT_UP_TO:
+        return 7, 8, 9
+    return (4, 5, 6) if height >= TALL_FROM else (1, 2, 3)
+
+
+def _appearance(catalog, height, rng):
+    look = {code: rng.choice(values) for code, values in catalog.generic_appearance_options.items() if values}
+    look['bodytypecode'] = rng.choice(body_codes(height))
+    return look
+
+
 def generate(project, team, catalog, rng=random):
     """The new Players that complete the roster of a new team (uid), up to builder.MAX_ROSTER. Hidden players stay
     out of the patch, so they do not take a place."""
@@ -40,6 +55,7 @@ def generate(project, team, catalog, rng=random):
     nations = [nation['id'] for nation in catalog.nations]
     first_day, last_day = (day.toordinal() for day in BIRTHDATES)
     skills = {skill: (low + high) // 2 for skill, (low, high) in SKILLS.items()}
+    heights = [rng.randint(*HEIGHTS) for _ in numbers]
     return [Player(
         uid='u' + os.urandom(6).hex(),  # starts with a letter: an all-digit address names a game id
         first_name='Player',
@@ -47,11 +63,11 @@ def generate(project, team, catalog, rng=random):
         jersey_name=f'Player {index:02d}',  # the back of the shirt would otherwise show only the last name
         teams=[TeamLink(team=team, number=number, position=STRIKER_POSITION)],
         generic=True,
-        height=rng.randint(*HEIGHTS),
+        height=height,
         weight=rng.randint(*WEIGHTS),
         birthdate=datetime.date.fromordinal(rng.randint(first_day, last_day)).isoformat(),
         foot=rng.choice(('right', 'left')),
         skills=skills,
-        appearance={code: rng.choice(values) for code, values in catalog.appearance_options.items() if values},
+        appearance=_appearance(catalog, height, rng),
         fields={'nationality': rng.choice(nations)},
-    ) for number, index in zip(numbers, indexes)]
+    ) for number, height, index in zip(numbers, heights, indexes)]

@@ -308,6 +308,10 @@ export const originalCrestUrl = (teamid: number) => `/api/originals/crests/${tea
 export const originalLeagueImageUrl = (leagueid: number) => `/api/originals/league-images/${leagueid}.webp`
 export const originalPhotoUrl = (playerid: number) => `/api/originals/photos/${playerid}.webp`
 
+/** The game's picture of a generic appearance code (variant: the color of a hair or beard style). */
+export const appearanceThumbUrl = (field: string, code: number, variant = 0) =>
+  `/api/originals/appearance/${field}/${code}.webp?variant=${variant}&v=2` // v: new pictures past the browser's cache
+
 /** List picture of one of the game's boots. */
 export const originalBootThumbUrl = (code: number) => `/api/originals/boots/${code}.webp`
 

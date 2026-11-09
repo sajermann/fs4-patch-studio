@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Copy, DatabaseZap, Dices, Eraser, Info, LoaderCircle, RotateCcw, Trash2, User } from 'lucide-react'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError, photoPreviewUrl, scannedFaceQuery, type FaceSource } from '@/api/client'
 import { HAIR_MODES, HAIR_THICKNESS, THICK_HAIR_MODES, type HairMode, type Player } from '@/api/types'
+import { THUMBNAIL_CODES, ThumbnailField, ThumbnailPicker } from '@/components/common/AppearanceThumbnails'
 import { BaseDataDialog } from '@/components/common/BaseDataDialog'
 import { FacePicker, type BrowsedFace } from '@/components/common/FacePicker'
 import { EntityIssues, Field, NumberInput, OriginalBadge, Stepper } from '@/components/common/form'
@@ -47,6 +48,10 @@ import { useCatalog, useLookups, useStatus } from '@/state/queries'
 const PlayerPreview = lazy(() => import('@/components/common/PlayerPreview'))
 
 const NONE = 'none'
+// the Visual card's second group; the rest of its fields are the face
+const BODY_CODES = ['bodytypecode', 'jerseysleevelengthcode', 'socklengthcode']
+const LOOK_MIN_HEIGHT = 360
+const LOOK_BOTTOM_GAP = 16
 // codes that still matter with a real face: the scalp hair color (painted by the converter), the body skin and the body
 const FACE_MODE_CODES = ['haircolorcode', 'skintonecode', 'bodytypecode', 'shoetypecode', 'gkglovetypecode', 'jerseysleevelengthcode', 'socklengthcode']
 const FACE_MODE_LABELS: Record<string, MessageKey> = { haircolorcode: 'playerEdit.faceHairColor', skintonecode: 'playerEdit.faceSkinTone' }
@@ -346,13 +351,34 @@ function HairThickness({ value, onCommit }: { value: number; onCommit: (v: numbe
   )
 }
 
+/** Height that takes an element from where it starts to the end of the viewport (a small gap below it). */
+function useHeightToViewportEnd() {
+  const ref = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState<number>()
+  useLayoutEffect(() => {
+    const measure = () => {
+      if (ref.current) setHeight(Math.max(LOOK_MIN_HEIGHT, window.innerHeight - ref.current.getBoundingClientRect().top - LOOK_BOTTOM_GAP))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [])
+  return { ref, height }
+}
+
 function AppearanceTab({ player }: { player: Player }) {
   const { t } = useI18n()
   const { draft, updatePlayer } = useProject()
   const catalog = useCatalog().data
   const options = catalog?.appearance ?? {}
   const defaults = usePlayerDefaults(player.uid)
-  const preview = previewAppearance(player, defaults, catalog, draft.boots, draft.gloves)
+  // the pictures of a code in place of this card: the clicked one shows in the preview until Apply or Cancel
+  const [picking, setPicking] = useState<{ code: string; start: number | undefined; value: number | undefined } | null>(null)
+  useEffect(() => setPicking(null), [player.uid])
+  // a player with no team has no template player to inherit from: he stays on the first option, as the preview shows him
+  const inheritedCode = (code: string): number | undefined => defaults?.appearance[code] ?? options[code]?.[0]
+  const shownPlayer = picking?.value === undefined ? player : { ...player, appearance: { ...player.appearance, [picking.code]: picking.value } }
+  const preview = previewAppearance(shownPlayer, defaults, catalog, draft.boots, draft.gloves)
   const [browsing, setBrowsingFace] = useState<BrowsedFace | null>(null)
   // options of the face being looked at: shown and previewed at once, set on the player only by "use this face"
   const [browseOptions, setBrowseOptions] = useState<BrowseFaceOptions>(NEW_FACE_OPTIONS)
@@ -366,7 +392,7 @@ function AppearanceTab({ player }: { player: Player }) {
   }
   const generic = player.generic
   // the converter paints the scalp with the player's hair color (fsmod.scanface)
-  const playerHairColor = player.appearance.haircolorcode ?? defaults?.appearance.haircolorcode ?? options.haircolorcode?.[0] ?? 0
+  const playerHairColor = shownPlayer.appearance.haircolorcode ?? inheritedCode('haircolorcode') ?? 0
   const faceSource: FaceSource | null = browsing
     ? { folder: browsing.folder, face: browsing.face.id }
     : !generic && player.face
@@ -386,7 +412,7 @@ function AppearanceTab({ player }: { player: Player }) {
       ? browseHair.code
       : (hairSuggestion.data?.haircolorcode ?? undefined)
     : undefined
-  const hairColorCode = browseHairColor ?? playerHairColor
+  const hairColorCode = (picking?.code === 'haircolorcode' ? picking.value : undefined) ?? browseHairColor ?? playerHairColor
   const faceOptions: BrowseFaceOptions = browsing
     ? browseOptions
     : {
@@ -434,10 +460,27 @@ function AppearanceTab({ player }: { player: Player }) {
     else appearance[code] = value
     updatePlayer(player.uid, { appearance })
   }
+  const lookCard = useHeightToViewportEnd()
+  const lookingHairColor = (code: string) => !!browsing && code === 'haircolorcode'
+  // hair and beard pictures come in the color the player has
+  const thumbnailVariant = (code: string) =>
+    code === 'hairtypecode' ? hairColorCode : code === 'facialhairtypecode' ? (shownPlayer.appearance.facialhaircolorcode ?? inheritedCode('facialhaircolorcode') ?? 0) : 0
+  const openPicker = (code: string) => {
+    const start = lookingHairColor(code) ? hairColorCode : (player.appearance[code] ?? inheritedCode(code))
+    setPicking({ code, start, value: start })
+  }
+  const applyPick = () => {
+    if (!picking) return
+    if (lookingHairColor(picking.code)) {
+      if (picking.value !== undefined) setBrowseHair({ key: browseKey, code: picking.value })
+    } else set(picking.code, picking.value)
+    setPicking(null)
+  }
+  const fieldLabel = (code: string) => t((!generic && FACE_MODE_LABELS[code]) || APPEARANCE_LABELS[code])
   const randomize = () => {
     const appearance: Record<string, number> = {}
     for (const code of ['headtypecode', 'hairtypecode', 'haircolorcode', 'skintonecode', 'facialhairtypecode', 'eyecolorcode']) {
-      const list = options[code] ?? []
+      const list = catalog?.appearance_natural?.[code] ?? options[code] ?? []
       if (list.length) appearance[code] = list[Math.floor(Math.random() * list.length)]
     }
     updatePlayer(player.uid, { appearance: { ...player.appearance, ...appearance } })
@@ -445,7 +488,28 @@ function AppearanceTab({ player }: { player: Player }) {
 
   return (
     <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
-      <Card className="order-3 w-fit max-w-full xl:order-1 xl:max-w-[26rem] xl:shrink-0">
+      <div
+        ref={lookCard.ref}
+        style={{ '--look-height': `${lookCard.height}px` } as CSSProperties}
+        className="order-3 w-[420px] max-w-full xl:order-1 xl:h-(--look-height) xl:shrink-0"
+      >
+      <Card className="h-full">
+        {picking ? (
+          <ThumbnailPicker
+            key={picking.code}
+            code={picking.code}
+            title={fieldLabel(picking.code)}
+            options={options[picking.code] ?? []}
+            groups={picking.code === 'hairtypecode' ? catalog?.hair_groups.map((g) => ({ ...g, label: t(`playerEdit.hairGroup.${g.key}`) })) : undefined}
+            value={picking.value}
+            variant={thumbnailVariant(picking.code)}
+            changed={picking.value !== picking.start}
+            onSelect={(value) => setPicking({ ...picking, value })}
+            onApply={applyPick}
+            onCancel={() => setPicking(null)}
+          />
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col gap-(--card-spacing) overflow-y-auto">
         <CardHeader>
           <CardTitle>{t('playerEdit.tabLook')}</CardTitle>
           <div className="flex w-fit rounded-md border p-0.5 text-sm">
@@ -547,27 +611,35 @@ function AppearanceTab({ player }: { player: Player }) {
             )}
           </CardContent>
         )}
-        <CardContent className="grid gap-x-6 gap-y-4 sm:grid-cols-[repeat(2,11.5rem)]">
+        {[
+          { title: t('playerEdit.lookGroupFace'), body: false },
+          { title: t('playerEdit.lookGroupBody'), body: true },
+        ].map(({ title, body }) => (
+        <CardContent key={title} className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
+          <h3 className="border-b pb-1 text-sm font-semibold text-muted-foreground sm:col-span-2">{title}</h3>
           {Object.keys(APPEARANCE_LABELS)
             // boots: Accessories tab (one per pitch surface)
             // boots and the goalkeeper glove: Accessories tab
             .filter((code) => !['shoetypecode', 'gkglovetypecode'].includes(code) && options[code] && (generic || FACE_MODE_CODES.includes(code)))
+            .filter((code) => BODY_CODES.includes(code) === body)
             .map((code) => (
-              <Field key={code} label={t((!generic && FACE_MODE_LABELS[code]) || APPEARANCE_LABELS[code])} entity={player.uid} field={`appearance.${code}`}>
-                {/* looking at a real face: its hair color is kept here until "use this face" */}
-                {browsing && code === 'haircolorcode' ? (
-                  <Stepper
-                    value={hairColorCode}
+              <Field key={code} label={fieldLabel(code)} entity={player.uid} field={`appearance.${code}`}>
+                {THUMBNAIL_CODES.includes(code) ? (
+                  <ThumbnailField
+                    code={code}
+                    /* looking at a real face: its hair color is kept here until "use this face" */
+                    value={lookingHairColor(code) ? hairColorCode : player.appearance[code]}
+                    inherited={lookingHairColor(code) ? (hairSuggestion.data?.haircolorcode ?? undefined) : inheritedCode(code)}
                     options={options[code]}
-                    onChange={(v) => (v === undefined ? setBrowseHair(null) : setBrowseHair({ key: browseKey, code: v }))}
-                    inherited={hairSuggestion.data?.haircolorcode ?? undefined}
+                    variant={thumbnailVariant(code)}
+                    onOpen={() => openPicker(code)}
                   />
                 ) : (
                   <Stepper
                     value={player.appearance[code]}
                     options={options[code]}
                     onChange={(v) => set(code, v)}
-                    inherited={defaults?.appearance[code]}
+                    inherited={inheritedCode(code)}
                   />
                 )}
                 {code === 'bodytypecode' && (
@@ -579,7 +651,11 @@ function AppearanceTab({ player }: { player: Player }) {
               </Field>
             ))}
         </CardContent>
+        ))}
+          </div>
+        )}
       </Card>
+      </div>
       {/* the 3D preview takes all the free width, pushing the reference photo to the right */}
       <Card className="order-1 h-fit min-w-0 flex-1 gap-2 overflow-hidden py-0 xl:sticky xl:top-4 xl:order-2">
         <div className="aspect-[3/4] max-h-[75vh] w-full bg-gradient-to-b from-muted to-background">

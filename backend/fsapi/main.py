@@ -27,7 +27,7 @@ from .faces import FaceError, FaceService
 from .original_images import OriginalImages
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
 from .project_store import BackupError, ProjectFileError, ProjectStore, file_slug, migrate_folder
-from fsmod import (balls, boots, builder, gloves, kit, kitprint, model, original_league, original_player, original_team, photo,
+from fsmod import (appearance_thumbs, balls, boots, builder, gloves, kit, kitprint, model, original_league, original_player, original_team, photo,
                    player_generator, preview, scanface, validation)
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
@@ -432,12 +432,24 @@ def create_app(state=None):
             raise HTTPException(404)
         return Response(data, media_type='image/webp', headers=ORIGINAL_IMAGE_CACHE)
 
+    @app.get('/api/originals/appearance/{field}/{code}.webp')
+    def original_appearance_image(field: str, code: int, variant: int = 0):
+        """The game's thumbnail of a generic appearance code (variant: color of a hair or beard style); 404 when it has none."""
+        state.catalog()
+        data = state.original_images.appearance(field, code, variant) if field in appearance_thumbs.FIELDS else None
+        if data is None:
+            raise HTTPException(404)
+        return Response(data, media_type='image/webp', headers=ORIGINAL_IMAGE_CACHE)
+
     # ---------------------------------------------------------------- valid values
     @app.get('/api/catalog')
     def catalog():
         c = state.catalog()
         return {'positions': c.positions,
                 'nations': c.nations, 'appearance': c.appearance_options,
+                # what the "randomize" button draws from: no green hair
+                'appearance_natural': {f: c.generic_appearance_options[f] for f in ('hairtypecode', 'haircolorcode')},
+                'hair_groups': c.hair_groups,
                 'skills': {k: {'min': lo, 'max': hi} for k, (lo, hi) in SKILLS.items()},
                 'template_teams': [t for t in c.teams if t['generic']],
                 'max_roster': builder.MAX_ROSTER,
@@ -1041,7 +1053,7 @@ def create_app(state=None):
         the player when a real face is looked at (the scalp paint uses the player's hair color)."""
         if not (folder or player):
             raise HTTPException(404)
-        codes = state.catalog().appearance_options['haircolorcode']
+        codes = state.catalog().generic_appearance_options['haircolorcode']
         _, files = faces_call(state.faces.source_files, folder, face, state.store.folder, player)
         try:
             rgb = scanface.hair_rgb(files)

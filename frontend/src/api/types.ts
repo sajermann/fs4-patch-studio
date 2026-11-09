@@ -495,10 +495,14 @@ export interface OriginalPlayer {
   appearance: Record<string, number>
 }
 
+export type HairGroupKey = 'afro' | 'very_short' | 'short' | 'medium' | 'long' | 'helmets' | 'other'
+
 export interface Catalog {
   positions: { code: number; abbr: string }[]
   nations: { id: number; name: string }[]
   appearance: Record<string, number[]>
+  appearance_natural: Record<string, number[]> // what "randomize" draws from where it differs: no green hair
+  hair_groups: { key: HairGroupKey; codes: number[] }[] // the game's hair categories
   skills: Record<string, { min: number; max: number }>
   template_teams: OriginalTeam[]
   max_roster: number

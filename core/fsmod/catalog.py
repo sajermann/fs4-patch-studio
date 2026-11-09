@@ -24,6 +24,19 @@ APPEARANCE_FIELDS = ('headtypecode', 'hairtypecode', 'haircolorcode', 'skintonec
                      'turf_shoe', 'indoor_shoe')
 FREE_AGENTS_TEAM = 111592
 STADIUM_NO_TIME = 5  # stadiums.timeofday1-4: an empty slot
+MAX_HAIR_CODE = 127  # players.hairtypecode has 7 bits; only createplayer's hair style (9 bits) reaches the hairs above it
+# The game's own hair categories (CreatePlayerHairLength_<n>; lists in the code of the player creator, 128 hairs).
+# Hair 27 is in none of them: some generic players use it, the creator does not offer it.
+HAIR_GROUPS = {
+    'afro': (1, 2, 3, 4, 5, 6, 28, 45, 46, 47, 60, 71, 82, 96, 97, 109, 110, 203, 303, 308, 311, 313),
+    'very_short': (0, 25, 26, 29, 41, 43, 304),
+    'short': (16, 17, 18, 19, 21, 22, 23, 24, 31, 36, 37, 38, 39, 40, 54, 61, 64, 65, 69, 70, 72, 75, 77, 78, 85, 86, 88, 90,
+              92, 93, 94, 100, 101, 102, 104, 105, 106, 107, 111, 302, 306, 312),
+    'medium': (13, 14, 15, 20, 30, 35, 42, 44, 52, 55, 57, 58, 59, 62, 63, 66, 67, 74, 76, 81, 83, 87, 89, 95, 98, 99, 103,
+               108, 112, 307, 315),
+    'long': (7, 8, 9, 10, 11, 12, 32, 33, 34, 48, 49, 51, 53, 56, 68, 73, 79, 80, 84, 91, 300, 301, 305, 314),
+    'helmets': (50, 213),
+}
 
 
 def _days_to_iso(days):
@@ -259,7 +272,29 @@ class Catalog:
 
     @cached_property
     def appearance_options(self):
-        """{field: sorted values} used by the game's generic players (values known to render)."""
+        """{field: sorted values} a generic player may have: what the game's generic players use, plus the hair colors
+        (player.lua) and the hairs with files that none of them uses."""
+        out = dict(self.generic_appearance_options)
+        out['haircolorcode'] = list(range(len(preview.HAIR_COLORS)))
+        out['hairtypecode'] = sorted({*out['hairtypecode'], *(
+            code for code in range(MAX_HAIR_CODE + 1)
+            if self.game.locate(f'data/sceneassets/hair/hair_{code}_1_0.rx3')
+            and self.game.locate(f'data/sceneassets/hair/hair_{code}_1_textures.rx3'))})
+        return out
+
+    @cached_property
+    def hair_groups(self):
+        """[{key, codes}]: the hairs on offer by the game's categories, in its order; 'other' = the ones in none."""
+        options = self.appearance_options['hairtypecode']
+        known = {code for codes in HAIR_GROUPS.values() for code in codes}
+        groups = {**{key: [c for c in options if c in codes] for key, codes in HAIR_GROUPS.items()},
+                  'other': [c for c in options if c not in known]}
+        return [{'key': key, 'codes': codes} for key, codes in groups.items() if codes]
+
+    @cached_property
+    def generic_appearance_options(self):
+        """{field: sorted values} used by the game's generic players: the natural looks, for random picks and
+        suggestions (no green hair)."""
         t = self.db.table('players')
         generic = [r for r in t.records if self.db.get(t, r, 'headclasscode') == 1]
         out = {f: sorted({self.db.get(t, r, f) for r in generic}) for f in APPEARANCE_FIELDS}
