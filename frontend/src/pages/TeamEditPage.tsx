@@ -1,3 +1,5 @@
+import { teamKey, teamPath } from '@/lib/players'
+import { EntryDates } from '@/components/common/dates'
 import { Copy, Loader2, RotateCcw, Trash2, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -5,6 +7,7 @@ import { toast } from 'sonner'
 import { ApiError, api, imageUrl, kitPreviewUrl } from '@/api/client'
 import type { KitKind, KitPart, RGB, Team } from '@/api/types'
 import { ColorInput, EntityIssues, Field, FieldIssues, OriginalBadge } from '@/components/common/form'
+import { ShareDownloadButton, ShareSingleImport } from '@/components/common/share'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { LineupEditor, type LineupPlayer } from '@/components/common/LineupEditor'
 import { RosterCard } from '@/components/common/Roster'
@@ -33,7 +36,7 @@ import { useCopy } from '@/lib/copy'
 import { KIT_LABELS, KIT_PART_LABELS } from '@/lib/labels'
 import { fullKit } from '@/lib/teams'
 import { cn } from '@/lib/utils'
-import { useIssues, useProject, useWasEdited } from '@/state/project'
+import { useIssues, useProject, useSameAsGame, useWasEdited } from '@/state/project'
 
 function DataTab({ team }: { team: Team }) {
   const { t } = useI18n()
@@ -236,6 +239,7 @@ export function TeamEditPage() {
   const tabs = useTabParam('data')
   const original = team?.original_id != null
   const edited = useWasEdited(uid, team?.original_id)
+  const sameAsGame = useSameAsGame()
 
   const copyTeam = async (withRoster: boolean) => {
     setCopyOpen(false)
@@ -268,13 +272,18 @@ export function TeamEditPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {team.crest && <img src={imageUrl(team.crest)} alt="" className="size-10 object-contain" />}
-          <h1 className="text-2xl font-semibold">{team.name || t('teams.new')}</h1>
+          <div>
+            <h1 className="text-2xl font-semibold">{team.name || t('teams.new')}</h1>
+            <EntryDates entry={team} />
+          </div>
           {original && <OriginalBadge entry={team.uid} team={team.original_id} />}
           {!original && team.hidden && <OutOfPatchBadge alert />}
           {!original && !team.hidden && leagueHidden && <OutOfPatchBadge alert label={t('teams.leagueOutOfPatch')} />}
           <EntityIssues uid={team.uid} />
         </div>
         <div className="flex gap-2">
+          <ShareSingleImport kind="teams" entry={team} pathOf={(e) => teamPath(teamKey(e as Team))} />
+          <ShareDownloadButton kind="teams" uid={team.uid} unchanged={sameAsGame(team.uid)} />
           {!original && (
             <HideButton
               variant="outline"

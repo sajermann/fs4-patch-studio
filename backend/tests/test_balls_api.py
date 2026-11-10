@@ -88,13 +88,14 @@ def test_shared_zip_round_trip(lenient):
     z = zipfile.ZipFile(io.BytesIO(r.content))
     assert sorted(z.namelist()) == ['ball-a1.png', 'ball-a1.rx3', 'ball-a1_textures.rx3', 'manifest.json']
     assert json.loads(z.read('manifest.json')) == {'type': 'fs4-ball', 'version': 1, 'ball': {
-        'name': 'Brazuca', 'credits': 'modder', 'hidden': False, 'mesh': 'ball-a1.rx3',
-        'texture': 'ball-a1_textures.rx3', 'thumbnail': 'ball-a1.png'}}
+        'uid': 'a1', 'original_id': None, 'name': 'Brazuca', 'credits': 'modder', 'hidden': False, 'mesh': 'ball-a1.rx3',
+        'texture': 'ball-a1_textures.rx3', 'thumbnail': 'ball-a1.png',
+        'created_at': saved['balls'][0]['created_at'], 'updated_at': saved['balls'][0]['updated_at']}}
     assert z.read('ball-a1.rx3') == (folder / saved['balls'][0]['mesh']).read_bytes()
     body = client.post('/api/balls/import', files={'file': ('b.zip', r.content, 'application/zip')}).json()
     assert body['kind'] == 'one' and body['problems'] == []
     back = body['balls'][0]
-    assert back['uid'] not in ('a1', 'a2') and back['name'] == 'Brazuca' and back['mesh'] and back['texture']
+    assert back['uid'] == 'a1' and back['name'] == 'Brazuca' and back['mesh'] and back['texture']
     many = client.post('/api/balls/export', json={'uids': ['a1', 'a2']})
     manifest = json.loads(zipfile.ZipFile(io.BytesIO(many.content)).read('manifest.json'))
     assert manifest['type'] == 'fs4-balls' and [b['name'] for b in manifest['balls']] == ['Brazuca', 'Jabulani']

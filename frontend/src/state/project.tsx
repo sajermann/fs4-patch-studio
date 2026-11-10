@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api, bumpProjectImagesRevision } from '@/api/client'
+import { toast } from 'sonner'
+import { ApiError, api, bumpProjectImagesRevision } from '@/api/client'
 import { LoadError } from '@/components/layout/LoadError'
 import { useI18n } from '@/i18n'
 import { withFittedBody } from '@/lib/body'
@@ -8,7 +9,7 @@ import { lineupsWithout, takersWithout } from '@/lib/lineup'
 import { linkOf, teamsWithout } from '@/lib/players'
 import type { Ball, Boot, Glove, Issue, League, OriginalSquadLink, Player, PlayerDefaults, Project, Team } from '@/api/types'
 
-const EMPTY: Project = { version: 8, leagues: [], teams: [], players: [], boots: [], gloves: [], balls: [] }
+const EMPTY: Project = { version: 9, leagues: [], teams: [], players: [], boots: [], gloves: [], balls: [] }
 const VALIDATE_DELAY_MS = 400
 
 /** A new entry's uid: starts with a letter (never all digits, the addresses of the game's teams/players). */
@@ -31,6 +32,8 @@ interface ProjectContextValue {
   /** uids of original leagues/teams/players opened from the game but not changed: in `draft` for the pages, out of the
    * project (not saved, not validated, not "unsaved changes") until something of theirs changes */
   opened: Set<string>
+  /** uids of the entries saved in the project (an entry not in it is still being created) */
+  savedUids: Set<string>
   saving: boolean
   setDraft: (update: (p: Project) => Project) => void
   updateLeague: (uid: string, patch: Partial<League>) => void
@@ -71,6 +74,8 @@ interface ProjectContextValue {
    * row's `original` ball: kept only when it differs) */
   setStadiumBalls: (rows: { id: number; original: number }[], ball: string | number | null) => void
   save: () => Promise<void>
+  /** saves once the draft has the change just made (the next render): for changes made right before leaving the page */
+  requestSave: () => void
   discard: () => void
 }
 
@@ -208,6 +213,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [query.data])
 
   const dirty = useMemo(() => JSON.stringify(draft) !== saved, [draft, saved])
+  const savedUids = useMemo(() => {
+    const p = JSON.parse(saved) as Project
+    return new Set([p.leagues, p.teams, p.players, p.boots ?? [], p.gloves ?? [], p.balls ?? []].flatMap((l) => l.map((e) => e.uid)))
+  }, [saved])
 
   // live validation of the draft (debounced; the latest answer wins)
   useEffect(() => {
@@ -280,6 +289,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
   }, [draft, queryClient])
 
+  // requestSave: the provider outlives the page that asked (it may open another address right after)
+  const [saveRequested, setSaveRequested] = useState(false)
+  useEffect(() => {
+    if (!saveRequested) return
+    setSaveRequested(false)
+    save().catch((e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')))
+  }, [saveRequested, save, t])
+
   const value = useMemo<ProjectContextValue>(
     () => ({
       loaded: !!query.data,
@@ -291,6 +308,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       changedSquads,
       changedLeagues,
       opened: openedUids,
+      savedUids,
       saving,
       setDraft,
       updateLeague: (uid, patch) => setDraft((p) => ({ ...p, leagues: replace(p.leagues, uid, patch) })),
@@ -335,7 +353,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
             ? s
             : { ...s, opened: { ...s.opened, players: [...s.opened.players, entry.player] } }
         }),
-      removeLeague: (uid) => setDraft((p) => ({ ...p, leagues: p.leagues.filter((l) => l.uid !== uid) })),
+      // deleting a new league takes it off its teams first (a team left with no league stays out of the patch)
+      removeLeague: (uid) =>
+        setDraft((p) => ({
+          ...p,
+          leagues: p.leagues.filter((l) => l.uid !== uid),
+          teams: p.teams.map((t) => (t.leagues.includes(uid) ? { ...t, leagues: t.leagues.filter((l) => l !== uid) } : t)),
+        })),
       // removing a new team takes it out of its players' teams (they are not deleted); restoring an edited original
       // team (squad = the game's, GET /api/originals/teams/{id}/squad) also puts its squad back: who left returns
       // with the game's number and position (keeping his other teams), who joined leaves
@@ -406,6 +430,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           return { ...p, originals: { ...p.originals, stadium_balls: next } }
         }),
       save,
+      requestSave: () => setSaveRequested(true),
       discard: () => {
         setDraftState(JSON.parse(saved))
         if (query.data) {
@@ -418,7 +443,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [query.data, view, dirty, issues, defaults, untouched, changedSquads, changedLeagues, openedUids, saving, setDraft, setDraftState, save, saved],
+    [query.data, view, dirty, issues, defaults, untouched, changedSquads, changedLeagues, openedUids, savedUids, saving, setDraft, setDraftState, save, saved],
   )
 
   if (query.error) {

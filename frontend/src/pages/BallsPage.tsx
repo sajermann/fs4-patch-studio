@@ -1,5 +1,7 @@
-import { Download, FileUp, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { ZipImportButton } from '@/components/common/share'
+import { DateCells, DateHeads } from '@/components/common/dates'
+import { Download, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError, api, saveBlob } from '@/api/client'
@@ -48,14 +50,6 @@ export function BallsPage() {
   const [askAll, setAskAll] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [busy, setBusy] = useState(false)
-  const fileInput = useRef<HTMLInputElement>(null)
-  // imported balls are saved right away, once the draft has them (the next render's save)
-  const [saveSoon, setSaveSoon] = useState(false)
-  useEffect(() => {
-    if (!saveSoon) return
-    setSaveSoon(false)
-    save().catch((e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')))
-  }, [saveSoon, save, t])
 
   const gameName = (b: OriginalBall) => gameBallName(b, b.id, (id) => t('balls.gameName', { id }))
   const using = (b: Ball | { original_id: number }) => stadiumsUsing(draft, stadiums, b)
@@ -104,30 +98,6 @@ export function BallsPage() {
     navigate(ballPath(uid), from)
   }
 
-  const importZip = async (file: File) => {
-    setBusy(true)
-    try {
-      const r = await api.importBalls(file)
-      const admitted = admitImported(r.balls, slots.free)
-      addBalls(admitted)
-      const out = admitted.filter((b, k) => b.hidden && !r.balls[k].hidden).length
-      toast.success(t('balls.imported', { count: admitted.length }), {
-        description: [
-          out ? t('balls.importedOut', { count: out }) : '',
-          r.problems.length ? t('balls.importedProblems', { count: r.problems.length }) : '',
-        ]
-          .filter(Boolean)
-          .join(' '),
-      })
-      r.problems.forEach((p) => toast.warning(`${p.name || t('common.unnamed')}: ${p.message}`))
-      setSaveSoon(true)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('balls.importFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const download = async () => {
     const exportable = picked.filter((b) => b.original_id == null || (b.mesh && b.texture))
     if (exportable.length < picked.length) toast.warning(t('balls.downloadSkipsGame', { count: picked.length - exportable.length }))
@@ -161,20 +131,17 @@ export function BallsPage() {
           <Badge variant={slots.free ? 'secondary' : 'destructive'} className="font-normal" title={t('balls.slotsHint', { total: slots.total })}>
             {t('balls.slots', { used: slots.used, total: slots.total })}
           </Badge>
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".zip,application/zip"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              e.target.value = ''
-              if (file) void importZip(file)
+          <ZipImportButton
+            kind="balls"
+            read={async (file) => {
+              const r = await api.importBalls(file)
+              return { items: r.balls, problems: r.problems }
             }}
+            // an entry it replaces gives its code back
+            admit={(items, replaced) => admitImported(items as Ball[], slots.free + replaced.filter((b) => !(b as Ball).hidden && (b as Ball).original_id == null).length)}
+            label={t('balls.importMany')}
+            hint={t('balls.importManyHint')}
           />
-          <Button variant="outline" disabled={busy} title={t('balls.importManyHint')} onClick={() => fileInput.current?.click()}>
-            <FileUp /> {t('balls.importMany')}
-          </Button>
           <Button onClick={create}>
             <Plus /> {t('balls.new')}
           </Button>
@@ -231,13 +198,14 @@ export function BallsPage() {
             <TableHead>{t('balls.colCredits')}</TableHead>
             <TableHead>{t('balls.colStadiums')}</TableHead>
             <TableHead>{t('balls.colId')}</TableHead>
+            <DateHeads />
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {page.total === 0 && (
             <TableRow>
-              <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+              <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
                 {originalsQuery.error
                   ? t('balls.originalsFailed', { error: originalsQuery.error.message })
                   : originals === undefined
@@ -265,6 +233,7 @@ export function BallsPage() {
                     {users || '—'}
                   </TableCell>
                   <TableCell className="tabular-nums">{b.id}</TableCell>
+                  <DateCells />
                   <TableCell />
                 </TableRow>
               )
@@ -290,6 +259,7 @@ export function BallsPage() {
                   {users || '—'}
                 </TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">{b.original_id ?? b.code ?? t('common.auto')}</TableCell>
+                <DateCells entry={b} />
                 <TableCell>
                   <span className="flex items-center gap-1">
                     <EntityIssues uid={b.uid} />

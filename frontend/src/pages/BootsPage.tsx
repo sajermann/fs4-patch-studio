@@ -1,5 +1,7 @@
-import { Download, FileUp, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { ZipImportButton } from '@/components/common/share'
+import { DateCells, DateHeads } from '@/components/common/dates'
+import { Download, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError, api, saveBlob } from '@/api/client'
@@ -48,14 +50,6 @@ export function BootsPage() {
   const [askAll, setAskAll] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [busy, setBusy] = useState(false)
-  const fileInput = useRef<HTMLInputElement>(null)
-  // imported boots are saved right away, once the draft has them (the next render's save)
-  const [saveSoon, setSaveSoon] = useState(false)
-  useEffect(() => {
-    if (!saveSoon) return
-    setSaveSoon(false)
-    save().catch((e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')))
-  }, [saveSoon, save, t])
 
   // the game's boots edited in the project show once, as their entry; ones only opened list as the game's
   const mine = (draft.boots ?? []).filter((b) => !sameAsGame(b.uid))
@@ -99,30 +93,6 @@ export function BootsPage() {
     navigate(bootPath(uid), from)
   }
 
-  const importZip = async (file: File) => {
-    setBusy(true)
-    try {
-      const r = await api.importBoots(file)
-      const admitted = admitImported(r.boots, slots.free)
-      addBoots(admitted)
-      const out = admitted.filter((b, k) => b.hidden && !r.boots[k].hidden).length
-      toast.success(t('boots.imported', { count: admitted.length }), {
-        description: [
-          out ? t('boots.importedOut', { count: out }) : '',
-          r.problems.length ? t('boots.importedProblems', { count: r.problems.length }) : '',
-        ]
-          .filter(Boolean)
-          .join(' '),
-      })
-      r.problems.forEach((p) => toast.warning(`${p.name || t('common.unnamed')}: ${p.message}`))
-      setSaveSoon(true)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('boots.importFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const download = async () => {
     const exportable = picked.filter((b) => b.original_id == null || (b.mesh && b.texture))
     if (exportable.length < picked.length) toast.warning(t('boots.downloadSkipsGame', { count: picked.length - exportable.length }))
@@ -155,20 +125,17 @@ export function BootsPage() {
           <Badge variant={slots.free ? 'secondary' : 'destructive'} className="font-normal" title={t('boots.streetSlotsHint')}>
             {t('boots.streetSlots', { used: slots.used, total: slots.total })}
           </Badge>
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".zip,application/zip"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              e.target.value = ''
-              if (file) void importZip(file)
+          <ZipImportButton
+            kind="boots"
+            read={async (file) => {
+              const r = await api.importBoots(file)
+              return { items: r.boots, problems: r.problems }
             }}
+            // an entry it replaces gives its code back
+            admit={(items, replaced) => admitImported(items as Boot[], slots.free + replaced.filter((b) => !!(b as Boot).street && !(b as Boot).hidden && (b as Boot).original_id == null).length)}
+            label={t('boots.importMany')}
+            hint={t('boots.importManyHint')}
           />
-          <Button variant="outline" disabled={busy} title={t('boots.importManyHint')} onClick={() => fileInput.current?.click()}>
-            <FileUp /> {t('boots.importMany')}
-          </Button>
           <Button onClick={create}>
             <Plus /> {t('boots.new')}
           </Button>
@@ -236,13 +203,14 @@ export function BootsPage() {
             <TableHead>{t('boots.colStreet')}</TableHead>
             <TableHead>{t('boots.colWearers')}</TableHead>
             <TableHead>{t('boots.colCode')}</TableHead>
+            <DateHeads />
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {page.total === 0 && (
             <TableRow>
-              <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+              <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                 {originalsQuery.error
                   ? t('boots.originalsFailed', { error: originalsQuery.error.message })
                   : originals === undefined
@@ -270,6 +238,7 @@ export function BootsPage() {
                     {b.players}
                   </TableCell>
                   <TableCell className="tabular-nums">{b.code}</TableCell>
+                  <DateCells />
                   <TableCell />
                 </TableRow>
               )
@@ -296,6 +265,7 @@ export function BootsPage() {
                 </TableCell>
                 <TableCell className="tabular-nums">{users || '—'}</TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">{b.original_id ?? b.code ?? t('common.auto')}</TableCell>
+                <DateCells entry={b} />
                 <TableCell>
                   <span className="flex items-center gap-1">
                     <EntityIssues uid={b.uid} />

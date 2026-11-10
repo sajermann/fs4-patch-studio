@@ -1,4 +1,6 @@
-import { Download, FileUp, ImageOff, LoaderCircle, RotateCcw, Trash2, Upload, Undo2, X } from 'lucide-react'
+import { SingleZipImport } from '@/components/common/share'
+import { EntryDates } from '@/components/common/dates'
+import { Download, ImageOff, LoaderCircle, RotateCcw, Trash2, Upload, Undo2, X } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -24,7 +26,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useI18n } from '@/i18n'
 import { BackButton, useBack, useFrom, useGoBack } from '@/lib/back'
-import { ballName, gameBallName, REGION_LABELS, stadiumsUsing, useBallSlots } from '@/lib/balls'
+import { admitImported, ballKey, ballName, ballPath, gameBallName, REGION_LABELS, stadiumsUsing, useBallSlots } from '@/lib/balls'
 import { keyOfPath } from '@/lib/players'
 import { stadiumPath } from '@/lib/stadiums'
 import { newUid, useIssues, useProject, useWasEdited } from '@/state/project'
@@ -131,7 +133,6 @@ export function BallEditPage() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [takingOff, setTakingOff] = useState<number[] | null>(null) // stadium rows to take the ball off, asking first
   const [busy, setBusy] = useState(false)
-  const zipInput = useRef<HTMLInputElement>(null)
 
   if (!ball) {
     return (
@@ -173,25 +174,6 @@ export function BallEditPage() {
     }
   }
 
-  const importOne = async (file: File) => {
-    setBusy(true)
-    try {
-      const r = await api.importBalls(file)
-      if (r.balls.length !== 1) {
-        toast.error(t('balls.zipHasMany', { count: r.balls.length }))
-        return
-      }
-      const got = r.balls[0]
-      set({ name: got.name, credits: got.credits, mesh: got.mesh, texture: got.texture, thumbnail: got.thumbnail })
-      r.problems.forEach((p) => toast.warning(p.message))
-      toast.success(t('balls.zipFilled'))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('balls.importFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const download = async () => {
     setBusy(true)
     try {
@@ -217,7 +199,10 @@ export function BallEditPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <BallThumb ball={ball} className="size-12" />
-          <h1 className="text-2xl font-semibold">{name}</h1>
+          <div>
+            <h1 className="text-2xl font-semibold">{name}</h1>
+            <EntryDates entry={ball} />
+          </div>
           {original && <OriginalBadge entry={ball.uid} />}
           {!original && ball.hidden && <OutOfPatchBadge alert />}
           <EntityIssues uid={ball.uid} />
@@ -238,20 +223,17 @@ export function BallEditPage() {
               showHint={t('balls.showHint')}
             />
           )}
-          <input
-            ref={zipInput}
-            type="file"
-            accept=".zip,application/zip"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              e.target.value = ''
-              if (file) void importOne(file)
+          <SingleZipImport
+            kind="balls"
+            entry={ball}
+            read={async (file) => {
+              const r = await api.importBalls(file)
+              return { items: r.balls, problems: r.problems }
             }}
+            admit={(item) => admitImported([item as Ball], slots.free)[0]}
+            pathOf={(e) => ballPath(ballKey(e as Ball))}
+            label={t('balls.uploadZip')}
           />
-          <Button variant="outline" size="sm" disabled={busy} title={t('balls.uploadZipHint')} onClick={() => zipInput.current?.click()}>
-            <FileUp /> {t('balls.uploadZip')}
-          </Button>
           <Button
             variant="outline"
             size="sm"

@@ -22,7 +22,14 @@ export interface RealKit {
   shorts_number?: boolean // number on the shorts; unset = the row's (new team: off; original: the game's)
 }
 
-export interface League {
+/** When an entry of the project was created and last changed (ISO 8601, UTC), set by the backend on save; entries
+ * saved before contract 9 have none until they change. */
+export interface Dated {
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface League extends Dated {
   uid: string
   league_id?: number | null // leagueid in the game, given by the build
   name: string
@@ -40,7 +47,7 @@ export interface League {
 /** What a team names its league by: a new league's uid or an original league's id. */
 export type LeagueKey = number | string
 
-export interface Team {
+export interface Team extends Dated {
   uid: string
   name: string
   leagues: LeagueKey[] // new league uids / original league ids it plays in; none = left out of the patch
@@ -113,7 +120,7 @@ export interface StreetPart {
 /** Street Home/Away; a missing part keeps the template's pieces. */
 export type StreetKit = Partial<Record<StreetPartName, StreetPart>>
 
-export interface Player {
+export interface Player extends Dated {
   uid: string
   first_name: string
   last_name: string
@@ -151,7 +158,7 @@ export const SURFACE_FIELDS: Record<ShoeSurface, string> = { street: 'shoetypeco
 /** A boot of the project: a new one (pack files, its code given by the build) or one of the game's boots the user
  * edits (original_id = its code; new files replace the game's for every player wearing it). Files are project
  * paths, kept as the user sent them. */
-export interface Boot {
+export interface Boot extends Dated {
   uid: string
   name: string
   credits?: string
@@ -175,7 +182,7 @@ export interface OriginalBoot {
 /** A goalkeeper glove of the project: a new one (a FIFA 16 pack file, its code given by the build) or one of the
  * game's gloves the user edits (original_id = its code; a new file replaces the game's for every goalkeeper wearing
  * it). The file is a project path, kept as the user sent it. */
-export interface Glove {
+export interface Glove extends Dated {
   uid: string
   name: string
   credits?: string
@@ -202,7 +209,7 @@ export interface GloveImport {
 /** A ball of the project: a new one (FIFA 16 pack files, its id given by the build) or one of the game's balls the
  * user edits (original_id = its id; new files replace the game's for every stadium using it). Files are project
  * paths, kept as the user sent them. Stadiums pick it in originals.stadium_balls. */
-export interface Ball {
+export interface Ball extends Dated {
   uid: string
   name: string
   credits?: string
@@ -226,6 +233,21 @@ export interface BallImport {
   kind: 'one' | 'many'
   balls: Ball[]
   problems: { index: number; name: string; field: 'mesh' | 'texture' | 'thumbnail'; code: string; message: string }[]
+}
+
+/** Leagues, teams and players shared in a zip (backend share_service): what a zip holds, before anything changes. */
+export type ShareKind = 'leagues' | 'teams' | 'players'
+export interface ShareProblem {
+  index: number
+  name: string
+  field: string | null
+  code: string
+  message: string
+}
+export interface ShareInspect<T> {
+  token: string // names the staged zip for apply
+  items: T[] // entries as in the zip (file fields name files of the zip; problem files already left empty)
+  problems: ShareProblem[]
 }
 
 export interface BootImport {
@@ -314,7 +336,7 @@ export interface WorldTour {
 }
 
 export interface Project {
-  version: 8
+  version: 9
   leagues: League[]
   teams: Team[]
   players: Player[]

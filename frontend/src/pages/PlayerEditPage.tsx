@@ -1,3 +1,4 @@
+import { EntryDates } from '@/components/common/dates'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Copy, DatabaseZap, Dices, Eraser, Info, LoaderCircle, RotateCcw, Trash2, User } from 'lucide-react'
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
@@ -9,6 +10,7 @@ import { THUMBNAIL_CODES, ThumbnailField, ThumbnailPicker } from '@/components/c
 import { BaseDataDialog } from '@/components/common/BaseDataDialog'
 import { FacePicker, type BrowsedFace } from '@/components/common/FacePicker'
 import { EntityIssues, Field, NumberInput, OriginalBadge, Stepper } from '@/components/common/form'
+import { ShareDownloadButton, ShareSingleImport } from '@/components/common/share'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { PhotoCard, PlayerAvatar } from '@/components/common/PlayerPhoto'
 import {
@@ -38,13 +40,13 @@ import { APPEARANCE_LABELS, FOOT_LABELS, SKILL_LABELS } from '@/lib/labels'
 import { computeOverall } from '@/lib/skills'
 import { GOALKEEPER_POSITION, backName, previewAppearance, teamPreviewKit } from '@/lib/preview'
 import { useEntryOfPath } from '@/lib/members'
-import { linkedTeam, teamKey, teamPath } from '@/lib/players'
+import { linkedTeam, playerPath, playerRef, teamKey, teamPath } from '@/lib/players'
 import { PlayerBoots } from '@/components/common/PlayerBoots'
 import { PlayerGloves } from '@/components/common/PlayerGloves'
 import { preferredPosition } from '@/lib/gloves'
 import { PlayerTeamsCard } from '@/components/common/PlayerTeams'
 import { cn } from '@/lib/utils'
-import { usePlayerDefaults, useProject, useWasEdited } from '@/state/project'
+import { usePlayerDefaults, useProject, useSameAsGame, useWasEdited } from '@/state/project'
 import { useCatalog, useLookups, useStatus } from '@/state/queries'
 
 const PlayerPreview = lazy(() => import('@/components/common/PlayerPreview'))
@@ -759,6 +761,7 @@ export function PlayerEditPage() {
   const keepBack = useKeepBack()
   const tabs = useTabParam('data')
   const edited = useWasEdited(uid)
+  const sameAsGame = useSameAsGame()
 
   if (!player) {
     return (
@@ -781,12 +784,17 @@ export function PlayerEditPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <PlayerAvatar player={player} className="size-10" />
-          <h1 className="text-2xl font-semibold">{name || t('players.new')}</h1>
+          <div>
+            <h1 className="text-2xl font-semibold">{name || t('players.new')}</h1>
+            <EntryDates entry={player} />
+          </div>
           {original && <OriginalBadge entry={player.uid} />}
           {!original && player.hidden && <OutOfPatchBadge alert />}
           <EntityIssues uid={player.uid} />
         </div>
         <div className="flex gap-2">
+          <ShareSingleImport kind="players" entry={player} pathOf={(e) => playerPath(playerRef(e as Player))} />
+          <ShareDownloadButton kind="players" uid={player.uid} unchanged={sameAsGame(player.uid)} />
           {!original && (
             <HideButton
               variant="outline"

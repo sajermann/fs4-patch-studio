@@ -1,5 +1,7 @@
-import { Download, FileUp, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { ZipImportButton } from '@/components/common/share'
+import { DateCells, DateHeads } from '@/components/common/dates'
+import { Download, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError, api, saveBlob } from '@/api/client'
@@ -48,14 +50,6 @@ export function GlovesPage() {
   const [askAll, setAskAll] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [busy, setBusy] = useState(false)
-  const fileInput = useRef<HTMLInputElement>(null)
-  // imported gloves are saved right away, once the draft has them (the next render's save)
-  const [saveSoon, setSaveSoon] = useState(false)
-  useEffect(() => {
-    if (!saveSoon) return
-    setSaveSoon(false)
-    save().catch((e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')))
-  }, [saveSoon, save, t])
 
   // the game's gloves edited in the project show once, as their entry; ones only opened list as the game's
   const mine = (draft.gloves ?? []).filter((g) => !sameAsGame(g.uid))
@@ -101,30 +95,6 @@ export function GlovesPage() {
     navigate(glovePath(uid), from)
   }
 
-  const importZip = async (file: File) => {
-    setBusy(true)
-    try {
-      const r = await api.importGloves(file)
-      const admitted = admitImported(r.gloves, slots.free)
-      addGloves(admitted)
-      const out = admitted.filter((g, k) => g.hidden && !r.gloves[k].hidden).length
-      toast.success(t('gloves.imported', { count: admitted.length }), {
-        description: [
-          out ? t('gloves.importedOut', { count: out }) : '',
-          r.problems.length ? t('gloves.importedProblems', { count: r.problems.length }) : '',
-        ]
-          .filter(Boolean)
-          .join(' '),
-      })
-      r.problems.forEach((p) => toast.warning(`${p.name || t('common.unnamed')}: ${p.message}`))
-      setSaveSoon(true)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('gloves.importFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const download = async () => {
     const exportable = picked.filter((g) => g.original_id == null || g.texture)
     if (exportable.length < picked.length) toast.warning(t('gloves.downloadSkipsGame', { count: picked.length - exportable.length }))
@@ -157,20 +127,17 @@ export function GlovesPage() {
           <Badge variant={slots.free ? 'secondary' : 'destructive'} className="font-normal" title={t('gloves.slotsHint', { total: slots.total })}>
             {t('gloves.slots', { used: slots.used, total: slots.total })}
           </Badge>
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".zip,application/zip"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              e.target.value = ''
-              if (file) void importZip(file)
+          <ZipImportButton
+            kind="gloves"
+            read={async (file) => {
+              const r = await api.importGloves(file)
+              return { items: r.gloves, problems: r.problems }
             }}
+            // an entry it replaces gives its code back
+            admit={(items, replaced) => admitImported(items as Glove[], slots.free + replaced.filter((g) => !(g as Glove).hidden && (g as Glove).original_id == null).length)}
+            label={t('gloves.importMany')}
+            hint={t('gloves.importManyHint')}
           />
-          <Button variant="outline" disabled={busy} title={t('gloves.importManyHint')} onClick={() => fileInput.current?.click()}>
-            <FileUp /> {t('gloves.importMany')}
-          </Button>
           <Button onClick={create}>
             <Plus /> {t('gloves.new')}
           </Button>
@@ -227,13 +194,14 @@ export function GlovesPage() {
             <TableHead>{t('gloves.colCredits')}</TableHead>
             <TableHead>{t('gloves.colWearers')}</TableHead>
             <TableHead>{t('gloves.colCode')}</TableHead>
+            <DateHeads />
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {page.total === 0 && (
             <TableRow>
-              <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+              <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
                 {originalsQuery.error
                   ? t('gloves.originalsFailed', { error: originalsQuery.error.message })
                   : originals === undefined
@@ -260,6 +228,7 @@ export function GlovesPage() {
                     {g.players}
                   </TableCell>
                   <TableCell className="tabular-nums">{g.code}</TableCell>
+                  <DateCells />
                   <TableCell />
                 </TableRow>
               )
@@ -283,6 +252,7 @@ export function GlovesPage() {
                 <TableCell className="text-muted-foreground">{g.credits || '—'}</TableCell>
                 <TableCell className="tabular-nums">{users || '—'}</TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">{g.original_id ?? g.code ?? t('common.auto')}</TableCell>
+                <DateCells entry={g} />
                 <TableCell>
                   <span className="flex items-center gap-1">
                     <EntityIssues uid={g.uid} />

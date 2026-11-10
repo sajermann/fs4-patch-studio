@@ -1,5 +1,7 @@
+import { DateCells, DateHeads } from '@/components/common/dates'
 import { Eye, EyeOff, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
 import type { League, OriginalLeague } from '@/api/types'
 import { EntityIssues, OriginalBadge } from '@/components/common/form'
 import {
@@ -18,6 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { GameHiddenBadge, HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
+import { BulkActions, RowCheckbox, SelectAllCheckbox, SelectAllDialog, ShareImportButton, useListSelection } from '@/components/common/share'
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
 import { useOriginalChanges } from '@/lib/originals'
@@ -30,7 +33,7 @@ type Row = { kind: 'project'; league: League } | { kind: 'original'; league: Ori
 
 export function LeaguesPage() {
   const { t } = useI18n()
-  const { draft, addLeague, updateLeague } = useProject()
+  const { draft, addLeague, updateLeague, removeLeague } = useProject()
   const originals = useOriginalLeagues().data ?? []
   const originalTeams = useOriginalTeams().data ?? []
   const navigate = useNavigate()
@@ -87,21 +90,33 @@ export function LeaguesPage() {
       (f.status === ALL || (f.status === 'hidden') === isHidden(r)),
   )
   const page = usePage(rows, list.page, list.pageSize)
+  const projectUids = (rs: Row[]) => rs.flatMap((r) => (r.kind === 'project' ? [r.league.uid] : []))
+  const selection = useListSelection(projectUids(page.rows), projectUids(rows))
+  const picked = mine.filter((l) => selection.selected.has(l.uid)).map((l) => l.uid)
+  // only new leagues go in bulk, taken off their teams first (an original is restored on its page)
+  const deleteLeagues = (uids: string[]) => {
+    const removable = mine.filter((l) => uids.includes(l.uid) && l.original_id == null)
+    removable.forEach((l) => removeLeague(l.uid))
+    if (removable.length < uids.length) toast.warning(t('share.deleteSkipped', { count: uids.length - removable.length }))
+  }
 
   return (
     <div className={LIST_PAGE}>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold">{t('nav.leagues')}</h1>
           <p className="text-sm text-muted-foreground">{t('leagues.description')}</p>
         </div>
-        <Button
-          onClick={create}
-          disabled={full}
-          title={full ? t('leagues.maxReached', { max: maxLeagues }) : undefined}
-        >
-          <Plus /> {t('leagues.new')}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ShareImportButton kind="leagues" />
+          <Button
+            onClick={create}
+            disabled={full}
+            title={full ? t('leagues.maxReached', { max: maxLeagues }) : undefined}
+          >
+            <Plus /> {t('leagues.new')}
+          </Button>
+        </div>
       </div>
       <FilterBar active={list.active} onClear={list.clear}>
         <SearchInput value={f.q} onChange={(v) => list.set('q', v)} placeholder={t('leagues.search')} />
@@ -125,21 +140,26 @@ export function LeaguesPage() {
             { value: 'hidden', label: t('leagues.statusHidden') },
           ]}
         />
+        <BulkActions kind="leagues" selection={selection} picked={picked} onDelete={deleteLeagues} />
       </FilterBar>
       <ScrollTable>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-8">
+              <SelectAllCheckbox selection={selection} />
+            </TableHead>
             <TableHead data-grow>{t('list.colName')}</TableHead>
             <TableHead>{t('list.colId')}</TableHead>
             <TableHead>{t('leagues.colOrder')}</TableHead>
             <TableHead>{t('nav.teams')}</TableHead>
+            <DateHeads />
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {page.total === 0 && (
             <TableRow>
-              <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+              <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
                 {t('leagues.noneFiltered')}
               </TableCell>
             </TableRow>
@@ -151,6 +171,9 @@ export function LeaguesPage() {
               const hidden = isHidden(r)
               return (
                 <TableRow key={l.uid} className="cursor-pointer" onClick={() => navigate(leaguePath(leagueKey(l)), from)}>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <RowCheckbox selection={selection} value={l.uid} />
+                  </TableCell>
                   <TableCell data-grow className={hidden ? 'font-medium text-muted-foreground' : 'font-medium'}>
                     <span className="mr-2">{l.name || <span className="text-muted-foreground">{t('common.unnamed')}</span>}</span>
                     {oid != null && <OriginalBadge entry={l.uid} league={oid} />}
@@ -165,6 +188,7 @@ export function LeaguesPage() {
                   <TableCell className="tabular-nums text-muted-foreground">{oid ?? l.league_id ?? t('common.auto')}</TableCell>
                   <TableCell className="tabular-nums">{l.sort_order}</TableCell>
                   <TableCell className="tabular-nums">{teamsOf(l)}</TableCell>
+                  <DateCells entry={l} />
                   <TableCell>
                     <span className="flex items-center gap-1">
                       <EntityIssues uid={l.uid} />
@@ -191,6 +215,7 @@ export function LeaguesPage() {
             const l = r.league
             return (
               <TableRow key={l.id} className="cursor-pointer text-muted-foreground" onClick={() => navigate(leaguePath(l.id), from)}>
+                <TableCell />
                 <TableCell data-grow>
                   <span className="mr-2 text-foreground">{l.name}</span>
                   <OriginalBadge league={l.id} />
@@ -206,6 +231,7 @@ export function LeaguesPage() {
                 <TableCell className="tabular-nums">
                   {l.team_count + teamsDelta(l.id)}
                 </TableCell>
+                <DateCells />
                 <TableCell>
                   {!l.hidden && (
                     <Button
@@ -229,6 +255,7 @@ export function LeaguesPage() {
         </TableBody>
       </ScrollTable>
       <Pager page={page.page} pages={page.pages} total={page.total} pageSize={list.pageSize} onPage={list.setPage} />
+      <SelectAllDialog selection={selection} />
     </div>
   )
 }

@@ -14,8 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # players in several teams and the game's own entries (original_id); 4 = street kits with a list of pieces per part;
 # 5 = world_tour (players of the friendly match); 6 = boots (the user's and edited game boots) and Player.boots;
 # 7 = goalkeeper gloves (the user's and edited game gloves) and Player.glove; 8 = balls (the user's and edited game
-# balls) and the ball of each stadium (originals.stadium_balls)
-CONTRACT_VERSION = 8
+# balls) and the ball of each stadium (originals.stadium_balls); 9 = created_at / updated_at of every entry
+CONTRACT_VERSION = 9
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
 Channel = Annotated[int, Field(ge=0, le=255)]
@@ -38,7 +38,14 @@ class Entity(BaseModel):
     model_config = ConfigDict(extra='ignore')
 
 
-class League(Entity):
+class Dated(Entity):
+    """An entry of the project with the dates it was created and last changed (ISO 8601, UTC), set when the project
+    is saved (stamp_dates). Entries saved before contract 9 have none until they change."""
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class League(Dated):
     uid: str
     name: str
     league_id: Optional[int] = None  # leagueid in the game (a new one, unused by the game); None = given by the build
@@ -150,7 +157,7 @@ class OriginalPlayerSnapshot(BaseModel):
     images: dict[str, str] = {}  # SHA-1 of each image as loaded ('photo')
 
 
-class Player(Entity):
+class Player(Dated):
     uid: str
     first_name: str
     last_name: str
@@ -210,7 +217,7 @@ class Player(Entity):
         return self.original_id if self.is_original else self.uid
 
 
-class Boot(Entity):
+class Boot(Dated):
     """A boot of the project (fsmod.boots): a new one (pack files, a code of its own given by the build) or one of the
     game's boots the user edits (original_id = its code: new files replace the game's for every player wearing it;
     name and credits only exist in the app)."""
@@ -236,7 +243,7 @@ class Boot(Entity):
         return bool(self.mesh and self.texture)
 
 
-class Glove(Entity):
+class Glove(Dated):
     """A goalkeeper glove of the project (fsmod.gloves): a new one (a pack texture file, a code of its own given by the
     build) or one of the game's gloves the user edits (original_id = its code: a new file replaces the game's for every
     goalkeeper wearing it; name and credits only exist in the app)."""
@@ -259,7 +266,7 @@ class Glove(Entity):
         return bool(self.texture)
 
 
-class Ball(Entity):
+class Ball(Dated):
     """A ball of the project (fsmod.balls): a new one (pack files, an id of its own given by the build) or one of the
     game's balls the user edits (original_id = its id: new files replace the game's for every stadium using it; name
     and credits only exist in the app). Stadiums pick it in originals.stadium_balls."""
@@ -302,7 +309,7 @@ class OriginalSnapshot(BaseModel):
     images: dict[str, str] = {}  # SHA-1 of each image as loaded, by field path ('crest', 'real_kits.home.jersey'...)
 
 
-class Team(Entity):
+class Team(Dated):
     uid: str
     name: str
     # leagues the team plays in (validated in game: one leagueteamlinks row each): uid of a new league or id of an
@@ -402,7 +409,7 @@ class WorldTour(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3, 4, 5, 6, 7, 8] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5, 6, 7, 8, 9] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []
@@ -489,6 +496,43 @@ class Project(Entity):
 
     def to_json(self):
         return self.model_dump(mode='json', exclude_none=True)
+
+
+ENTRY_LISTS = ('leagues', 'teams', 'players', 'boots', 'gloves', 'balls')  # the project's lists of Dated entries
+DATE_FIELDS = {'created_at', 'updated_at'}
+
+
+def iso_date(value):
+    """`value` when it is an ISO 8601 date text (a date read from a shared zip), else None."""
+    import datetime
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    return value
+
+
+def stamp_dates(previous, project, now):
+    """Dates of the entries of `project` about to be saved over `previous` (the saved one), `now` an ISO 8601 text:
+    an entry new to the project keeps the dates it brings (an imported one) or is created now (or when it was changed,
+    if it brings only that date); one whose content changed is updated now (and keeps its creation date; entries
+    from before contract 9 have none)."""
+    for kind in ENTRY_LISTS:
+        before = {e.uid: e for e in getattr(previous, kind)}
+        for entry in getattr(project, kind):
+            old = before.get(entry.uid)
+            if old is None:
+                # one that brings only the date it was changed (shared before it had a creation date) was created
+                # then at the latest: never created after it was changed
+                entry.created_at = entry.created_at or entry.updated_at or now
+                entry.updated_at = entry.updated_at or entry.created_at
+            elif entry.model_dump(mode='json', exclude=DATE_FIELDS) != old.model_dump(mode='json', exclude=DATE_FIELDS):
+                entry.created_at = entry.created_at or old.created_at
+                entry.updated_at = now
+            else:
+                entry.created_at, entry.updated_at = old.created_at, old.updated_at
 
 
 def load(data):

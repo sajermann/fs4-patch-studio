@@ -1,4 +1,6 @@
-import { Download, FileUp, ImageOff, LoaderCircle, RotateCcw, Trash2, Upload, UserMinus, X } from 'lucide-react'
+import { SingleZipImport } from '@/components/common/share'
+import { EntryDates } from '@/components/common/dates'
+import { Download, ImageOff, LoaderCircle, RotateCcw, Trash2, Upload, UserMinus, X } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -23,7 +25,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useI18n } from '@/i18n'
 import { BackButton, useBack, useFrom, useGoBack } from '@/lib/back'
-import { gloveName, useGloveSlots, wearers } from '@/lib/gloves'
+import { admitImported, gloveKey, gloveName, glovePath, useGloveSlots, wearers } from '@/lib/gloves'
 import { keyOfPath, playerName, playerPath, playerRef } from '@/lib/players'
 import { newUid, useIssues, useProject, useWasEdited } from '@/state/project'
 import { useOriginalGloves } from '@/state/queries'
@@ -128,7 +130,6 @@ export function GloveEditPage() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [takingOff, setTakingOff] = useState<string[] | null>(null) // players to take the glove off, asking first
   const [busy, setBusy] = useState(false)
-  const zipInput = useRef<HTMLInputElement>(null)
 
   if (!glove) {
     return (
@@ -162,25 +163,6 @@ export function GloveEditPage() {
     }
   }
 
-  const importOne = async (file: File) => {
-    setBusy(true)
-    try {
-      const r = await api.importGloves(file)
-      if (r.gloves.length !== 1) {
-        toast.error(t('gloves.zipHasMany', { count: r.gloves.length }))
-        return
-      }
-      const got = r.gloves[0]
-      set({ name: got.name, credits: got.credits, texture: got.texture, thumbnail: got.thumbnail })
-      r.problems.forEach((p) => toast.warning(p.message))
-      toast.success(t('gloves.zipFilled'))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('gloves.importFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const download = async () => {
     setBusy(true)
     try {
@@ -206,7 +188,10 @@ export function GloveEditPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <GloveThumb glove={glove} className="size-12" />
-          <h1 className="text-2xl font-semibold">{name}</h1>
+          <div>
+            <h1 className="text-2xl font-semibold">{name}</h1>
+            <EntryDates entry={glove} />
+          </div>
           {original && <OriginalBadge entry={glove.uid} />}
           {!original && glove.hidden && <OutOfPatchBadge alert />}
           <EntityIssues uid={glove.uid} />
@@ -227,20 +212,17 @@ export function GloveEditPage() {
               showHint={t('gloves.showHint')}
             />
           )}
-          <input
-            ref={zipInput}
-            type="file"
-            accept=".zip,application/zip"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              e.target.value = ''
-              if (file) void importOne(file)
+          <SingleZipImport
+            kind="gloves"
+            entry={glove}
+            read={async (file) => {
+              const r = await api.importGloves(file)
+              return { items: r.gloves, problems: r.problems }
             }}
+            admit={(item) => admitImported([item as Glove], slots.free)[0]}
+            pathOf={(e) => glovePath(gloveKey(e as Glove))}
+            label={t('gloves.uploadZip')}
           />
-          <Button variant="outline" size="sm" disabled={busy} title={t('gloves.uploadZipHint')} onClick={() => zipInput.current?.click()}>
-            <FileUp /> {t('gloves.uploadZip')}
-          </Button>
           <Button
             variant="outline"
             size="sm"

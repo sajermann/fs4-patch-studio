@@ -4,9 +4,13 @@ Zip format (one glove or many), only the manifest and the files it names, side b
 
     manifest.json   {"type": "fs4-glove", "version": 1, "glove": {...}}
                     {"type": "fs4-gloves", "version": 1, "gloves": [{...}, ...]}
-    each glove:     {"name", "credits", "hidden", "texture", "thumbnail"}
+    each glove:     {"name", "credits", "hidden", "texture", "thumbnail", "created_at", "updated_at"}
                     texture / thumbnail = names of files in the zip (any name on upload; glove-<uid>_textures.rx3,
                     glove-<uid>.<ext> on download)
+                    created_at / updated_at: when the entry was created and last changed in the project it came
+                    from (ISO 8601; kept on import, null when unknown)
+                    uid / original_id: the entry's uid (kept on import: the same entry imported again replaces it)
+                    and the game's entry it edits (null = a new one); zips without them come in as new entries
                     on download every key is there, null when empty (credits, a missing file); on upload a key
                     may be null, "" or left out
 
@@ -26,6 +30,7 @@ from PIL import Image
 from fsmod import gloves, model, rx3tex
 
 from .project_store import IMAGE_EXTENSIONS, file_slug
+from .share_service import kept_original, kept_uid
 
 MANIFEST = 'manifest.json'
 ONE, MANY = 'fs4-glove', 'fs4-gloves'
@@ -175,11 +180,16 @@ class GloveService:
                 stored[field, filename] = result
                 return result
 
+            seen, valid = set(), set(gloves.game_codes(self.game))
             for k, item in enumerate(items):
                 name = item.get('name') if isinstance(item.get('name'), str) else ''
                 credits = item.get('credits') if isinstance(item.get('credits'), str) else None
-                glove = {'uid': 'g' + uuid.uuid4().hex[:12], 'name': name.strip(), 'credits': credits or None,
-                         'hidden': item.get('hidden') is True}
+                glove = {'uid': kept_uid(item.get('uid'), 'g', seen),
+                         'original_id': kept_original(item.get('original_id'), valid),
+                         'name': name.strip(), 'credits': credits or None,
+                         'hidden': item.get('hidden') is True,
+                         'created_at': model.iso_date(item.get('created_at')),
+                         'updated_at': model.iso_date(item.get('updated_at'))}
                 for field in ('texture', 'thumbnail'):
                     path, problem = stored_file(field, item.get(field))
                     if path:
@@ -197,7 +207,9 @@ class GloveService:
             for g in project_gloves:
                 stem = f'glove-{file_slug(g.uid)}'
                 # every key is written, null when empty, so whoever edits the manifest by hand sees all of them
-                item = {'name': g.name, 'credits': g.credits or None, 'hidden': g.hidden,
+                item = {'uid': g.uid, 'original_id': g.original_id,
+                        'name': g.name, 'credits': g.credits or None, 'hidden': g.hidden,
+                        'created_at': g.created_at, 'updated_at': g.updated_at,
                         'texture': None, 'thumbnail': None}
                 for field, name in (('texture', f'{stem}_textures.rx3'),
                                     ('thumbnail', stem + os.path.splitext(g.thumbnail or '')[1].lower())):

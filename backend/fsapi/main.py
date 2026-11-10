@@ -25,6 +25,7 @@ from .glove_service import GloveService, GloveZipError
 from .dialogs import browse_folder, open_file, save_file
 from .faces import FaceError, FaceService
 from .original_images import OriginalImages
+from .share_service import ShareService, ShareZipError
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
 from .project_store import BackupError, ProjectFileError, ProjectStore, file_slug, migrate_folder
 from fsmod import (appearance_thumbs, balls, boots, builder, gloves, kit, kitprint, model, original_league, original_player, original_team, photo,
@@ -45,6 +46,11 @@ INSTALL_ERROR_TEXT = {
     'disk_full': 'Falta espaço no disco do jogo para instalar o patch.',
     'not_installed': 'Não há patch do app instalado nesse jogo.',
 }
+
+
+def now_iso():
+    """The current time as the project dates keep it (ISO 8601, UTC, seconds)."""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 
 class AppState:
@@ -71,6 +77,7 @@ class AppState:
         self.boots = BootService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.gloves = GloveService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.balls = BallService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
+        self.shares = ShareService(os.path.join(os.path.dirname(prints), 'cache'))
         self._catalog = None
 
     def upgrade_project(self):
@@ -289,6 +296,11 @@ def create_app(state=None):
         project.boots = [b for b in project.boots if b.uid not in drop]
         project.gloves = [g for g in project.gloves if g.uid not in drop]
         project.balls = [b for b in project.balls if b.uid not in drop]
+        try:
+            previous = load_project()
+        except ProjectFileError:
+            previous = model.Project()  # the file on disk cannot be read: every entry counts as new
+        model.stamp_dates(previous, project, now_iso())
         state.store.save(project)
         return {'project': project.to_json(), **state_of(project, untouched=False),
                 'patch': patch_status(state.store, state.patch_dir)}
@@ -648,6 +660,81 @@ def create_app(state=None):
         state.boots.write_zip(picked, state.store.folder, buf, many)
         slug = file_slug(picked[0].name).encode('ascii', 'ignore').decode() or picked[0].uid
         name = 'boots.zip' if many else f'boot-{slug}.zip'
+        return Response(buf.getvalue(), media_type='application/zip',
+                        headers={'Content-Disposition': f'attachment; filename="{name}"'})
+
+    # ---------------------------------------------------------------- leagues, teams and players shared in a zip
+    SHARE_PROBLEM_TEXT = {
+        'zip_file_missing': 'O arquivo citado no manifest não está no zip.',
+        'zip_file_too_big': 'Arquivo grande demais.',
+        'image_invalid': 'Imagem inválida (use PNG, JPG ou WebP).',
+        'invalid_item': 'Item fora do formato do app: ficou de fora.',
+        'face_files_missing': 'Faltam arquivos da face real: o jogador entra com a cabeça genérica.',
+    }
+    SHARE_ZIP_ERROR_TEXT = {
+        'not_a_zip': 'O arquivo não é um zip.',
+        'zip_not_flat': 'O zip só pode ter o manifest.json e os arquivos soltos (sem pastas).',
+        'no_manifest': 'O zip não tem o manifest.json.',
+        'zip_too_big': 'O zip é grande demais.',
+        'invalid_manifest': 'O manifest.json não está no formato do app.',
+        'wrong_kind': 'Esse zip é de outro tipo (ligas, times ou jogadores): importe na tela certa.',
+        'zip_too_new': 'Esse zip foi feito por uma versão mais nova do app: atualize o app para importar.',
+        'import_expired': 'A importação expirou: envie o zip de novo.',
+        'invalid_target_uid': 'Identificador de destino inválido.',
+    }
+    SHARE_KIND = Path(pattern='^(leagues|teams|players)$')
+
+    def share_failure(e):
+        return HTTPException(400, {'code': 'invalid_share_zip', 'reason': e.code,
+                                   'message': SHARE_ZIP_ERROR_TEXT.get(e.code, e.code)})
+
+    @app.post('/api/share/{kind}/inspect')
+    def share_inspect(kind: str = SHARE_KIND, file: UploadFile = File(...)):
+        """What a shared zip of leagues, teams or players holds (share_service): nothing changes in the project; the
+        client compares it with the draft (entries it replaces, links not found) and then calls apply."""
+        try:
+            result = state.shares.inspect(kind, file.file)
+        except ShareZipError as e:
+            raise share_failure(e)
+        result['problems'] = [{**p, 'message': SHARE_PROBLEM_TEXT.get(p['code'], p['code'])} for p in result['problems']]
+        return result
+
+    class ShareApply(BaseModel):
+        token: str
+        uids: list[str] = Field(min_length=1)
+        as_uids: dict[str, str] = {}  # uid in the zip -> uid it takes (a zip uploaded on an entry's page fills it)
+
+    @app.post('/api/share/{kind}/apply')
+    def share_apply(req: ShareApply, kind: str = SHARE_KIND):
+        """The chosen entries of an inspected zip with their files put into the project (images as uploads, real
+        faces in faces/<uid>/): the client merges them into the draft and saves."""
+        try:
+            items = state.shares.apply(kind, req.token, req.uids, state.store.folder, state.store.save_image,
+                                       req.as_uids)
+        except ShareZipError as e:
+            raise share_failure(e)
+        return {'items': items}
+
+    class ShareExport(BaseModel):
+        uids: list[str] = Field(min_length=1)
+        many: bool = False  # the several-entries layout even for one
+
+    @app.post('/api/share/{kind}/export')
+    def share_export(req: ShareExport, kind: str = SHARE_KIND):
+        """Zip of saved leagues, teams or players to share."""
+        by_uid = {e.uid: e for e in getattr(load_project(), kind)}
+        picked = [by_uid[u] for u in req.uids if u in by_uid]
+        if len(picked) != len(req.uids):
+            raise HTTPException(400, {'code': 'share_not_saved', 'message': 'Salve o projeto antes de baixar.'})
+        buf = io.BytesIO()
+        state.shares.write_zip(kind, picked, state.store.folder, buf, req.many)
+        if len(picked) == 1 and not req.many:
+            entry = picked[0]
+            label = entry.shown_name if kind == 'players' else entry.name
+            slug = file_slug(label).encode('ascii', 'ignore').decode() or entry.uid
+            name = f'{kind[:-1]}-{slug}.zip'
+        else:
+            name = f'{kind}.zip'
         return Response(buf.getvalue(), media_type='application/zip',
                         headers={'Content-Disposition': f'attachment; filename="{name}"'})
 

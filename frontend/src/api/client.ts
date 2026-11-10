@@ -35,6 +35,8 @@ import type {
   Project,
   RGB,
   ScannedFace,
+  ShareInspect,
+  ShareKind,
   Status,
 } from './types'
 import { hasMessage, translate } from '@/i18n'
@@ -179,6 +181,22 @@ export const api = {
   exportBoots: async (uids: string[], many = false) => {
     const res = await send('/api/boots/export', json('POST', { uids, many }))
     const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'boots.zip'
+    return { name, blob: await res.blob() }
+  },
+
+  /** What a shared zip of leagues, teams or players holds; nothing changes in the project. */
+  inspectShare: <T>(kind: ShareKind, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<ShareInspect<T>>(`/api/share/${kind}/inspect`, { method: 'POST', body: form })
+  },
+  /** The chosen entries of an inspected zip, their files put into the project; the caller merges them and saves. */
+  applyShare: <T>(kind: ShareKind, token: string, uids: string[], asUids: Record<string, string> = {}) =>
+    request<{ items: T[] }>(`/api/share/${kind}/apply`, json('POST', { token, uids, as_uids: asUids })),
+  /** Zip of saved leagues, teams or players to share: { file name, contents }. */
+  exportShare: async (kind: ShareKind, uids: string[]) => {
+    const res = await send(`/api/share/${kind}/export`, json('POST', { uids }))
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? `${kind}.zip`
     return { name, blob: await res.blob() }
   },
 

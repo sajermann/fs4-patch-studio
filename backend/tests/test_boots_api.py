@@ -103,29 +103,35 @@ def test_shared_zip_round_trip(lenient):
     assert sorted(z.namelist()) == ['boot-b1.png', 'boot-b1.rx3', 'boot-b1_textures.rx3', 'manifest.json']
     manifest = json.loads(z.read('manifest.json'))
     assert manifest == {'type': 'fs4-boot', 'version': 1, 'boot': {
-        'name': 'Mercurial', 'credits': 'modder', 'street': True, 'hidden': False, 'mesh': 'boot-b1.rx3',
-        'texture': 'boot-b1_textures.rx3', 'thumbnail': 'boot-b1.png'}}
+        'uid': 'b1', 'original_id': None, 'name': 'Mercurial', 'credits': 'modder', 'street': True, 'hidden': False, 'mesh': 'boot-b1.rx3',
+        'texture': 'boot-b1_textures.rx3', 'thumbnail': 'boot-b1.png',
+        'created_at': saved['boots'][0]['created_at'], 'updated_at': saved['boots'][0]['updated_at']}}
     assert z.read('boot-b1.rx3') == (folder / saved['boots'][0]['mesh']).read_bytes()
     r = client.post('/api/boots/import', files={'file': ('b.zip', r.content, 'application/zip')})
     body = r.json()
     assert r.status_code == 200 and body['kind'] == 'one' and body['problems'] == []
     back = body['boots'][0]
-    assert back['uid'] not in ('b1', 'b2') and back['name'] == 'Mercurial' and back['street'] is True
+    # the same uid: imported into a project that has it, it replaces that boot (the client asks first)
+    assert back['uid'] == 'b1' and back['name'] == 'Mercurial' and back['street'] is True
+    # the dates come along (a new uid in the project, the same history), kept when the import is saved
+    assert back['created_at'] == saved['boots'][0]['created_at'] and back['updated_at'] == saved['boots'][0]['updated_at']
     assert (folder / back['mesh']).read_bytes() == z.read('boot-b1.rx3')  # a provisional upload, not saved yet
     many = client.post('/api/boots/export', json={'uids': ['b1', 'b2']})
     manifest = json.loads(zipfile.ZipFile(io.BytesIO(many.content)).read('manifest.json'))
     assert manifest['type'] == 'fs4-boots' and [b['name'] for b in manifest['boots']] == ['Mercurial', 'Predator']
+    assert save(client, {'boots': [back]})['project']['boots'][0]['created_at'] == saved['boots'][0]['created_at']
 
 
 def test_downloaded_manifest_lists_empty_fields(lenient):
     client = lenient['client']
     boot = {**new_boot(client), 'credits': None, 'thumbnail': None}
-    save(client, {'boots': [boot]})
+    saved = save(client, {'boots': [boot]})['project']['boots'][0]
     r = client.post('/api/boots/export', json={'uids': ['b1']})
     z = zipfile.ZipFile(io.BytesIO(r.content))
     assert json.loads(z.read('manifest.json'))['boot'] == {
-        'name': 'Mercurial', 'credits': None, 'street': True, 'hidden': False, 'mesh': 'boot-b1.rx3',
-        'texture': 'boot-b1_textures.rx3', 'thumbnail': None}
+        'uid': 'b1', 'original_id': None, 'name': 'Mercurial', 'credits': None, 'street': True, 'hidden': False, 'mesh': 'boot-b1.rx3',
+        'texture': 'boot-b1_textures.rx3', 'thumbnail': None, 'created_at': saved['created_at'],
+        'updated_at': saved['updated_at']}
     # filled in by hand: the picture added to the zip and named in the manifest
     files = {n: z.read(n) for n in z.namelist() if n != 'manifest.json'}
     manifest = json.loads(z.read('manifest.json'))
@@ -221,3 +227,23 @@ def test_a_pack_boot_from_upload_to_patch(env):
     assert client.get('/api/project').json()['project']['boots'][0]['code'] == 561
     files = {f.lower() for f in r.json()['patch']['files']}
     assert {f'game/data/sceneassets/shoe/shoe_561{s}.rx3' for s in ('', '_0_textures', '_textures')} <= files
+
+
+def test_import_keeps_uid_and_the_edited_game_boot(lenient):
+    """uid and original_id come back as they went (the client replaces the entry that has them); a zip without them,
+    a uid used twice or a game code the game does not have comes in as a new boot."""
+    client = lenient['client']
+    items = [
+        {'uid': 'mine1', 'original_id': 611, 'name': 'Edited 611', 'updated_at': '2026-11-01T10:00:00Z'},
+        {'uid': 'mine1', 'name': 'Same uid again'},
+        {'uid': '../bad', 'original_id': 150, 'name': 'Bad uid, no such code'},
+        {'name': 'Old zip, no uid'},
+    ]
+    data = make_zip({'manifest.json': {'type': 'fs4-boots', 'version': 1, 'boots': items}})
+    boots_in = client.post('/api/boots/import', files={'file': ('b.zip', data, 'application/zip')}).json()['boots']
+    assert boots_in[0]['uid'] == 'mine1' and boots_in[0]['original_id'] == 611
+    assert len({b['uid'] for b in boots_in}) == 4 and all(b['uid'] != '../bad' for b in boots_in)
+    assert 'original_id' not in boots_in[2]
+    # a boot that brings only the date it was changed is created then at the latest, never after it
+    saved = save(client, {'boots': [boots_in[0]]})['project']['boots'][0]
+    assert saved['created_at'] == saved['updated_at'] == '2026-11-01T10:00:00Z'

@@ -97,13 +97,14 @@ def test_shared_zip_round_trip(lenient):
     z = zipfile.ZipFile(io.BytesIO(r.content))
     assert sorted(z.namelist()) == ['glove-g1.png', 'glove-g1_textures.rx3', 'manifest.json']
     assert json.loads(z.read('manifest.json')) == {'type': 'fs4-glove', 'version': 1, 'glove': {
-        'name': 'Predator', 'credits': 'modder', 'hidden': False, 'texture': 'glove-g1_textures.rx3',
-        'thumbnail': 'glove-g1.png'}}
+        'uid': 'g1', 'original_id': None, 'name': 'Predator', 'credits': 'modder', 'hidden': False, 'texture': 'glove-g1_textures.rx3',
+        'thumbnail': 'glove-g1.png', 'created_at': saved['gloves'][0]['created_at'],
+        'updated_at': saved['gloves'][0]['updated_at']}}
     assert z.read('glove-g1_textures.rx3') == (folder / saved['gloves'][0]['texture']).read_bytes()
     body = client.post('/api/gloves/import', files={'file': ('g.zip', r.content, 'application/zip')}).json()
     assert body['kind'] == 'one' and body['problems'] == []
     back = body['gloves'][0]
-    assert back['uid'] not in ('g1', 'g2') and back['name'] == 'Predator'
+    assert back['uid'] == 'g1' and back['name'] == 'Predator'
     assert (folder / back['texture']).read_bytes() == z.read('glove-g1_textures.rx3')
     many = client.post('/api/gloves/export', json={'uids': ['g1', 'g2']})
     manifest = json.loads(zipfile.ZipFile(io.BytesIO(many.content)).read('manifest.json'))

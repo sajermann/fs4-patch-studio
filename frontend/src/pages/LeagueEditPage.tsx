@@ -1,3 +1,4 @@
+import { EntryDates } from '@/components/common/dates'
 import { Copy, LoaderCircle, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -5,6 +6,7 @@ import { toast } from 'sonner'
 import { ApiError, api, imageUrl } from '@/api/client'
 import type { League, LeagueKey, OriginalTeam, Team, TeamKey } from '@/api/types'
 import { EntityIssues, Field, NumberInput, OriginalBadge, OriginalCrest, TeamCrest } from '@/components/common/form'
+import { ShareDownloadButton, ShareSingleImport } from '@/components/common/share'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { matches } from '@/components/common/list'
 import { PickerDialog, type PickerItem } from '@/components/common/PickerDialog'
@@ -24,7 +26,6 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { BackButton, useBack, useFrom, useGoBack, useKeepBack } from '@/lib/back'
 import { useI18n } from '@/i18n'
 import { useCopy } from '@/lib/copy'
@@ -32,7 +33,7 @@ import { useEntryOfPath, useTeamLeagues } from '@/lib/members'
 import { useOriginalChanges } from '@/lib/originals'
 import { keyOfPath, leagueKey, leaguePath, teamKey, teamPath } from '@/lib/players'
 import { editedOriginals, useLeagueName, useLeagueTeams } from '@/lib/teams'
-import { useProject, useWasEdited } from '@/state/project'
+import { useProject, useSameAsGame, useWasEdited } from '@/state/project'
 import { useOriginalLeagues, useOriginalTeams } from '@/state/queries'
 
 /** A team of the league list: a project entry (new team or edited original) or one of the game's as it is. */
@@ -226,7 +227,9 @@ export function LeagueEditPage() {
   // a league the game's selector hides is shown, not edited (the backend refuses to load it)
   const { entry: league, loading } = useEntryOfPath<League>('league', param, !!gameLeagues && !game?.hidden)
   const edited = useWasEdited(league?.uid, null, league?.original_id)
+  const sameAsGame = useSameAsGame()
   const [restoreOpen, setRestoreOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const back = useBack({ to: '/leagues', label: t('nav.leagues') })
   const goBack = useGoBack()
   const keepBack = useKeepBack()
@@ -259,7 +262,7 @@ export function LeagueEditPage() {
 
   const l = league
   const original = l.original_id != null
-  const canDelete = !draft.teams.some((tm) => tm.leagues.includes(l.uid))
+  const ownTeams = draft.teams.filter((tm) => tm.leagues.includes(l.uid))
   // restoring an original league also gives it back its teams: who joined leaves it, who left comes back (each team
   // keeps its other leagues); the page stays and loads the league again from the game
   const restore = () => {
@@ -281,12 +284,17 @@ export function LeagueEditPage() {
       <BackButton back={back} />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-semibold">{l.name || t('leagues.new')}</h1>
+          <div>
+            <h1 className="text-2xl font-semibold">{l.name || t('leagues.new')}</h1>
+            <EntryDates entry={l} />
+          </div>
           {original && <OriginalBadge entry={l.uid} league={l.original_id} />}
           {original && isLeagueHidden(l.original_id!) && <OutOfPatchBadge alert label={t('leagues.hiddenByProject')} />}
           {!original && l.hidden && <OutOfPatchBadge alert />}
         </div>
         <div className="flex gap-2">
+          <ShareSingleImport kind="leagues" entry={l} pathOf={(e) => leaguePath(leagueKey(e as League))} />
+          <ShareDownloadButton kind="leagues" uid={l.uid} unchanged={sameAsGame(l.uid)} />
           {original ? (
             <HideButton
               variant="outline"
@@ -328,24 +336,9 @@ export function LeagueEditPage() {
               >
                 <Copy /> {t('common.copy')}
               </Button>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!canDelete}
-                      onClick={() => {
-                        removeLeague(l.uid)
-                        goBack(back)
-                      }}
-                    >
-                      <Trash2 /> {t('leagueEdit.delete')}
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                {!canDelete && <TooltipContent>{t('leagueEdit.cannotDelete')}</TooltipContent>}
-              </Tooltip>
+              <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
+                <Trash2 /> {t('leagueEdit.delete')}
+              </Button>
             </>
           )}
         </div>
@@ -404,6 +397,29 @@ export function LeagueEditPage() {
         </CardContent>
       </Card>
       <LeagueTeamsCard league={leagueKey(l)} leagueName={l.name || t('teams.colLeague')} />
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('leagueEdit.deleteTitle', { name: l.name || t('common.unnamed') })}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {ownTeams.length
+                ? t('leagueEdit.deleteWithTeams', { teams: ownTeams.map((tm) => tm.name || t('common.unnamed')).join(', ') })
+                : t('leagueEdit.deleteDescription')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                removeLeague(l.uid)
+                goBack(back)
+              }}
+            >
+              {t('common.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog open={restoreOpen} onOpenChange={setRestoreOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

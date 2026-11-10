@@ -1,8 +1,10 @@
+import { DateCells, DateHeads } from '@/components/common/dates'
 import { Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import type { OriginalPlayer, Player, TeamKey } from '@/api/types'
 import { EntityIssues, OriginalBadge } from '@/components/common/form'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
+import { BulkActions, RowCheckbox, SelectAllCheckbox, SelectAllDialog, ShareImportButton, useListSelection } from '@/components/common/share'
 import {
   ALL,
   FilterBar,
@@ -32,7 +34,7 @@ const ALL_ORIGINALS = { limit: 5000 } // the whole list (2,213 players) once: fi
 
 export function PlayersPage() {
   const { t } = useI18n()
-  const { draft, addPlayer, updatePlayer, defaults } = useProject()
+  const { draft, addPlayer, updatePlayer, removePlayer, defaults } = useProject()
   const { position, originalTeam } = useLookups()
   const originalTeams = useOriginalTeams().data ?? []
   const originalsQuery = useOriginalPlayers(ALL_ORIGINALS)
@@ -84,6 +86,11 @@ export function PlayersPage() {
       (f.status === ALL || (f.status === 'hidden') === (r.kind === 'project' && !!r.player.hidden)),
   )
   const page = usePage(rows, list.page, list.pageSize)
+  const projectUids = (rs: Row[]) => rs.flatMap((r) => (r.kind === 'project' ? [r.player.uid] : []))
+  const selection = useListSelection(projectUids(page.rows), projectUids(rows))
+  const picked = mine.filter((p) => selection.selected.has(p.uid)).map((p) => p.uid)
+  // a new player leaves the project (and his places in the teams); an edited original goes back to the game's
+  const deletePlayers = (uids: string[]) => uids.forEach((uid) => removePlayer(uid))
 
   const teamOptions = [
     { value: ALL, label: t('players.allTeams') },
@@ -98,14 +105,17 @@ export function PlayersPage() {
 
   return (
     <div className={LIST_PAGE}>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold">{t('nav.players')}</h1>
           <p className="text-sm text-muted-foreground">{t('players.description')}</p>
         </div>
-        <Button onClick={create}>
-          <Plus /> {t('players.new')}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ShareImportButton kind="players" />
+          <Button onClick={create}>
+            <Plus /> {t('players.new')}
+          </Button>
+        </div>
       </div>
 
       <FilterBar active={list.active} onClear={list.clear}>
@@ -131,23 +141,28 @@ export function PlayersPage() {
             { value: 'hidden', label: t('teams.statusHidden') },
           ]}
         />
+        <BulkActions kind="players" selection={selection} picked={picked} onDelete={deletePlayers} />
       </FilterBar>
 
       <ScrollTable>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-8">
+              <SelectAllCheckbox selection={selection} />
+            </TableHead>
             <TableHead data-grow>{t('list.colName')}</TableHead>
             <TableHead>{t('players.colTeam')}</TableHead>
             <TableHead>{t('players.colNumber')}</TableHead>
             <TableHead>{t('players.colPosition')}</TableHead>
             <TableHead>{t('list.colId')}</TableHead>
+            <DateHeads />
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {page.total === 0 && (
             <TableRow>
-              <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+              <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                 {originalsQuery.error
                   ? t('players.originalsFailed', { error: originalsQuery.error.message })
                   : originals === undefined
@@ -166,6 +181,7 @@ export function PlayersPage() {
                   title={t('players.editOriginalHint')}
                   onClick={() => navigate(playerPath(p.id), from)}
                 >
+                  <TableCell />
                   <TableCell data-grow>
                     <span className="flex items-center gap-2">
                       <OriginalPlayerAvatar player={p} />
@@ -180,6 +196,7 @@ export function PlayersPage() {
                   <TableCell className="tabular-nums">{p.number ?? '—'}</TableCell>
                   <TableCell>{p.position !== null ? position.get(p.position) : '—'}</TableCell>
                   <TableCell className="tabular-nums">{p.id}</TableCell>
+                  <DateCells />
                   <TableCell />
                 </TableRow>
               )
@@ -187,6 +204,9 @@ export function PlayersPage() {
             const p = r.player
             return (
               <TableRow key={p.uid} className="cursor-pointer" onClick={() => navigate(playerPath(playerRef(p)), from)}>
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  <RowCheckbox selection={selection} value={p.uid} />
+                </TableCell>
                 <TableCell data-grow className={p.hidden ? 'font-medium text-muted-foreground' : 'font-medium'}>
                   <span className="flex items-center gap-2">
                     <PlayerAvatar player={p} />
@@ -208,6 +228,7 @@ export function PlayersPage() {
                     : '—'}
                 </TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">{p.original_id ?? p.player_id ?? t('common.auto')}</TableCell>
+                <DateCells entry={p} />
                 <TableCell>
                   <span className="flex items-center gap-1">
                     <EntityIssues uid={p.uid} />
@@ -225,6 +246,7 @@ export function PlayersPage() {
         </TableBody>
       </ScrollTable>
       <Pager page={page.page} pages={page.pages} total={page.total} pageSize={list.pageSize} onPage={list.setPage} />
+      <SelectAllDialog selection={selection} />
     </div>
   )
 }

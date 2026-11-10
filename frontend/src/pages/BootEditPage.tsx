@@ -1,4 +1,6 @@
-import { Download, FileUp, ImageOff, LoaderCircle, RotateCcw, Trash2, Upload, UserMinus, X } from 'lucide-react'
+import { SingleZipImport } from '@/components/common/share'
+import { EntryDates } from '@/components/common/dates'
+import { Download, ImageOff, LoaderCircle, RotateCcw, Trash2, Upload, UserMinus, X } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -24,7 +26,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useI18n } from '@/i18n'
 import { BackButton, useBack, useFrom, useGoBack } from '@/lib/back'
-import { bootName, streetCode, SURFACE_LABELS, useStreetSlots, wearers } from '@/lib/boots'
+import { admitImported, bootKey, bootName, bootPath, streetCode, SURFACE_LABELS, useStreetSlots, wearers } from '@/lib/boots'
 import { keyOfPath, playerName, playerPath, playerRef } from '@/lib/players'
 import { newUid, useIssues, useProject, useWasEdited } from '@/state/project'
 import { useOriginalBoots } from '@/state/queries'
@@ -130,7 +132,6 @@ export function BootEditPage() {
   const [streetBlocked, setStreetBlocked] = useState(false)
   const [takingOff, setTakingOff] = useState<string[] | null>(null) // players to take the boot off, asking first
   const [busy, setBusy] = useState(false)
-  const zipInput = useRef<HTMLInputElement>(null)
 
   if (!boot) {
     return (
@@ -179,31 +180,6 @@ export function BootEditPage() {
     set({ street: on })
   }
 
-  const importOne = async (file: File) => {
-    setBusy(true)
-    try {
-      const r = await api.importBoots(file)
-      if (r.boots.length !== 1) {
-        toast.error(t('boots.zipHasMany', { count: r.boots.length }))
-        return
-      }
-      const got = r.boots[0]
-      const patch: Partial<Boot> = { name: got.name, credits: got.credits, mesh: got.mesh, texture: got.texture, thumbnail: got.thumbnail }
-      if (!original) {
-        const wantsStreet = !!got.street
-        patch.street = wantsStreet && (boot.hidden || slots.free > 0 || !!boot.street)
-        if (wantsStreet && !patch.street) toast.warning(t('boots.streetFull', { total: slots.total }))
-      }
-      set(patch)
-      r.problems.forEach((p) => toast.warning(p.message))
-      toast.success(t('boots.zipFilled'))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('boots.importFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const download = async () => {
     setBusy(true)
     try {
@@ -229,7 +205,10 @@ export function BootEditPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <BootThumb boot={boot} className="h-10 w-20" />
-          <h1 className="text-2xl font-semibold">{name}</h1>
+          <div>
+            <h1 className="text-2xl font-semibold">{name}</h1>
+            <EntryDates entry={boot} />
+          </div>
           {original && <OriginalBadge entry={boot.uid} />}
           {!original && boot.hidden && <OutOfPatchBadge alert />}
           <EntityIssues uid={boot.uid} />
@@ -250,20 +229,17 @@ export function BootEditPage() {
               showHint={t('boots.showHint')}
             />
           )}
-          <input
-            ref={zipInput}
-            type="file"
-            accept=".zip,application/zip"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              e.target.value = ''
-              if (file) void importOne(file)
+          <SingleZipImport
+            kind="boots"
+            entry={boot}
+            read={async (file) => {
+              const r = await api.importBoots(file)
+              return { items: r.boots, problems: r.problems }
             }}
+            admit={(item) => admitImported([item as Boot], slots.free)[0]}
+            pathOf={(e) => bootPath(bootKey(e as Boot))}
+            label={t('boots.uploadZip')}
           />
-          <Button variant="outline" size="sm" disabled={busy} title={t('boots.uploadZipHint')} onClick={() => zipInput.current?.click()}>
-            <FileUp /> {t('boots.uploadZip')}
-          </Button>
           <Button variant="outline" size="sm" disabled={busy || !hasFiles} title={hasFiles ? t('boots.downloadHint') : t('boots.downloadNeedsFiles')} onClick={() => void download()}>
             <Download /> {t('boots.download')}
           </Button>

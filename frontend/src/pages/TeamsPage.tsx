@@ -1,8 +1,12 @@
+import { DateCells, DateHeads } from '@/components/common/dates'
 import { Eye, EyeOff, Lock, LockOpen, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
+import { ApiError, api } from '@/api/client'
 import type { OriginalTeam, Player, Team } from '@/api/types'
 import { EntityIssues, OriginalBadge, OriginalCrest, TeamCrest } from '@/components/common/form'
 import { GameHiddenBadge, HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
+import { BulkActions, RowCheckbox, SelectAllCheckbox, SelectAllDialog, ShareImportButton, useListSelection, type ListSelection } from '@/components/common/share'
 import {
   ALL,
   FilterBar,
@@ -34,7 +38,7 @@ const leagueKey = (league: number | string) => (typeof league === 'string' ? `ne
 
 export function TeamsPage() {
   const { t } = useI18n()
-  const { draft, addTeam, updateTeam } = useProject()
+  const { draft, addTeam, updateTeam, removeTeam } = useProject()
   const games = useGamePlayers()
   // a game team's squad size change: how many joined minus how many left (squads live in the players' links)
   const squadDelta = (teamid: number) => {
@@ -115,6 +119,23 @@ export function TeamsPage() {
         (f.status === 'locked' && isLocked(r))),
   )
   const page = usePage(rows, list.page, list.pageSize)
+  const projectUids = (rs: Row[]) => rs.flatMap((r) => (r.kind === 'project' ? [r.team.uid] : []))
+  const selection = useListSelection(projectUids(page.rows), projectUids(rows))
+  const picked = mine.filter((tm) => selection.selected.has(tm.uid)).map((tm) => tm.uid)
+  // a new team leaves the project; an edited original goes back to the game's, with the game's squad
+  const deleteTeams = async (uids: string[]) => {
+    for (const team of mine.filter((tm) => uids.includes(tm.uid))) {
+      if (team.original_id == null) {
+        removeTeam(team.uid)
+        continue
+      }
+      try {
+        removeTeam(team.uid, await api.originalSquad(team.original_id))
+      } catch (e) {
+        toast.error(e instanceof ApiError ? e.message : t('share.deleteFailed', { name: team.name }))
+      }
+    }
+  }
 
   const leagueOptions = [
     { value: ALL, label: t('teams.allLeagues') },
@@ -125,18 +146,21 @@ export function TeamsPage() {
 
   return (
     <div className={LIST_PAGE}>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold">{t('nav.teams')}</h1>
           <p className="text-sm text-muted-foreground">{t('teams.description')}</p>
         </div>
-        <Button
-          onClick={create}
-          disabled={firstFreeLeague === null}
-          title={firstFreeLeague === null ? t('teams.allLeaguesFull', { max: leagueTeams.max }) : undefined}
-        >
-          <Plus /> {t('teams.new')}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ShareImportButton kind="teams" />
+          <Button
+            onClick={create}
+            disabled={firstFreeLeague === null}
+            title={firstFreeLeague === null ? t('teams.allLeaguesFull', { max: leagueTeams.max }) : undefined}
+          >
+            <Plus /> {t('teams.new')}
+          </Button>
+        </div>
       </div>
 
       <FilterBar active={list.active} onClear={list.clear}>
@@ -163,23 +187,28 @@ export function TeamsPage() {
             { value: 'locked', label: t('teams.statusLocked') },
           ]}
         />
+        <BulkActions kind="teams" selection={selection} picked={picked} onDelete={deleteTeams} />
       </FilterBar>
 
       <ScrollTable>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-8">
+              <SelectAllCheckbox selection={selection} />
+            </TableHead>
             <TableHead className="w-12" />
             <TableHead data-grow>{t('list.colName')}</TableHead>
             <TableHead>{t('teams.colLeague')}</TableHead>
             <TableHead>{t('nav.players')}</TableHead>
             <TableHead>{t('list.colId')}</TableHead>
+            <DateHeads />
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {page.total === 0 && (
             <TableRow>
-              <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+              <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                 {list.active ? t('teams.noneFiltered') : t('teams.noneYet')}
               </TableCell>
             </TableRow>
@@ -189,6 +218,7 @@ export function TeamsPage() {
               <ProjectTeamRow
                 key={r.team.uid}
                 team={r.team}
+                selection={selection}
                 leagueHidden={r.team.leagues.length > 0 && r.team.leagues.every((l) => typeof l === 'string' && hiddenLeagues.has(l))}
                 original={r.team.original_id != null ? originalById.get(r.team.original_id) : undefined}
                 originalHidden={r.team.original_id != null && isTeamHidden(r.team.original_id)}
@@ -208,6 +238,7 @@ export function TeamsPage() {
                 title={t('teams.editOriginalHint')}
                 onClick={() => edit(r.team)}
               >
+                <TableCell />
                 <TableCell>
                   <OriginalCrest team={r.team} />
                 </TableCell>
@@ -229,6 +260,7 @@ export function TeamsPage() {
                 <TableCell>{r.team.league !== null ? leagueName(r.team.league) : '—'}</TableCell>
                 <TableCell className="tabular-nums">{r.team.player_count + squadDelta(r.team.id)}</TableCell>
                 <TableCell className="tabular-nums">{r.team.id}</TableCell>
+                <DateCells />
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <span className="flex items-center gap-1">
                     <OriginalTeamAction
@@ -247,12 +279,14 @@ export function TeamsPage() {
         </TableBody>
       </ScrollTable>
       <Pager page={page.page} pages={page.pages} total={page.total} pageSize={list.pageSize} onPage={list.setPage} />
+      <SelectAllDialog selection={selection} />
     </div>
   )
 }
 
 function ProjectTeamRow({
   team,
+  selection,
   leagueHidden,
   original,
   originalHidden,
@@ -262,6 +296,7 @@ function ProjectTeamRow({
   onToggleHidden,
 }: {
   team: Team
+  selection: ListSelection
   leagueHidden: boolean
   original?: OriginalTeam // the game's team this entry edits
   originalHidden: boolean
@@ -274,6 +309,9 @@ function ProjectTeamRow({
   const hidden = original ? originalHidden : !!team.hidden
   return (
     <TableRow className="cursor-pointer" onClick={onOpen}>
+      <TableCell onClick={(e) => e.stopPropagation()}>
+        <RowCheckbox selection={selection} value={team.uid} />
+      </TableCell>
       <TableCell>
         <TeamCrest team={team} />
       </TableCell>
@@ -295,6 +333,7 @@ function ProjectTeamRow({
       <TableCell className="tabular-nums text-muted-foreground">
         {team.original_id ?? team.team_id ?? t('common.auto')}
       </TableCell>
+      <DateCells entry={team} />
       <TableCell>
         <span className="flex items-center gap-1">
           <EntityIssues uid={team.uid} />
