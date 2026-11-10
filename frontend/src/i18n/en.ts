@@ -4,7 +4,7 @@ import type { MessageKey } from './pt-BR'
 export const en: Record<MessageKey, string> = {
   'app.documentTitle': 'FS4 Patch Studio',
   'app.subtitle': 'FIFA Street mod editor',
-  'app.credits': 'Made by',
+  'app.credits': 'By',
   'app.sourceCode': 'Source code',
   'app.donate': 'Support the project',
   'app.version': 'Version',

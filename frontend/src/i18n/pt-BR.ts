@@ -2,7 +2,7 @@
 export const ptBR = {
   'app.documentTitle': 'FS4 Patch Studio',
   'app.subtitle': 'Editor de mods do FIFA Street',
-  'app.credits': 'Criado por',
+  'app.credits': 'By',
   'app.sourceCode': 'Código-fonte',
   'app.donate': 'Apoiar o projeto',
   'app.version': 'Versão',
