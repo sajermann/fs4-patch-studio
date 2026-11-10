@@ -39,7 +39,6 @@ export function TeamLeagues({ team }: { team: Team }) {
   const [q, setQ] = useState('')
   const [leaving, setLeaving] = useState<LeagueKey>()
   const issues = useIssues(team.uid).filter((i) => i.field === 'leagues' || i.field?.startsWith('leagues.'))
-
   const item = (key: LeagueKey): PickerItem<LeagueKey> => ({
     key,
     icon: <LeagueIcon league={key} />,
@@ -53,8 +52,9 @@ export function TeamLeagues({ team }: { team: Team }) {
     { label: t('teams.originalLeagues'), items: originals.map((l) => l.id).filter(shown).map(item) },
   ]
 
+  // fills the height the page leaves; only the league list scrolls, the header stays put
   return (
-    <Card>
+    <Card className="min-h-48 flex-1">
       <CardHeader>
         <CardTitle>{t('teamEdit.leagues')}</CardTitle>
         <CardDescription>{t('teamEdit.leagueHint')}</CardDescription>
@@ -64,7 +64,7 @@ export function TeamLeagues({ team }: { team: Team }) {
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-h-0 flex-1 overflow-y-auto">
         <FieldIssues issues={issues} />
         {team.leagues.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t('teamEdit.noLeagues')}</p>

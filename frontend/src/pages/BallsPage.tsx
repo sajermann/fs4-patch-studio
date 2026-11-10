@@ -199,13 +199,14 @@ export function BallsPage() {
             <TableHead>{t('balls.colStadiums')}</TableHead>
             <TableHead>{t('balls.colId')}</TableHead>
             <DateHeads />
+            <TableHead className="w-12" />
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {page.total === 0 && (
             <TableRow>
-              <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+              <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                 {originalsQuery.error
                   ? t('balls.originalsFailed', { error: originalsQuery.error.message })
                   : originals === undefined
@@ -235,6 +236,7 @@ export function BallsPage() {
                   <TableCell className="tabular-nums">{b.id}</TableCell>
                   <DateCells />
                   <TableCell />
+                  <TableCell />
                 </TableRow>
               )
             }
@@ -261,8 +263,10 @@ export function BallsPage() {
                 <TableCell className="tabular-nums text-muted-foreground">{b.original_id ?? b.code ?? t('common.auto')}</TableCell>
                 <DateCells entry={b} />
                 <TableCell>
-                  <span className="flex items-center gap-1">
-                    <EntityIssues uid={b.uid} />
+                  <EntityIssues uid={b.uid} />
+                </TableCell>
+                <TableCell>
+                  <span className="flex items-center justify-end gap-1">
                     {!original && (
                       <HideButton
                         hidden={!!b.hidden}

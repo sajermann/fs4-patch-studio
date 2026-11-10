@@ -185,7 +185,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="space-y-6">
       <h1 className="text-2xl font-semibold">{t('nav.settings')}</h1>
       <GameCard status={status} />
       <Card>

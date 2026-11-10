@@ -1,5 +1,5 @@
 import { DateCells, DateHeads } from '@/components/common/dates'
-import { Eye, EyeOff, Lock, LockOpen, Plus } from 'lucide-react'
+import { Lock, LockOpen, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError, api } from '@/api/client'
@@ -18,6 +18,7 @@ import {
   SearchInput,
   useListParams,
   usePage,
+  YesNoCell,
 } from '@/components/common/list'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -200,15 +201,17 @@ export function TeamsPage() {
             <TableHead data-grow>{t('list.colName')}</TableHead>
             <TableHead>{t('teams.colLeague')}</TableHead>
             <TableHead>{t('nav.players')}</TableHead>
+            <TableHead className="text-center">{t('teams.colRealKits')}</TableHead>
             <TableHead>{t('list.colId')}</TableHead>
             <DateHeads />
+            <TableHead className="w-12" />
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {page.total === 0 && (
             <TableRow>
-              <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
+              <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
                 {list.active ? t('teams.noneFiltered') : t('teams.noneYet')}
               </TableCell>
             </TableRow>
@@ -259,16 +262,18 @@ export function TeamsPage() {
                 </TableCell>
                 <TableCell>{r.team.league !== null ? leagueName(r.team.league) : '—'}</TableCell>
                 <TableCell className="tabular-nums">{r.team.player_count + squadDelta(r.team.id)}</TableCell>
+                <YesNoCell value={false} title={t('teams.gameKits')} />
                 <TableCell className="tabular-nums">{r.team.id}</TableCell>
                 <DateCells />
+                <TableCell />
                 <TableCell onClick={(e) => e.stopPropagation()}>
-                  <span className="flex items-center gap-1">
+                  <span className="flex items-center justify-end gap-1">
                     <OriginalTeamAction
-                    team={r.team}
-                    gameHidden={r.team.league !== null && gameHiddenLeagues.has(r.team.league)}
-                    locked={teamLocked(r.team)}
-                    hidden={isTeamHidden(r.team.id)}
-                    onLock={() => setTeamLocked(r.team, !teamLocked(r.team))}
+                      team={r.team}
+                      gameHidden={r.team.league !== null && gameHiddenLeagues.has(r.team.league)}
+                      locked={teamLocked(r.team)}
+                      hidden={isTeamHidden(r.team.id)}
+                      onLock={() => setTeamLocked(r.team, !teamLocked(r.team))}
                       onToggleHidden={() => toggleTeam(r.team.id)}
                     />
                   </span>
@@ -330,13 +335,16 @@ function ProjectTeamRow({
       </TableCell>
       <TableCell>{leagueName}</TableCell>
       <TableCell className="tabular-nums">{original ? original.player_count + players : players}</TableCell>
+      <YesNoCell value={!!team.use_real_kits} title={t(team.use_real_kits ? 'teams.realKitsOn' : original ? 'teams.gameKits' : 'teams.realKitsOff')} />
       <TableCell className="tabular-nums text-muted-foreground">
         {team.original_id ?? team.team_id ?? t('common.auto')}
       </TableCell>
       <DateCells entry={team} />
       <TableCell>
-        <span className="flex items-center gap-1">
-          <EntityIssues uid={team.uid} />
+        <EntityIssues uid={team.uid} />
+      </TableCell>
+      <TableCell>
+        <span className="flex items-center justify-end gap-1">
           <HideButton
             hidden={hidden}
             onToggle={onToggleHidden}
@@ -368,19 +376,18 @@ function OriginalTeamAction({
   const { t } = useI18n()
   if (team.lockable)
     return (
-      <Button variant="ghost" size="sm" onClick={onLock}>
+      // same width as the hide button, so the action column lines up
+      <Button variant="ghost" size="sm" className="min-w-24 justify-start" onClick={onLock}>
         {locked ? <LockOpen /> : <Lock />} {locked ? t('list.unlock') : t('list.lock')}
       </Button>
     )
   if (team.league === null || gameHidden) return null
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      title={hidden ? t('teams.originalShowHint') : t('teams.originalHideHint')}
-      onClick={onToggleHidden}
-    >
-      {hidden ? <Eye /> : <EyeOff />} {hidden ? t('list.show') : t('list.hide')}
-    </Button>
+    <HideButton
+      hidden={hidden}
+      onToggle={onToggleHidden}
+      hideHint={t('teams.originalHideHint')}
+      showHint={t('teams.originalShowHint')}
+    />
   )
 }

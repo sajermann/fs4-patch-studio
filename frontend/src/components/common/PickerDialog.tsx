@@ -65,19 +65,20 @@ export function PickerDialog<K extends string | number>({
   const shown = groups.filter((g) => g.items.length > 0)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         {header}
-        <SearchInput autoFocus={!!header} value={query} onChange={onQuery} placeholder={placeholder} />
+        <SearchInput autoFocus={!!header} value={query} onChange={onQuery} placeholder={placeholder} className="w-full" />
         {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
-        {shown.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{empty}</p>
-        ) : (
-          <div className="max-h-96 overflow-y-auto pr-3">
-            {shown.map((g, k) => (
+        {/* fixed height: searching does not shrink the dialog (no flicker); many results scroll */}
+        <div className="h-96 overflow-y-auto pr-3">
+          {shown.length === 0 ? (
+            <p className="py-2 text-sm text-muted-foreground">{empty}</p>
+          ) : (
+            shown.map((g, k) => (
               <div key={k}>
                 {g.label && (
                   <p className="sticky top-0 z-10 bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground">{g.label}</p>
@@ -86,7 +87,8 @@ export function PickerDialog<K extends string | number>({
                   {g.items.map((item) => (
                     <li key={String(item.key)} className="flex items-center justify-between gap-2 py-2">
                       <span className="flex min-w-0 items-center gap-2">
-                        {item.icon}
+                        {/* a box that never shrinks: a long title does not squeeze the image (rows stay aligned) */}
+                        <span className="flex h-9 min-w-9 shrink-0 items-center justify-center">{item.icon}</span>
                         <span className="min-w-0">
                           <span className="block truncate">{item.title}</span>
                           {item.subtitle && <span className="block truncate text-xs text-muted-foreground">{item.subtitle}</span>}
@@ -105,9 +107,9 @@ export function PickerDialog<K extends string | number>({
                   ))}
                 </ul>
               </div>
-            ))}
-          </div>
-        )}
+            ))
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   )

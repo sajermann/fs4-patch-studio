@@ -102,7 +102,7 @@ export function WorldTourPage() {
   const current = SIDES.find((s) => s.side === adding)
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">{t('nav.worldTour')}</h1>
         <p className="text-sm text-muted-foreground">{t('worldTour.description')}</p>

@@ -188,24 +188,52 @@ export function OriginalBadge({ entry, team, league }: { entry?: string; team?: 
   )
 }
 
-/** Error/warning counters for one entity, shown in tables. */
+/** Error/warning counters for one entity, shown in tables; hovering them lists the messages. */
 export function EntityIssues({ uid }: { uid: string }) {
   const issues = useIssues(uid)
   const errors = issues.filter((i) => i.severity === 'error').length
   const warnings = issues.length - errors
+  if (!issues.length) return null
   return (
-    <span className="inline-flex gap-2 text-xs">
-      {errors > 0 && (
-        <span className="inline-flex items-center gap-1 text-destructive">
-          <CircleAlert className="size-3" /> {errors}
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex cursor-help gap-2 text-xs">
+          {errors > 0 && (
+            <span className="inline-flex items-center gap-1 text-destructive">
+              <CircleAlert className="size-3" /> {errors}
+            </span>
+          )}
+          {warnings > 0 && (
+            <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-500">
+              <AlertTriangle className="size-3" /> {warnings}
+            </span>
+          )}
         </span>
-      )}
-      {warnings > 0 && (
-        <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-500">
-          <AlertTriangle className="size-3" /> {warnings}
-        </span>
-      )}
-    </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm">
+        <IssueList issues={issues} />
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** The messages of a list of issues, errors first, each with its icon (the tooltip of the counters). */
+function IssueList({ issues }: { issues: Issue[] }) {
+  const { t } = useI18n()
+  const sorted = [...issues].sort((a, b) => (a.severity === 'error' ? 0 : 1) - (b.severity === 'error' ? 0 : 1))
+  return (
+    <ul className="space-y-1">
+      {sorted.map((i, k) => (
+        <li key={k} className="flex items-start gap-1.5">
+          {i.severity === 'error' ? (
+            <CircleAlert className="mt-0.5 size-3 shrink-0 text-red-400 dark:text-red-600" />
+          ) : (
+            <AlertTriangle className="mt-0.5 size-3 shrink-0 text-amber-400 dark:text-amber-600" />
+          )}
+          <span>{issueText(t, i)}</span>
+        </li>
+      ))}
+    </ul>
   )
 }
 

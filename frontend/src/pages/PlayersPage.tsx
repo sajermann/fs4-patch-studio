@@ -16,6 +16,7 @@ import {
   SearchInput,
   useListParams,
   usePage,
+  YesNoCell,
 } from '@/components/common/list'
 import { OriginalPlayerAvatar, PlayerAvatar } from '@/components/common/PlayerPhoto'
 import { useTeamName } from '@/lib/members'
@@ -26,6 +27,11 @@ import { useFrom } from '@/lib/back'
 import { linkOf, playerPath, playerRef } from '@/lib/players'
 import { newUid, useProject, useSameAsGame } from '@/state/project'
 import { useLookups, useOriginalPlayers, useOriginalTeams } from '@/state/queries'
+
+/** What head a project player wears: a real face of a pack, the game's scanned one (an original kept as is) or the
+ * generic one. */
+const faceKind = (p: Player) =>
+  p.generic ? 'players.faceGeneric' : p.face ? 'players.faceReal' : p.original_id != null ? 'players.faceGame' : 'players.faceGeneric'
 
 type Row = { kind: 'project'; player: Player } | { kind: 'original'; player: OriginalPlayer }
 
@@ -154,15 +160,17 @@ export function PlayersPage() {
             <TableHead>{t('players.colTeam')}</TableHead>
             <TableHead>{t('players.colNumber')}</TableHead>
             <TableHead>{t('players.colPosition')}</TableHead>
+            <TableHead className="text-center">{t('players.colFace')}</TableHead>
             <TableHead>{t('list.colId')}</TableHead>
             <DateHeads />
+            <TableHead className="w-12" />
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {page.total === 0 && (
             <TableRow>
-              <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
+              <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
                 {originalsQuery.error
                   ? t('players.originalsFailed', { error: originalsQuery.error.message })
                   : originals === undefined
@@ -195,8 +203,10 @@ export function PlayersPage() {
                   </TableCell>
                   <TableCell className="tabular-nums">{p.number ?? '—'}</TableCell>
                   <TableCell>{p.position !== null ? position.get(p.position) : '—'}</TableCell>
+                  <YesNoCell value={!p.generic_head} title={t(p.generic_head ? 'players.faceGeneric' : 'players.faceGame')} />
                   <TableCell className="tabular-nums">{p.id}</TableCell>
                   <DateCells />
+                  <TableCell />
                   <TableCell />
                 </TableRow>
               )
@@ -227,11 +237,14 @@ export function PlayersPage() {
                     ? position.get((p.teams[0]?.position ?? defaults[p.uid]?.position)!)
                     : '—'}
                 </TableCell>
+                <YesNoCell value={faceKind(p) !== 'players.faceGeneric'} title={t(faceKind(p))} />
                 <TableCell className="tabular-nums text-muted-foreground">{p.original_id ?? p.player_id ?? t('common.auto')}</TableCell>
                 <DateCells entry={p} />
                 <TableCell>
-                  <span className="flex items-center gap-1">
-                    <EntityIssues uid={p.uid} />
+                  <EntityIssues uid={p.uid} />
+                </TableCell>
+                <TableCell>
+                  <span className="flex items-center justify-end gap-1">
                     <HideButton
                       hidden={!!p.hidden}
                       onToggle={() => updatePlayer(p.uid, { hidden: !p.hidden })}

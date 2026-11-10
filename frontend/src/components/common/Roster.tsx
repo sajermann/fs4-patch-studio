@@ -192,9 +192,10 @@ export function RosterCard({ team }: { team: Team }) {
   const inheritedPosition = (m: Member) =>
     m.position != null ? t('common.inherited', { value: positionAbbr.get(m.position) ?? m.position }) : t('street.reset')
 
+  // the roster card takes the height left over and scrolls its table; the takers card below stays whole
   return (
-    <div className="space-y-4">
-      <Card>
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <Card className="min-h-60 flex-1">
         <CardHeader>
           <CardTitle>
             {t('teamEdit.roster')}{' '}
@@ -221,7 +222,7 @@ export function RosterCard({ team }: { team: Team }) {
             </div>
           </CardAction>
         </CardHeader>
-        <CardContent>
+        <CardContent className="min-h-0 flex-1 overflow-y-auto">
           <FieldIssues issues={rosterIssues} />
           <Table>
             <TableHeader>
@@ -231,7 +232,7 @@ export function RosterCard({ team }: { team: Team }) {
                 <TableHead className="w-32">{t('players.colPosition')}</TableHead>
                 <RoleHeads />
                 <TableHead className="w-20" />
-                <TableHead className="w-12" />
+                <TableHead className="w-28" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -257,8 +258,8 @@ export function RosterCard({ team }: { team: Team }) {
                   <RoleCells player={m.ref} roles={roles} />
                   <TableCell>{m.player && <EntityIssues uid={m.player.uid} />}</TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" title={t('roster.removeFromTeam')} onClick={() => void remove(m)}>
-                      <UserMinus />
+                    <Button variant="ghost" size="sm" title={t('roster.removeFromTeam')} onClick={() => void remove(m)}>
+                      <UserMinus /> {t('common.remove')}
                     </Button>
                   </TableCell>
                 </MemberRow>
@@ -283,15 +284,17 @@ export function RosterCard({ team }: { team: Team }) {
           </AlertDialogContent>
         </AlertDialog>
       </Card>
-      <TakersCard
-        entity={team.uid}
-        players={active.map((m) => ({ value: m.ref, label: m.name }))}
-        captain={captain}
-        takers={takers}
-        fallback={original ? undefined : { label: t('takers.captain', { name: active.find((m) => m.ref === captain)?.name ?? '—' }) }}
-        onCaptainChange={(c) => updateTeam(team.uid, { captain: c })}
-        onChange={(takers) => updateTeam(team.uid, { takers })}
-      />
+      <div className="shrink-0">
+        <TakersCard
+          entity={team.uid}
+          players={active.map((m) => ({ value: m.ref, label: m.name }))}
+          captain={captain}
+          takers={takers}
+          fallback={original ? undefined : { label: t('takers.captain', { name: active.find((m) => m.ref === captain)?.name ?? '—' }) }}
+          onCaptainChange={(c) => updateTeam(team.uid, { captain: c })}
+          onChange={(takers) => updateTeam(team.uid, { takers })}
+        />
+      </div>
     </div>
   )
 }

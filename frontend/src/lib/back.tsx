@@ -43,7 +43,7 @@ export function useKeepBack() {
 
 export function BackButton({ back }: { back: Back }) {
   return (
-    <Button variant="ghost" size="sm" asChild>
+    <Button variant="ghost" size="sm" className="self-start" asChild>
       <Link to={back.to} state={backState(back)}>
         <ArrowLeft /> {back.label}
       </Link>

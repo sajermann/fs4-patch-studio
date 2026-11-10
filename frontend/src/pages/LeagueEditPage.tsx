@@ -1,6 +1,6 @@
 import { EntryDates } from '@/components/common/dates'
-import { Copy, LoaderCircle, Plus, RotateCcw, Trash2, X } from 'lucide-react'
-import { type ReactNode, useState } from 'react'
+import { Copy, LoaderCircle, Plus, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { type ReactNode, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError, api, imageUrl } from '@/api/client'
@@ -24,7 +24,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table'
 import { BackButton, useBack, useFrom, useGoBack, useKeepBack } from '@/lib/back'
 import { useI18n } from '@/i18n'
@@ -126,8 +125,9 @@ function LeagueTeamsCard({ league, leagueName, readOnly }: { league: LeagueKey; 
   const from = useFrom(leagueName)
   const [addOpen, setAddOpen] = useState(false)
   const [removing, setRemoving] = useState<LeagueTeam>()
+  // fills the height the page leaves; only the team list scrolls, the header stays put
   return (
-    <Card>
+    <Card className="min-h-48 flex-1">
       <CardHeader>
         <CardTitle>
           {t('leagueEdit.teams')}{' '}
@@ -149,7 +149,7 @@ function LeagueTeamsCard({ league, leagueName, readOnly }: { league: LeagueKey; 
           </CardAction>
         )}
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-h-0 flex-1 overflow-y-auto">
         {teams.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t('leagueEdit.noTeams')}</p>
         ) : (
@@ -237,7 +237,7 @@ export function LeagueEditPage() {
   if (!league) {
     if (game?.hidden) {
       return (
-        <div className="max-w-3xl space-y-4">
+        <div className="flex h-full flex-col gap-4">
           <BackButton back={back} />
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold">{game.name}</h1>
@@ -280,9 +280,9 @@ export function LeagueEditPage() {
   }
 
   return (
-    <div className="max-w-3xl space-y-4">
+    <div className="flex h-full flex-col gap-4">
       <BackButton back={back} />
-      <div className="flex items-center justify-between">
+      <div className="flex justify-between">
         <div className="flex items-center gap-2">
           <div>
             <h1 className="text-2xl font-semibold">{l.name || t('leagues.new')}</h1>
@@ -292,60 +292,63 @@ export function LeagueEditPage() {
           {original && isLeagueHidden(l.original_id!) && <OutOfPatchBadge alert label={t('leagues.hiddenByProject')} />}
           {!original && l.hidden && <OutOfPatchBadge alert />}
         </div>
-        <div className="flex gap-2">
-          <ShareSingleImport kind="leagues" entry={l} pathOf={(e) => leaguePath(leagueKey(e as League))} />
-          <ShareDownloadButton kind="leagues" uid={l.uid} unchanged={sameAsGame(l.uid)} />
-          {original ? (
-            <HideButton
-              variant="outline"
-              hidden={isLeagueHidden(l.original_id!)}
-              onToggle={() => toggleLeague(l.original_id!)}
-              hideHint={t('leagues.originalHideHint')}
-              showHint={t('leagues.originalShowHint')}
-            />
-          ) : (
-            <HideButton
-              variant="outline"
-              hidden={!!l.hidden}
-              onToggle={() => updateLeague(l.uid, { hidden: !l.hidden })}
-              hideHint={t('leagues.hideHint')}
-              showHint={t('leagues.showHint')}
-            />
-          )}
-          {original ? (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!edited}
-              title={edited ? t('leagueEdit.restoreOriginalHint') : t('common.unchangedHint')}
-              onClick={() => setRestoreOpen(true)}
-            >
-              <RotateCcw /> {t('teamEdit.restoreOriginal')}
-            </Button>
-          ) : (
-            <>
+        <div className="flex flex-col items-end justify-between">
+          <div className="flex gap-2">
+            <ShareSingleImport kind="leagues" entry={l} pathOf={(e) => leaguePath(leagueKey(e as League))} />
+            <ShareDownloadButton kind="leagues" uid={l.uid} unchanged={sameAsGame(l.uid)} />
+            {original ? (
+              <HideButton
+                variant="outline"
+                hidden={isLeagueHidden(l.original_id!)}
+                onToggle={() => toggleLeague(l.original_id!)}
+                hideHint={t('leagues.originalHideHint')}
+                showHint={t('leagues.originalShowHint')}
+              />
+            ) : (
+              <HideButton
+                variant="outline"
+                hidden={!!l.hidden}
+                onToggle={() => updateLeague(l.uid, { hidden: !l.hidden })}
+                hideHint={t('leagues.hideHint')}
+                showHint={t('leagues.showHint')}
+              />
+            )}
+            {original ? (
               <Button
                 variant="outline"
                 size="sm"
-                disabled={!copy.canCopyLeague}
-                title={copy.canCopyLeague ? t('leagueEdit.copyHint') : t('leagueEdit.copyMax', { max: copy.maxLeagues })}
-                onClick={() => {
-                  const uid = copy.copyLeague(l.uid)
-                  if (uid) navigate(leaguePath(uid), keepBack)
-                }}
+                disabled={!edited}
+                title={edited ? t('leagueEdit.restoreOriginalHint') : t('common.unchangedHint')}
+                onClick={() => setRestoreOpen(true)}
               >
-                <Copy /> {t('common.copy')}
+                <RotateCcw /> {t('teamEdit.restoreOriginal')}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
-                <Trash2 /> {t('leagueEdit.delete')}
-              </Button>
-            </>
-          )}
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!copy.canCopyLeague}
+                  title={copy.canCopyLeague ? t('leagueEdit.copyHint') : t('leagueEdit.copyMax', { max: copy.maxLeagues })}
+                  onClick={() => {
+                    const uid = copy.copyLeague(l.uid)
+                    if (uid) navigate(leaguePath(uid), keepBack)
+                  }}
+                >
+                  <Copy /> {t('common.copy')}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}>
+                  <Trash2 /> {t('leagueEdit.delete')}
+                </Button>
+              </>
+            )}
+          </div>
+          <EntityIssues uid={l.uid} />
         </div>
       </div>
       {original && <p className="text-sm text-muted-foreground">{t('leagueEdit.originalDescription', { id: l.original_id! })}</p>}
-      <Card>
-        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+      <Card className="shrink-0">
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-3">
           <Field label={t('list.colName')} entity={l.uid} field="name">
             <Input value={l.name} onChange={(e) => updateLeague(l.uid, { name: e.target.value })} autoFocus={!l.name} />
           </Field>
@@ -355,44 +358,50 @@ export function LeagueEditPage() {
           <Field label={t('leagueEdit.sortOrder')} entity={l.uid} field="sort_order" hint={t('leagueEdit.sortOrderHint')}>
             <NumberInput value={l.sort_order} onChange={(v) => updateLeague(l.uid, { sort_order: v ?? 0 })} />
           </Field>
-          <Field
-            label={t('leagueEdit.logo')}
-            entity={l.uid}
-            field="image"
-            hint={original ? `${t('leagueEdit.logoHint')} ${t('leagueEdit.originalLogoHint')}` : t('leagueEdit.logoHint')}
-          >
-            <LeagueImageInput
-              path={l.image}
-              preview="size-16"
-              onUpload={async (f) => updateLeague(l.uid, { image: (await api.uploadImage(f)).path })}
-              onRemove={original ? undefined : () => updateLeague(l.uid, { image: undefined })}
-            />
-          </Field>
-          <Field label={t('leagueEdit.wideImage')} entity={l.uid} field="wide_image" hint={t('leagueEdit.wideImageHint')}>
-            <LeagueImageInput
-              path={l.wide_image}
-              preview={`h-12 aspect-[250/116] ${l.wide_image_fit === 'cover' ? 'object-cover' : 'object-contain'}`}
-              fallback={l.image}
-              onUpload={async (f) => updateLeague(l.uid, { wide_image: (await api.uploadImage(f)).path })}
-              onRemove={() => updateLeague(l.uid, { wide_image: undefined })}
-            />
-          </Field>
-          <Field label={t('leagueEdit.wideImageFit')} entity={l.uid} field="wide_image_fit">
-            <Select
-              value={l.wide_image_fit ?? 'contain'}
-              onValueChange={(v) => updateLeague(l.uid, { wide_image_fit: v as 'contain' | 'cover' })}
+          {/* images: the logo and the wide image side by side, each in a drop zone of the same height */}
+          <div className="grid gap-4 border-t pt-4 sm:col-span-full sm:grid-cols-2">
+            <Field
+              label={t('leagueEdit.logo')}
+              entity={l.uid}
+              field="image"
+              hint={original ? `${t('leagueEdit.logoHint')} ${t('leagueEdit.originalLogoHint')}` : t('leagueEdit.logoHint')}
             >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="contain">{t('leagueEdit.fitContain')}</SelectItem>
-                <SelectItem value="cover">{t('leagueEdit.fitCover')}</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <div className="sm:col-span-2">
-            <EntityIssues uid={l.uid} />
+              <LeagueImageInput
+                path={l.image}
+                frame="size-28"
+                onUpload={async (f) => updateLeague(l.uid, { image: (await api.uploadImage(f)).path })}
+                onRemove={original ? undefined : () => updateLeague(l.uid, { image: undefined })}
+              />
+            </Field>
+            <div className="space-y-4">
+              <Field label={t('leagueEdit.wideImage')} entity={l.uid} field="wide_image" hint={t('leagueEdit.wideImageHint')}>
+                <LeagueImageInput
+                  path={l.wide_image}
+                  // the frame has the selector's proportion, so the fit below shows as it will look
+                  frame="h-28 aspect-[250/116] bg-black/60"
+                  fit={l.wide_image_fit === 'cover' ? 'object-cover' : 'object-contain'}
+                  fallback={l.image}
+                  onUpload={async (f) => updateLeague(l.uid, { wide_image: (await api.uploadImage(f)).path })}
+                  onRemove={() => updateLeague(l.uid, { wide_image: undefined })}
+                />
+              </Field>
+              <Field label={t('leagueEdit.wideImageFit')} entity={l.uid} field="wide_image_fit">
+                <div className="inline-flex w-full rounded-md border p-0.5">
+                  {(['contain', 'cover'] as const).map((fit) => (
+                    <Button
+                      key={fit}
+                      type="button"
+                      size="sm"
+                      variant={(l.wide_image_fit ?? 'contain') === fit ? 'secondary' : 'ghost'}
+                      className="flex-1"
+                      onClick={() => updateLeague(l.uid, { wide_image_fit: fit })}
+                    >
+                      {t(fit === 'contain' ? 'leagueEdit.fitContain' : 'leagueEdit.fitCover')}
+                    </Button>
+                  ))}
+                </div>
+              </Field>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -438,44 +447,89 @@ export function LeagueEditPage() {
   )
 }
 
+/** A league image in a drop zone (click or drop a file, like the team crest). With an image, Replace and Remove
+ * buttons go under it; without one, the zone asks for a file. `frame` sizes the preview, `fit` places the image in
+ * it; `fallback` (the logo, for the wide image) is shown faded when there is no image of its own. */
 function LeagueImageInput({
   path,
-  preview,
+  frame,
+  fit = 'object-contain',
   fallback,
   onUpload,
   onRemove,
 }: {
   path?: string
-  preview: string
+  frame: string
+  fit?: string
   fallback?: string
   onUpload: (file: File) => Promise<void>
   onRemove?: () => void
 }) {
   const { t } = useI18n()
+  const input = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
   const shown = path ?? fallback
+  const upload = async (f: File) => {
+    setBusy(true)
+    try {
+      await onUpload(f)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t('image.uploadFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const ask = (
+    <span className="flex flex-col items-center gap-1 rounded-md bg-background/80 px-3 py-2 text-xs text-muted-foreground">
+      <Upload className="size-4" /> {t('image.clickOrDrop')}
+    </span>
+  )
   return (
-    <div className="flex items-center gap-3">
-      {shown && (
-        <img src={imageUrl(shown)} alt="" className={`${preview} rounded border bg-muted ${path ? '' : 'opacity-50'}`} />
-      )}
-      <Input
+    <div className="space-y-2">
+      <div
+        className="flex h-36 cursor-pointer items-center justify-center rounded-lg border border-dashed bg-[repeating-conic-gradient(var(--muted)_0_25%,transparent_0_50%)] bg-[length:16px_16px] transition-colors hover:border-foreground/40"
+        title={t('image.clickOrDrop')}
+        onClick={() => !busy && input.current?.click()}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault()
+          const f = e.dataTransfer.files[0]
+          if (f && !busy) void upload(f)
+        }}
+      >
+        {busy ? (
+          <LoaderCircle className="animate-spin text-muted-foreground" />
+        ) : shown ? (
+          <div className={`${frame} relative flex items-center justify-center overflow-hidden rounded`}>
+            <img src={imageUrl(shown)} alt="" className={`size-full ${fit} ${path ? '' : 'opacity-40'}`} />
+            {!path && <div className="absolute inset-0 flex items-center justify-center">{ask}</div>}
+          </div>
+        ) : (
+          ask
+        )}
+      </div>
+      <input
+        ref={input}
         type="file"
         accept="image/png,image/jpeg,image/webp"
-        onChange={async (e) => {
+        className="hidden"
+        onChange={(e) => {
           const f = e.target.files?.[0]
           e.target.value = ''
-          if (!f) return
-          try {
-            await onUpload(f)
-          } catch (err) {
-            toast.error(err instanceof ApiError ? err.message : t('image.uploadFailed'))
-          }
+          if (f) void upload(f)
         }}
       />
-      {path && onRemove && (
-        <Button variant="ghost" size="sm" onClick={onRemove}>
-          {t('common.remove')}
-        </Button>
+      {path && (
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => input.current?.click()}>
+            <Upload /> {t('common.replace')}
+          </Button>
+          {onRemove && (
+            <Button variant="outline" size="sm" disabled={busy} onClick={onRemove}>
+              <Trash2 /> {t('common.remove')}
+            </Button>
+          )}
+        </div>
       )}
     </div>
   )

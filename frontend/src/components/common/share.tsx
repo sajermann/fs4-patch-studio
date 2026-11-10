@@ -72,7 +72,8 @@ export function SelectAllDialog({ selection }: { selection: ListSelection }) {
   const { t } = useI18n()
   return (
     <AlertDialog open={selection.askAll} onOpenChange={selection.setAskAll}>
-      <AlertDialogContent>
+      {/* wider than the default: three buttons with counts do not fit in max-w-sm */}
+      <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-2rem)] data-[size=default]:sm:max-w-lg">
         <AlertDialogHeader>
           <AlertDialogTitle>{t('share.selectAllTitle')}</AlertDialogTitle>
           <AlertDialogDescription>

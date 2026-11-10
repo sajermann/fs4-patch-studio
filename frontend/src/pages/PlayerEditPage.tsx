@@ -91,8 +91,8 @@ function DataTab({ player }: { player: Player }) {
   const nationality = player.fields.nationality
 
   return (
-    <div className="space-y-4">
-    <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="grid shrink-0 gap-4 lg:grid-cols-[1fr_260px]">
       <Card>
         <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
           <Field label={t('playerEdit.firstName')} entity={player.uid} field="first_name">
@@ -173,19 +173,6 @@ function DataTab({ player }: { player: Player }) {
             </Select>
           </Field>
           <PreferredPosition player={player} />
-          <div className="flex items-center gap-2 sm:col-span-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="flex items-center gap-2">
-                  <Checkbox id="generic" checked={player.generic} disabled />
-                  <Label htmlFor="generic" className="font-normal">
-                    {t('playerEdit.generic')}
-                  </Label>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{t('playerEdit.genericHint')}</TooltipContent>
-            </Tooltip>
-          </div>
         </CardContent>
       </Card>
       <PhotoCard player={player} />
@@ -778,10 +765,12 @@ export function PlayerEditPage() {
 
   const name = player.display_name || `${player.first_name} ${player.last_name}`.trim()
   const original = player.original_id != null
+  // the Data tab fills the viewport: its team list scrolls inside its card, not the page
+  const fill = tabs.value === 'data'
   return (
-    <div className="max-w-7xl space-y-4">
+    <div className={fill ? 'flex h-full min-h-[40rem] flex-col gap-4' : 'flex flex-col gap-4'}>
       <BackButton back={back} />
-      <div className="flex items-center justify-between">
+      <div className="flex justify-between">
         <div className="flex items-center gap-3">
           <PlayerAvatar player={player} className="size-10" />
           <div>
@@ -790,62 +779,64 @@ export function PlayerEditPage() {
           </div>
           {original && <OriginalBadge entry={player.uid} />}
           {!original && player.hidden && <OutOfPatchBadge alert />}
-          <EntityIssues uid={player.uid} />
         </div>
-        <div className="flex gap-2">
-          <ShareSingleImport kind="players" entry={player} pathOf={(e) => playerPath(playerRef(e as Player))} />
-          <ShareDownloadButton kind="players" uid={player.uid} unchanged={sameAsGame(player.uid)} />
-          {!original && (
-            <HideButton
-              variant="outline"
-              hidden={!!player.hidden}
-              onToggle={() => updatePlayer(player.uid, { hidden: !player.hidden })}
-              hideHint={t('players.hideHint')}
-              showHint={t('players.showHint')}
-            />
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!hasBase}
-            title={hasBase ? t('playerEdit.baseHint') : t('apiError.players_base_not_set')}
-            onClick={() => setBaseOpen(true)}
-          >
-            <DatabaseZap /> {t('base.title')}
-          </Button>
-          {!original && (
+        <div className="flex flex-col items-end justify-between">
+          <div className="flex gap-2">
+            <ShareSingleImport kind="players" entry={player} pathOf={(e) => playerPath(playerRef(e as Player))} />
+            <ShareDownloadButton kind="players" uid={player.uid} unchanged={sameAsGame(player.uid)} />
+            {!original && (
+              <HideButton
+                variant="outline"
+                hidden={!!player.hidden}
+                onToggle={() => updatePlayer(player.uid, { hidden: !player.hidden })}
+                hideHint={t('players.hideHint')}
+                showHint={t('players.showHint')}
+              />
+            )}
             <Button
               variant="outline"
               size="sm"
-              title={t('playerEdit.copyHint')}
-              onClick={async () => {
-                const copied = await copyPlayer(player.uid)
-                if (copied) navigate(`/players/${copied}`, keepBack)
-              }}
+              disabled={!hasBase}
+              title={hasBase ? t('playerEdit.baseHint') : t('apiError.players_base_not_set')}
+              onClick={() => setBaseOpen(true)}
             >
-              <Copy /> {t('common.copy')}
+              <DatabaseZap /> {t('base.title')}
             </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            title={original ? t(edited ? 'playerEdit.restoreOriginalHint' : 'common.unchangedHint') : undefined}
-            disabled={original && !edited}
-            onClick={() => setDeleteOpen(true)}
-          >
-            {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('playerEdit.delete')}
-          </Button>
+            {!original && (
+              <Button
+                variant="outline"
+                size="sm"
+                title={t('playerEdit.copyHint')}
+                onClick={async () => {
+                  const copied = await copyPlayer(player.uid)
+                  if (copied) navigate(`/players/${copied}`, keepBack)
+                }}
+              >
+                <Copy /> {t('common.copy')}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              title={original ? t(edited ? 'playerEdit.restoreOriginalHint' : 'common.unchangedHint') : undefined}
+              disabled={original && !edited}
+              onClick={() => setDeleteOpen(true)}
+            >
+              {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('playerEdit.delete')}
+            </Button>
+          </div>
+          <EntityIssues uid={player.uid} />
         </div>
       </div>
       <BaseDataDialog player={player} open={baseOpen} onOpenChange={setBaseOpen} />
-      <Tabs {...tabs}>
+      <Tabs {...tabs} className={fill ? 'min-h-0 flex-1' : undefined}>
         <TabsList>
           <TabsTrigger value="data">{t('teamEdit.tabData')}</TabsTrigger>
           <TabsTrigger value="skills">{t('base.skills')}</TabsTrigger>
           <TabsTrigger value="appearance">{t('playerEdit.tabLook')}</TabsTrigger>
           <TabsTrigger value="accessories">{t('playerEdit.tabAccessories')}</TabsTrigger>
         </TabsList>
-        <TabsContent value="data">
+        <TabsContent value="data" className="flex min-h-0 flex-col">
           <DataTab player={player} />
         </TabsContent>
         <TabsContent value="skills">

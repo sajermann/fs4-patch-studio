@@ -100,8 +100,9 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
   const setLink = (index: number, patch: Partial<TeamLink>) =>
     updatePlayer(player.uid, { teams: player.teams.map((l, k) => (k === index ? { ...l, ...patch } : l)) })
 
+  // fills the height the page leaves; only the team list scrolls, the header stays put
   return (
-    <Card>
+    <Card className="min-h-48 flex-1">
       <CardHeader>
         <CardTitle>{t('playerEdit.teams')}</CardTitle>
         <CardDescription>{t('playerEdit.teamsDescription')}</CardDescription>
@@ -118,7 +119,7 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
           </div>
         </CardAction>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto">
         <FieldIssues issues={teamsIssues} />
         {player.teams.length > 0 && (
           <Table className="table-fixed">

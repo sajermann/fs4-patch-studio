@@ -183,9 +183,9 @@ export function GloveEditPage() {
       : null
 
   return (
-    <div className="max-w-7xl space-y-4">
+    <div className="space-y-4">
       <BackButton back={back} />
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap justify-between gap-2">
         <div className="flex items-center gap-3">
           <GloveThumb glove={glove} className="size-12" />
           <div>
@@ -194,58 +194,60 @@ export function GloveEditPage() {
           </div>
           {original && <OriginalBadge entry={glove.uid} />}
           {!original && glove.hidden && <OutOfPatchBadge alert />}
-          <EntityIssues uid={glove.uid} />
         </div>
-        <div className="flex flex-wrap gap-2">
-          {!original && (
-            <HideButton
-              variant="outline"
-              hidden={!!glove.hidden}
-              onToggle={() => {
-                if (glove.hidden && !slots.free) {
-                  toast.error(t('gloves.slotsFull', { total: slots.total }))
-                  return
-                }
-                set({ hidden: !glove.hidden })
+        <div className="flex flex-col items-end justify-between">
+          <div className="flex flex-wrap gap-2">
+            {!original && (
+              <HideButton
+                variant="outline"
+                hidden={!!glove.hidden}
+                onToggle={() => {
+                  if (glove.hidden && !slots.free) {
+                    toast.error(t('gloves.slotsFull', { total: slots.total }))
+                    return
+                  }
+                  set({ hidden: !glove.hidden })
+                }}
+                hideHint={t('gloves.hideHint')}
+                showHint={t('gloves.showHint')}
+              />
+            )}
+            <SingleZipImport
+              kind="gloves"
+              entry={glove}
+              read={async (file) => {
+                const r = await api.importGloves(file)
+                return { items: r.gloves, problems: r.problems }
               }}
-              hideHint={t('gloves.hideHint')}
-              showHint={t('gloves.showHint')}
+              admit={(item) => admitImported([item as Glove], slots.free)[0]}
+              pathOf={(e) => glovePath(gloveKey(e as Glove))}
+              label={t('gloves.uploadZip')}
             />
-          )}
-          <SingleZipImport
-            kind="gloves"
-            entry={glove}
-            read={async (file) => {
-              const r = await api.importGloves(file)
-              return { items: r.gloves, problems: r.problems }
-            }}
-            admit={(item) => admitImported([item as Glove], slots.free)[0]}
-            pathOf={(e) => glovePath(gloveKey(e as Glove))}
-            label={t('gloves.uploadZip')}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || !glove.texture}
-            title={glove.texture ? t('gloves.downloadHint') : t('gloves.downloadNeedsFile')}
-            onClick={() => void download()}
-          >
-            <Download /> {t('gloves.download')}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            title={original ? t(edited ? 'gloves.restoreOriginalHint' : 'common.unchangedHint') : undefined}
-            disabled={original && !edited}
-            onClick={() => setDeleteOpen(true)}
-          >
-            {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('gloves.delete')}
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy || !glove.texture}
+              title={glove.texture ? t('gloves.downloadHint') : t('gloves.downloadNeedsFile')}
+              onClick={() => void download()}
+            >
+              <Download /> {t('gloves.download')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              title={original ? t(edited ? 'gloves.restoreOriginalHint' : 'common.unchangedHint') : undefined}
+              disabled={original && !edited}
+              onClick={() => setDeleteOpen(true)}
+            >
+              {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('gloves.delete')}
+            </Button>
+          </div>
+          <EntityIssues uid={glove.uid} />
         </div>
       </div>
 
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
-        <div className="space-y-4 xl:w-[30rem] xl:shrink-0">
+        <div className="min-w-0 space-y-4 xl:flex-1">
           <Card>
             <CardContent className="grid gap-4 pt-6">
               <Field label={t('gloves.name')} entity={glove.uid} field="name">

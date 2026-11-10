@@ -200,9 +200,9 @@ export function BootEditPage() {
       : null
 
   return (
-    <div className="max-w-7xl space-y-4">
+    <div className="space-y-4">
       <BackButton back={back} />
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap justify-between gap-2">
         <div className="flex items-center gap-3">
           <BootThumb boot={boot} className="h-10 w-20" />
           <div>
@@ -211,52 +211,54 @@ export function BootEditPage() {
           </div>
           {original && <OriginalBadge entry={boot.uid} />}
           {!original && boot.hidden && <OutOfPatchBadge alert />}
-          <EntityIssues uid={boot.uid} />
         </div>
-        <div className="flex flex-wrap gap-2">
-          {!original && (
-            <HideButton
-              variant="outline"
-              hidden={!!boot.hidden}
-              onToggle={() => {
-                if (boot.hidden && boot.street && !slots.free) {
-                  toast.error(t('boots.streetFull', { total: slots.total }))
-                  return
-                }
-                set({ hidden: !boot.hidden })
+        <div className="flex flex-col items-end justify-between">
+          <div className="flex flex-wrap gap-2">
+            {!original && (
+              <HideButton
+                variant="outline"
+                hidden={!!boot.hidden}
+                onToggle={() => {
+                  if (boot.hidden && boot.street && !slots.free) {
+                    toast.error(t('boots.streetFull', { total: slots.total }))
+                    return
+                  }
+                  set({ hidden: !boot.hidden })
+                }}
+                hideHint={t('boots.hideHint')}
+                showHint={t('boots.showHint')}
+              />
+            )}
+            <SingleZipImport
+              kind="boots"
+              entry={boot}
+              read={async (file) => {
+                const r = await api.importBoots(file)
+                return { items: r.boots, problems: r.problems }
               }}
-              hideHint={t('boots.hideHint')}
-              showHint={t('boots.showHint')}
+              admit={(item) => admitImported([item as Boot], slots.free)[0]}
+              pathOf={(e) => bootPath(bootKey(e as Boot))}
+              label={t('boots.uploadZip')}
             />
-          )}
-          <SingleZipImport
-            kind="boots"
-            entry={boot}
-            read={async (file) => {
-              const r = await api.importBoots(file)
-              return { items: r.boots, problems: r.problems }
-            }}
-            admit={(item) => admitImported([item as Boot], slots.free)[0]}
-            pathOf={(e) => bootPath(bootKey(e as Boot))}
-            label={t('boots.uploadZip')}
-          />
-          <Button variant="outline" size="sm" disabled={busy || !hasFiles} title={hasFiles ? t('boots.downloadHint') : t('boots.downloadNeedsFiles')} onClick={() => void download()}>
-            <Download /> {t('boots.download')}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            title={original ? t(edited ? 'boots.restoreOriginalHint' : 'common.unchangedHint') : undefined}
-            disabled={original && !edited}
-            onClick={() => setDeleteOpen(true)}
-          >
-            {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('boots.delete')}
-          </Button>
+            <Button variant="outline" size="sm" disabled={busy || !hasFiles} title={hasFiles ? t('boots.downloadHint') : t('boots.downloadNeedsFiles')} onClick={() => void download()}>
+              <Download /> {t('boots.download')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              title={original ? t(edited ? 'boots.restoreOriginalHint' : 'common.unchangedHint') : undefined}
+              disabled={original && !edited}
+              onClick={() => setDeleteOpen(true)}
+            >
+              {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('boots.delete')}
+            </Button>
+          </div>
+          <EntityIssues uid={boot.uid} />
         </div>
       </div>
 
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
-        <div className="space-y-4 xl:w-[30rem] xl:shrink-0">
+        <div className="min-w-0 space-y-4 xl:flex-1">
           <Card>
             <CardContent className="grid gap-4 pt-6">
               <Field label={t('boots.name')} entity={boot.uid} field="name">

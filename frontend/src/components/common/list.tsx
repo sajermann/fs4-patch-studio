@@ -1,11 +1,13 @@
-import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Minus, Search, X } from 'lucide-react'
 import { useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { TableCell } from '@/components/ui/table'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useI18n } from '@/i18n'
 import { useReturning } from '@/lib/back'
+import { cn } from '@/lib/utils'
 
 export const ALL = 'all'
 const PAGE_SIZES = [25, 50, 100]
@@ -65,16 +67,18 @@ export function SearchInput({
   onChange,
   placeholder,
   autoFocus,
+  className = 'w-60',
 }: {
   value: string
   onChange: (v: string) => void
   placeholder: string
   autoFocus?: boolean
+  className?: string // width of the box (w-60 in the filter bars)
 }) {
   return (
-    <div className="relative">
+    <div className={cn('relative', className)}>
       <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-      <Input autoFocus={autoFocus} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-60 pl-8" />
+      <Input type="search" autoFocus={autoFocus} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full pl-8" />
     </div>
   )
 }
@@ -191,6 +195,19 @@ const scrollTops = new Map<string, number>() // list URL (path + filters) → la
 /** Table that fills the rest of the page and scrolls inside: vertical scroll moves only the rows (the header
  * sticks), horizontal scroll moves the header too. The column marked `data-grow` (its header and cells) takes the free width; the other
  * columns keep their content on one line (images keep their size: a shrunk column would squeeze them to 0). Coming back through an item's "←" restores the scroll the list had. */
+/** A centered yes/no mark of a list column (a check or a dash); `title` says what it means on hover. */
+export function YesNoCell({ value, title }: { value: boolean; title: string }) {
+  return (
+    <TableCell className="text-center" title={title}>
+      {value ? (
+        <Check className="inline size-4 text-emerald-600 dark:text-emerald-500" />
+      ) : (
+        <Minus className="inline size-4 text-muted-foreground/50" />
+      )}
+    </TableCell>
+  )
+}
+
 export function ScrollTable({ children }: { children: ReactNode }) {
   const loc = useLocation()
   const key = loc.pathname + loc.search

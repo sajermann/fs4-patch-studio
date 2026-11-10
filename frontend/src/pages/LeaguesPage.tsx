@@ -1,5 +1,5 @@
 import { DateCells, DateHeads } from '@/components/common/dates'
-import { Eye, EyeOff, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import type { League, OriginalLeague } from '@/api/types'
@@ -19,6 +19,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { LeagueIcon } from '@/components/common/LeagueIcon'
 import { GameHiddenBadge, HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { BulkActions, RowCheckbox, SelectAllCheckbox, SelectAllDialog, ShareImportButton, useListSelection } from '@/components/common/share'
 import { useI18n } from '@/i18n'
@@ -148,18 +149,20 @@ export function LeaguesPage() {
             <TableHead className="w-8">
               <SelectAllCheckbox selection={selection} />
             </TableHead>
+            <TableHead className="w-12" />
             <TableHead data-grow>{t('list.colName')}</TableHead>
             <TableHead>{t('list.colId')}</TableHead>
             <TableHead>{t('leagues.colOrder')}</TableHead>
             <TableHead>{t('nav.teams')}</TableHead>
             <DateHeads />
+            <TableHead className="w-12" />
             <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
           {page.total === 0 && (
             <TableRow>
-              <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+              <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
                 {t('leagues.noneFiltered')}
               </TableCell>
             </TableRow>
@@ -173,6 +176,9 @@ export function LeaguesPage() {
                 <TableRow key={l.uid} className="cursor-pointer" onClick={() => navigate(leaguePath(leagueKey(l)), from)}>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <RowCheckbox selection={selection} value={l.uid} />
+                  </TableCell>
+                  <TableCell>
+                    <LeagueIcon league={leagueKey(l)} />
                   </TableCell>
                   <TableCell data-grow className={hidden ? 'font-medium text-muted-foreground' : 'font-medium'}>
                     <span className="mr-2">{l.name || <span className="text-muted-foreground">{t('common.unnamed')}</span>}</span>
@@ -190,8 +196,10 @@ export function LeaguesPage() {
                   <TableCell className="tabular-nums">{teamsOf(l)}</TableCell>
                   <DateCells entry={l} />
                   <TableCell>
-                    <span className="flex items-center gap-1">
-                      <EntityIssues uid={l.uid} />
+                    <EntityIssues uid={l.uid} />
+                  </TableCell>
+                  <TableCell>
+                    <span className="flex items-center justify-end gap-1">
                       {oid != null ? (
                         <HideButton
                           hidden={isLeagueHidden(oid)}
@@ -216,6 +224,9 @@ export function LeaguesPage() {
             return (
               <TableRow key={l.id} className="cursor-pointer text-muted-foreground" onClick={() => navigate(leaguePath(l.id), from)}>
                 <TableCell />
+                <TableCell>
+                  <LeagueIcon league={l.id} />
+                </TableCell>
                 <TableCell data-grow>
                   <span className="mr-2 text-foreground">{l.name}</span>
                   <OriginalBadge league={l.id} />
@@ -232,21 +243,15 @@ export function LeaguesPage() {
                   {l.team_count + teamsDelta(l.id)}
                 </TableCell>
                 <DateCells />
-                <TableCell>
+                <TableCell />
+                <TableCell className="text-right">
                   {!l.hidden && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      title={
-                        isLeagueHidden(l.id) ? t('leagues.originalShowHint') : t('leagues.originalHideHint')
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        toggleLeague(l.id)
-                      }}
-                    >
-                      {isLeagueHidden(l.id) ? <Eye /> : <EyeOff />} {isLeagueHidden(l.id) ? t('list.show') : t('list.hide')}
-                    </Button>
+                    <HideButton
+                      hidden={isLeagueHidden(l.id)}
+                      onToggle={() => toggleLeague(l.id)}
+                      hideHint={t('leagues.originalHideHint')}
+                      showHint={t('leagues.originalShowHint')}
+                    />
                   )}
                 </TableCell>
               </TableRow>

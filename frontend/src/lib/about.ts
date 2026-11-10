@@ -3,6 +3,7 @@ export const APP_NAME = 'FS4 Patch Studio'
 export const AUTHOR_NAME = 'Bruno Sajermann'
 export const AUTHOR_GITHUB = 'https://github.com/Sajermann'
 export const REPO_URL = 'https://github.com/Sajermann/fs4-patch-studio'
+export const DONATE_URL = 'https://ko-fi.com/brunosajermann'
 
 declare const __APP_VERSION__: string // set by vite.config.ts from desktop/src-tauri/tauri.conf.json
 export const APP_VERSION = __APP_VERSION__

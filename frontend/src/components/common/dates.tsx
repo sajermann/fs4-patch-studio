@@ -34,14 +34,18 @@ export function DateCells({ entry }: { entry?: Dated }) {
   )
 }
 
-/** "Created … · Edited …" under an entry's title; nothing when it has no dates. */
+/** "Created …" and "Edited …" under an entry's title, one per line; nothing when it has no dates. */
 export function EntryDates({ entry }: { entry: Dated }) {
   const { t } = useI18n()
   const text = useDateText()
   const parts = [
     entry.created_at && t('dates.created', { date: text(entry.created_at) }),
     entry.updated_at && t('dates.updated', { date: text(entry.updated_at) }),
-  ].filter(Boolean)
+  ].filter((p): p is string => !!p)
   if (!parts.length) return null
-  return <p className="text-xs text-muted-foreground">{parts.join(' · ')}</p>
+  return parts.map((p) => (
+    <p key={p} className="text-xs text-muted-foreground">
+      {p}
+    </p>
+  ))
 }

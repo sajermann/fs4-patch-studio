@@ -53,7 +53,7 @@ export function PhotoCard({ player }: { player: Player }) {
   }
 
   return (
-    <Card className="h-fit">
+    <Card>
       <CardHeader>
         <CardTitle>{t('photo.title')}</CardTitle>
         <CardDescription>{t('photo.description')}</CardDescription>
@@ -94,9 +94,15 @@ export function PhotoCard({ player }: { player: Player }) {
         {player.photo && (
           <>
             <p className="text-center text-xs text-muted-foreground">{t('photo.previewSize')}</p>
-            <Button variant="ghost" size="sm" className="w-full" onClick={() => updatePlayer(player.uid, { photo: undefined })}>
-              <Trash2 /> {t('photo.remove')}
-            </Button>
+            {/* same pair as the other images (league, crest) */}
+            <div className="flex justify-center gap-2">
+              <Button variant="outline" size="sm" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                <Upload /> {t('common.replace')}
+              </Button>
+              <Button variant="outline" size="sm" disabled={uploading} onClick={() => updatePlayer(player.uid, { photo: undefined })}>
+                <Trash2 /> {t('common.remove')}
+              </Button>
+            </div>
           </>
         )}
         <FieldIssues issues={issues} />

@@ -173,7 +173,7 @@ export function FacePicker({
             </p>
             <div className="relative w-44">
               <Search className="absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('faces.filter')} className="h-7 pl-7 text-xs" />
+              <Input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('faces.filter')} className="h-7 pl-7 text-xs" />
             </div>
           </div>
           <div className="grid max-h-[26rem] grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-1.5 overflow-y-auto rounded-md border bg-muted/30 p-1.5">

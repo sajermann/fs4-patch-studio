@@ -48,7 +48,7 @@ function DataTab({ team }: { team: Team }) {
     </Field>
   )
   return (
-    <Card>
+    <Card className="shrink-0">
       <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
         <Field label={t('teamEdit.fullName')} entity={team.uid} field="name" className="sm:col-span-2">
           <Input value={team.name} onChange={(e) => set({ name: e.target.value })} autoFocus={!team.name} />
@@ -121,6 +121,19 @@ function CrestTab({ team }: { team: Team }) {
               e.target.value = ''
             }}
           />
+          {team.crest && (
+            // an original team keeps a crest (the game's one comes back with "Restore original")
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                <Upload /> {t('common.replace')}
+              </Button>
+              {team.original_id == null && (
+                <Button variant="outline" size="sm" disabled={uploading} onClick={() => set({ crest: undefined })}>
+                  <Trash2 /> {t('common.remove')}
+                </Button>
+              )}
+            </div>
+          )}
           <FieldIssues issues={crestIssues} />
         </CardContent>
       </Card>
@@ -266,10 +279,12 @@ export function TeamEditPage() {
   const hiddenLeagues = new Set(draft.leagues.filter((l) => l.hidden).map((l) => l.uid))
   const leagueHidden = team.leagues.length > 0 && team.leagues.every((l) => typeof l === 'string' && hiddenLeagues.has(l))
 
+  // the Data and Roster tabs fill the viewport: their lists scroll inside their cards, not the page
+  const fill = tabs.value === 'data' || tabs.value === 'roster'
   return (
-    <div className="max-w-5xl space-y-4">
+    <div className={fill ? 'flex h-full min-h-[36rem] flex-col gap-4' : 'flex flex-col gap-4'}>
       <BackButton back={back} />
-      <div className="flex items-center justify-between">
+      <div className="flex justify-between">
         <div className="flex items-center gap-3">
           {team.crest && <img src={imageUrl(team.crest)} alt="" className="size-10 object-contain" />}
           <div>
@@ -279,45 +294,47 @@ export function TeamEditPage() {
           {original && <OriginalBadge entry={team.uid} team={team.original_id} />}
           {!original && team.hidden && <OutOfPatchBadge alert />}
           {!original && !team.hidden && leagueHidden && <OutOfPatchBadge alert label={t('teams.leagueOutOfPatch')} />}
-          <EntityIssues uid={team.uid} />
         </div>
-        <div className="flex gap-2">
-          <ShareSingleImport kind="teams" entry={team} pathOf={(e) => teamPath(teamKey(e as Team))} />
-          <ShareDownloadButton kind="teams" uid={team.uid} unchanged={sameAsGame(team.uid)} />
-          {!original && (
-            <HideButton
-              variant="outline"
-              hidden={!!team.hidden}
-              onToggle={() => updateTeam(team.uid, { hidden: !team.hidden })}
-              hideHint={t('teams.hideHint')}
-              showHint={t('teams.showHint')}
-            />
-          )}
-          {!original && (
+        <div className="flex flex-col items-end justify-between">
+          <div className="flex gap-2">
+            <ShareSingleImport kind="teams" entry={team} pathOf={(e) => teamPath(teamKey(e as Team))} />
+            <ShareDownloadButton kind="teams" uid={team.uid} unchanged={sameAsGame(team.uid)} />
+            {!original && (
+              <HideButton
+                variant="outline"
+                hidden={!!team.hidden}
+                onToggle={() => updateTeam(team.uid, { hidden: !team.hidden })}
+                hideHint={t('teams.hideHint')}
+                showHint={t('teams.showHint')}
+              />
+            )}
+            {!original && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!copy.canCopyTeam(team.uid)}
+                title={
+                  copy.canCopyTeam(team.uid) ? t('teamEdit.copyHint') : t('teamEdit.copyMax', { max: copy.maxLeagueTeams })
+                }
+                onClick={() => setCopyOpen(true)}
+              >
+                <Copy /> {t('common.copy')}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
-              disabled={!copy.canCopyTeam(team.uid)}
-              title={
-                copy.canCopyTeam(team.uid) ? t('teamEdit.copyHint') : t('teamEdit.copyMax', { max: copy.maxLeagueTeams })
-              }
-              onClick={() => setCopyOpen(true)}
+              title={original ? t(edited ? 'teamEdit.restoreOriginalHint' : 'common.unchangedHint') : undefined}
+              disabled={original && !edited}
+              onClick={() => setDeleteOpen(true)}
             >
-              <Copy /> {t('common.copy')}
+              {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('teamEdit.delete')}
             </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            title={original ? t(edited ? 'teamEdit.restoreOriginalHint' : 'common.unchangedHint') : undefined}
-            disabled={original && !edited}
-            onClick={() => setDeleteOpen(true)}
-          >
-            {original ? <RotateCcw /> : <Trash2 />} {original ? t('teamEdit.restoreOriginal') : t('teamEdit.delete')}
-          </Button>
+          </div>
+          <EntityIssues uid={team.uid} />
         </div>
       </div>
-      <Tabs {...tabs}>
+      <Tabs {...tabs} className={fill ? 'min-h-0 flex-1' : undefined}>
         <TabsList>
           <TabsTrigger value="data">{t('teamEdit.tabData')}</TabsTrigger>
           <TabsTrigger value="crest">{t('teamEdit.tabCrest')}</TabsTrigger>
@@ -325,7 +342,7 @@ export function TeamEditPage() {
           <TabsTrigger value="roster">{t('teamEdit.roster')}</TabsTrigger>
           <TabsTrigger value="lineup">{t('lineup.tab')}</TabsTrigger>
         </TabsList>
-        <TabsContent value="data" className="space-y-4">
+        <TabsContent value="data" className="flex min-h-0 flex-col gap-4">
           <DataTab team={team} />
           <TeamLeagues team={team} />
         </TabsContent>
@@ -335,7 +352,7 @@ export function TeamEditPage() {
         <TabsContent value="kits">
           <KitsTab team={team} />
         </TabsContent>
-        <TabsContent value="roster">
+        <TabsContent value="roster" className="flex min-h-0 flex-col">
           <RosterCard team={team} />
         </TabsContent>
         <TabsContent value="lineup">

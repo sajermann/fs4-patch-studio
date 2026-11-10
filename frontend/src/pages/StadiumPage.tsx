@@ -129,7 +129,7 @@ export function StadiumPage() {
   const versions = [...stadium.versions].sort((a, b) => Number(b.menu) - Number(a.menu)) // the one played first
 
   return (
-    <div className="max-w-7xl space-y-4">
+    <div className="space-y-4">
       <BackButton back={back} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
@@ -151,7 +151,7 @@ export function StadiumPage() {
       </div>
 
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
-        <div className="space-y-4 xl:w-[36rem] xl:shrink-0">
+        <div className="min-w-0 space-y-4 xl:flex-1">
           <Card>
             <CardHeader>
               <CardTitle>{t('stadium.ballTitle')}</CardTitle>
@@ -295,8 +295,9 @@ export function StadiumPage() {
           </Card>
         </div>
 
-        <Card className="order-first h-fit min-w-0 flex-1 gap-2 overflow-hidden py-0 xl:sticky xl:top-4 xl:order-none">
-          <div className="aspect-[4/3] max-h-[60vh] w-full bg-gradient-to-b from-muted to-background">
+        {/* side by side (xl): as tall as the cards on the left, the 3D view taking all of it */}
+        <Card className="order-first h-fit min-w-0 flex-1 gap-2 overflow-hidden py-0 xl:order-none xl:h-auto xl:self-stretch">
+          <div className="aspect-[4/3] max-h-[60vh] w-full bg-gradient-to-b from-muted to-background xl:aspect-auto xl:max-h-none xl:min-h-80 xl:flex-1">
             <Suspense
               fallback={
                 <div className="flex size-full items-center justify-center text-muted-foreground">

@@ -3,6 +3,7 @@ import {
   Footprints,
   Globe,
   Hand,
+  Heart,
   Landmark,
   Loader2,
   Puzzle,
@@ -12,7 +13,8 @@ import {
   Users,
   Volleyball,
 } from 'lucide-react'
-import { APP_NAME, APP_VERSION, AUTHOR_GITHUB, AUTHOR_NAME, REPO_URL } from '@/lib/about'
+import { APP_NAME, APP_VERSION, AUTHOR_GITHUB, AUTHOR_NAME, DONATE_URL, REPO_URL } from '@/lib/about'
+import { Button } from '@/components/ui/button'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useI18n, type MessageKey } from '@/i18n'
 import { cn } from '@/lib/utils'
@@ -141,6 +143,11 @@ export function AppShell() {
                 {t('app.sourceCode')}
               </a>
             </p>
+            <Button variant="outline" size="sm" className="mt-2 w-full" asChild>
+              <a href={DONATE_URL} target="_blank" rel="noreferrer">
+                <Heart className="text-rose-500" /> {t('app.donate')}
+              </a>
+            </Button>
           </div>
         </div>
       </aside>
