@@ -118,9 +118,11 @@ def test_build_then_install_into_a_fake_game(env):
     ids = {p['uid']: p['player_id'] for p in saved['players']}  # playerids given by the build are kept
     assert ids == body['assigned_player_ids'] and len(set(ids.values())) == len(ids)
     files = {f.lower() for f in body['patch']['files']}
+    # layout 'loose' (fsmod.builder.PATCH_LAYOUT): every .bh, the locale archives and data8, never data0/1/3/7.big
     assert {'game/data/loc/locale.big', 'game/data/loc/locale_ptbr.big', 'game/data/ui/imgassets/heads/2dheads.bh',
-            'game/data/ui/imgassets/heads/2dheads.big', 'game/data1.bh', 'game/data1.big', 'game/data3.bh',
-            'game/data3.big', 'game/data7.bh', 'game/data7.big', 'game/data8.bh', 'game/data8.big'} < files
+            'game/data0.bh', 'game/data1.bh', 'game/data3.bh', 'game/data7.bh', 'game/data8.bh', 'game/data8.big'} < files
+    assert not {'game/data/ui/imgassets/heads/2dheads.big', 'game/data0.big', 'game/data1.big', 'game/data3.big',
+                'game/data7.big'} & files
     assert {'game/data/ui/imgassets/crest/licensed_large/l150000.dds',
             'game/data/sceneassets/kit/kit_150000_0_0.rx3'} < files  # team files are loose
     assert c.get('/api/status').json()['patch']['up_to_date'] is True
@@ -154,7 +156,8 @@ def test_build_then_install_into_a_fake_game(env):
     # uninstall: the app's originals come back, what the patch added goes away
     r = c.post('/api/patch/uninstall')
     assert r.status_code == 200, r.text
-    assert (game / 'data1.big').stat().st_size == os.path.getsize(os.path.join(env['state'].game.folder, 'Game', 'data1.big'))
+    assert not (game / 'data1.big').exists()  # the fake game has none and the 'loose' layout never writes one
+    assert (game / 'data1.bh').read_bytes() == open(os.path.join(env['state'].game.folder, 'Game', 'data1.bh'), 'rb').read()
     assert not (game / 'data8.big').exists() and not (game / 'data' / 'sceneassets').exists()
     assert not (game / '.fsmod_manifest.json').exists()
     assert c.get('/api/status').json()['setup']['game']['installed'] is False
@@ -176,7 +179,9 @@ def test_player_photo_upload_and_preview(env):
 
 
 def test_reinstall_restores_files_that_left_the_patch(tmp_path):
-    """A file installed before and no longer in the patch goes back to the original (original_files)."""
+    """A file installed before and no longer in the patch goes back to the original (original_files). This is also
+    how an install of the 'loose' layout puts back the whole .big files a patch of the 'archives' layout (0.4.0 and
+    before) had written: they are in the old manifest and not in the new patch."""
     from conftest import make_fake_game, make_fake_save
     from fsapi.patch_service import install
 

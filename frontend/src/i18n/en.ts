@@ -374,7 +374,7 @@ export const en: Record<MessageKey, string> = {
   'patches.validated': 'Validated in game',
   'patches.closeUpHeads.title': 'Close-up face at any distance',
   'patches.closeUpHeads.description': 'With the normal match camera the game draws each player with a simplified model and a generic head. On real faces this changes the face a lot (headbands and hair details disappear, and on some the ear shows the teeth texture). With this patch every player uses the close-up model (head, hair, eyes and body) at any distance.',
-  'patches.closeUpHeads.note': 'Uses more of the graphics card, since every player keeps the full model all the time (it made no difference on a current PC in our tests). Changes the game file data0.big; uninstalling the patch puts the original back.',
+  'patches.closeUpHeads.note': 'Uses more of the graphics card, since every player keeps the full model all the time (it made no difference on a current PC in our tests). Changes a game script (it goes as a loose file, and the data0.bh index points the game to it); uninstalling the patch puts the original back.',
   'teams.allLeagues': 'All leagues',
   'teams.newLeagues': 'New leagues',
   'teams.noLeague': 'No league',

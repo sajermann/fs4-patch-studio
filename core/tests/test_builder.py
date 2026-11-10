@@ -27,6 +27,12 @@ def palmeiras_patch(game, palmeiras_result, tmp_path_factory):
     return builder.write_patch(palmeiras_result, game, str(tmp_path_factory.mktemp('patch')))
 
 
+@pytest.fixture(scope='module')
+def palmeiras_patch_archives(game, palmeiras_result, tmp_path_factory):
+    """The old layout (PATCH_LAYOUT 'archives'), kept working so it can come back."""
+    return builder.write_patch_archives(palmeiras_result, game, str(tmp_path_factory.mktemp('patch_archives')))
+
+
 def read(path):
     with open(path, 'rb') as f:
         return f.read()
@@ -85,12 +91,17 @@ def test_palmeiras_build_matches_the_files_validated_in_game(game, palmeiras_res
     assert checked == 4  # 2 kits, 2 kit thumbnails
 
 
-# every file the app can change always goes in the patch (original when unchanged)
+# old layout (PATCH_LAYOUT 'archives'): every file the app can change always goes, whole (original when unchanged)
 FULL_PATCH = [builder.BUILD_STATE, 'Game/data/loc/locale.big', 'Game/data/loc/locale_ptbr.big',
               'Game/data/ui/imgAssets/heads/2dheads.bh', 'Game/data/ui/imgAssets/heads/2dheads.big',
               'Game/data0.bh', 'Game/data0.big', 'Game/data1.bh', 'Game/data1.big', 'Game/data3.bh', 'Game/data3.big',
               'Game/data7.bh', 'Game/data7.big',
               'Game/data8.bh', 'Game/data8.big']
+# layout 'loose' (default): every .bh (original or with records zeroed), the locale archives whole, data8
+LOOSE_PATCH = [builder.BUILD_STATE, 'Game/data/loc/locale.big', 'Game/data/loc/locale_ptbr.big',
+               'Game/data/ui/imgAssets/heads/2dheads.bh',
+               'Game/data0.bh', 'Game/data1.bh', 'Game/data3.bh', 'Game/data7.bh',
+               'Game/data8.bh', 'Game/data8.big']
 
 
 def patch_listing(patch_dir):
@@ -98,7 +109,73 @@ def patch_listing(patch_dir):
                   for root, _, files in os.walk(patch_dir) for n in files)
 
 
-def test_write_patch_writes_whole_archives_in_the_v2_layout(game, palmeiras_result, palmeiras_patch):
+def test_default_layout_is_loose():
+    assert builder.PATCH_LAYOUT == 'loose' and builder.PATCH_LAYOUT in builder.PATCH_LAYOUTS
+
+
+def test_write_patch_loose_zeroes_records_and_writes_entries_as_loose_files(game, palmeiras_result, palmeiras_patch):
+    from fsmod import big
+    tid = palmeiras_team_id(palmeiras_result)
+    loose = ['Game/' + n for n in palmeiras_result.loose]
+    entries = ['Game/' + name for short, name in palmeiras_result.entries if game.index_path(short)]
+    assert sorted(map(str.lower, patch_listing(palmeiras_patch))) == \
+        sorted(map(str.lower, LOOSE_PATCH + loose + entries))
+    for short in ('data0.big', 'data1.big', 'data3.big', 'data7.big', '2dheads.big'):
+        rel = os.path.relpath(game.index_path(short), os.path.join(game.folder, 'Game'))
+        new, orig = read(os.path.join(palmeiras_patch, 'Game', rel)), read(game.index_path(short))
+        assert len(new) == len(orig), rel
+        replaced = {name for s, name in palmeiras_result.entries if s == short}
+        names = [n for n, _, _ in big.read_toc_file(game.target_path(short))]
+        for i, name in enumerate(names):
+            record = new[16 + 20 * i:36 + 20 * i]
+            assert record == (bytes(20) if name in replaced else orig[16 + 20 * i:36 + 20 * i]), name
+        assert new[:16] == orig[:16] and new[16 + 20 * len(names):] == orig[16 + 20 * len(names):]
+    for (short, name), data in palmeiras_result.entries.items():
+        if game.index_path(short):
+            assert read(os.path.join(palmeiras_patch, 'Game', *name.split('/'))) == data, name
+    assert f'data/sceneassets/kit/kit_{tid}_0_0.rx3' in palmeiras_result.loose
+
+
+def test_write_patch_loose_zeroes_a_replaced_entry_of_every_archive(game, palmeiras_result, tmp_path):
+    """One entry replaced in each archive with a .bh: loose file + zeroed record; switching from the old layout in
+    the same folder drops its whole archives."""
+    import json
+    from fsmod import big
+    picks = {}
+    for short in ('data0.big', 'data1.big', 'data3.big', 'data7.big', '2dheads.big'):
+        name = big.read_toc_file(game.target_path(short))[3][0]
+        picks[short, name] = b'replaced ' + short.encode()
+    result = builder.BuildResult(database=palmeiras_result.database, entries=picks)
+    out = str(tmp_path / 'patch')
+    builder.write_patch_archives(result, game, out)
+    assert os.path.exists(os.path.join(out, 'Game', 'data3.big'))
+    builder.write_patch(result, game, out)
+    assert not [p for p in patch_listing(out) if p.endswith('.big') and 'data8' not in p and '/loc/' not in p]
+    for (short, name), data in picks.items():
+        assert read(os.path.join(out, 'Game', *name.split('/'))) == data
+        rel = os.path.relpath(game.index_path(short), os.path.join(game.folder, 'Game'))
+        assert read(os.path.join(out, 'Game', rel))[16 + 20 * 3:36 + 20 * 3] == bytes(20), short
+    with open(os.path.join(out, builder.BUILD_STATE), encoding='utf-8') as f:
+        assert json.load(f)['layout'] == 'loose'
+
+
+def test_write_patch_loose_refuses_an_entry_that_is_also_a_loose_file(game, palmeiras_result, tmp_path):
+    name = next(iter(palmeiras_result.loose))
+    result = builder.BuildResult(database=palmeiras_result.database, entries={('data3.big', name): b'x'},
+                                 loose={name: b'y'})
+    with pytest.raises(builder.BuildError):
+        builder.write_patch(result, game, str(tmp_path / 'patch'))
+
+
+def test_patch_layout_archives_goes_back_to_whole_archives(game, palmeiras_result, tmp_path, monkeypatch):
+    monkeypatch.setattr(builder, 'PATCH_LAYOUT', 'archives')
+    out = builder.write_patch(palmeiras_result, game, str(tmp_path / 'patch'))
+    assert 'Game/data3.big' in patch_listing(out)
+
+
+def test_write_patch_archives_writes_whole_archives_in_the_v2_layout(game, palmeiras_result,
+                                                                      palmeiras_patch_archives):
+    palmeiras_patch = palmeiras_patch_archives
     tid = palmeiras_team_id(palmeiras_result)
     loose = ['Game/' + n for n in palmeiras_result.loose]
     assert sorted(map(str.lower, patch_listing(palmeiras_patch))) == sorted(map(str.lower, FULL_PATCH + loose))
@@ -126,7 +203,7 @@ def test_menu_crests_are_loose_files_twice_the_original_size(game, palmeiras_res
         assert dds_size(stored) == (px * crest.SCALE, px * crest.SCALE)
 
 
-def test_write_patch_reuses_archives_and_restores_old_entries(game, palmeiras_result, tmp_path, monkeypatch):
+def test_write_patch_archives_reuses_archives_and_restores_old_entries(game, palmeiras_result, tmp_path, monkeypatch):
     """Entries replacing files of the archives (here: slot 1932's crests and away kit, as the old slot teams
     did) are written in place or moved to the end; dropped ones go back to the original."""
     import shutil
@@ -138,7 +215,7 @@ def test_write_patch_reuses_archives_and_restores_old_entries(game, palmeiras_re
     first = builder.BuildResult(database=palmeiras_result.database, entries={
         **palmeiras_result.entries, **crests, away: palmeiras_result.loose[f'data/sceneassets/kit/kit_{tid}_1_0.rx3']})
     out = str(tmp_path / 'patch')
-    builder.write_patch(first, game, out)
+    builder.write_patch_archives(first, game, out)
     for key, data in crests.items():
         offset, _, stored = patched_entry(os.path.join(out, 'Game', 'data1.big'), key[1])
         assert offset >= os.path.getsize(game.target_path('data1.big')) and stored == data  # bigger: moved
@@ -148,7 +225,7 @@ def test_write_patch_reuses_archives_and_restores_old_entries(game, palmeiras_re
     monkeypatch.setattr(shutil, 'copyfile', lambda src, dst: copies.append(src) or real_copy(src, dst))
     # second build: no crests, no away kit -> those entries go back to the original
     second = builder.BuildResult(database=palmeiras_result.database, entries=dict(palmeiras_result.entries))
-    builder.write_patch(second, game, out)
+    builder.write_patch_archives(second, game, out)
     assert copies == []  # archives reused, not copied again
     assert 'Mods' not in os.listdir(out)
     assert read(os.path.join(out, 'Game', 'data1.bh')) == read(game.index_path('data1.big'))  # nothing moved
@@ -335,8 +412,10 @@ def test_player_photos_are_loose_files_named_by_new_playerids(game, tmp_path):
     for pid in pids:
         with open(os.path.join(out, 'Game', *photo.photo_name(pid).split('/')), 'rb') as f:
             assert dds_size(chunk.decode(f.read())) == (photo.SIZE, photo.SIZE)
-    with open(os.path.join(out, 'Game', PHOTOS_FILE), 'rb') as f, open(game.target_path('2dheads.big'), 'rb') as g:
-        assert f.read() == g.read()
+    assert not os.path.exists(os.path.join(out, 'Game', PHOTOS_FILE))  # layout 'loose': the game keeps its own
+    with open(os.path.join(out, 'Game', PHOTOS_FILE[:-4] + '.bh'), 'rb') as f, \
+            open(game.index_path('2dheads.big'), 'rb') as g:
+        assert f.read() == g.read()  # no original photo replaced: the original index
 
 
 def test_player_ids_are_new_stable_and_validated(game, tmp_path):
@@ -413,7 +492,7 @@ def test_street_kit_pieces_fill_every_teamkits_slot(game):
     assert get(away, 'sock_geo_type_1') == 14 and get(home, 'sock_geo_type_1') == 3  # template pieces kept
 
 
-def test_write_patch_takes_data7_entries_and_reuses_the_archive(game, palmeiras_result, tmp_path, monkeypatch):
+def test_write_patch_archives_takes_data7_entries_and_reuses_the_archive(game, palmeiras_result, tmp_path, monkeypatch):
     """The far hair of scanned faces (hairlod) lives in data7: a bigger entry moves to the end and data7.bh follows."""
     from fsmod import big
     name = next(n for n, _, _ in big.read_toc_file(game.target_path('data7.big')) if '/hairlod/' in n)
@@ -421,7 +500,7 @@ def test_write_patch_takes_data7_entries_and_reuses_the_archive(game, palmeiras_
     grown = original + bytes(0x100)
     out = str(tmp_path / 'patch')
     entries = {**palmeiras_result.entries, ('data7.big', name): grown}
-    builder.write_patch(builder.BuildResult(database=palmeiras_result.database, entries=entries), game, out)
+    builder.write_patch_archives(builder.BuildResult(database=palmeiras_result.database, entries=entries), game, out)
     archive = os.path.join(out, 'Game', 'data7.big')
     assert patched_entry(archive, name)[1:] == (len(grown), grown)
     assert os.path.exists(os.path.join(out, 'Game', 'data7.bh'))
@@ -429,7 +508,7 @@ def test_write_patch_takes_data7_entries_and_reuses_the_archive(game, palmeiras_
     real_copy = shutil.copyfile
     monkeypatch.setattr(shutil, 'copyfile', lambda src, dst: copies.append(src) or real_copy(src, dst))
     entries[('data7.big', name)] = original[:len(original) // 2]  # fits in place now
-    builder.write_patch(builder.BuildResult(database=palmeiras_result.database, entries=entries), game, out)
+    builder.write_patch_archives(builder.BuildResult(database=palmeiras_result.database, entries=entries), game, out)
     assert copies == []
     assert read(os.path.join(out, 'Game', 'data7.bh')) == read(game.index_path('data7.big'))
     assert os.path.getsize(archive) == os.path.getsize(game.target_path('data7.big'))

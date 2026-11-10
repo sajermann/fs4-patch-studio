@@ -372,7 +372,7 @@ export const ptBR = {
   'patches.validated': 'Validado no jogo',
   'patches.closeUpHeads.title': 'Rosto de perto em qualquer distância',
   'patches.closeUpHeads.description': 'Na câmera normal da partida, o jogo desenha cada jogador com um modelo simplificado, com uma cabeça genérica. Nas faces reais isso muda muito o rosto (somem faixa e detalhes do cabelo, e em algumas a orelha mostra a textura dos dentes). Com este patch, todos os jogadores usam o modelo de perto (cabeça, cabelo, olhos e corpo) em qualquer distância.',
-  'patches.closeUpHeads.note': 'Usa mais a placa de vídeo, porque todos os jogadores ficam com o modelo completo o tempo todo (num PC atual não fez diferença nos testes). Muda o arquivo data0.big do jogo; desinstalar o patch devolve o original.',
+  'patches.closeUpHeads.note': 'Usa mais a placa de vídeo, porque todos os jogadores ficam com o modelo completo o tempo todo (num PC atual não fez diferença nos testes). Muda um script do jogo (vai como arquivo solto, e o índice data0.bh passa a apontar para ele); desinstalar o patch devolve o original.',
   'teams.allLeagues': 'Todas as ligas',
   'teams.newLeagues': 'Ligas novas',
   'teams.noLeague': 'Sem liga',

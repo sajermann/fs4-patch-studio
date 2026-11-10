@@ -1,8 +1,12 @@
 """Building the patch folder and installing it into the game.
 
-patch/ mirrors the game root of ReStreet 2.x: Game/data8.big/.bh + every game file the app can change, whole
-(Game/data1.big, Game/data/loc/locale.big, ...; the original when unchanged), see fsmod.builder.write_patch. patch/patch.json records which
-project content it was built from, so the UI can say "changes not built yet".
+patch/ mirrors the game root of ReStreet 2.x, in the layout of fsmod.builder.PATCH_LAYOUT. Since 10/11/2026 ('loose'):
+Game/data8.big/.bh + every .bh of the game (Game/data1.bh, ...; with the records of the replaced files zeroed) + the
+replaced files as loose files + Game/data/loc/locale*.big whole, never the big data0/1/3/7/2dheads archives. Until
+then ('archives'): every game file the app can change, whole. Install and uninstall only follow the file list of the
+patch, so both layouts work, and installing a 'loose' patch over an 'archives' one puts the original .big files back
+(they are in the old manifest, not in the new patch). patch/patch.json records which project content it was built
+from, so the UI can say "changes not built yet".
 Installing copies the patch over the game (game closed) and deletes the save, so the game creates a new one from
 the modded database; uninstalling puts the original files back.
 """

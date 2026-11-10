@@ -20,8 +20,9 @@ what is installed.
     by the playerid) are loose files: the game opens d:/<name> from disk when no archive has it.
 
 Output: database bytes (goes into data8.big/.bh) + new entries {(archive, entry name): bytes} that replace
-entries of original game archives. write_patch() writes the whole patched archives (ReStreet 2.x has no Mods
-overlay): an entry that fits stays in place, a bigger one moves to the end of the archive with its index updated.
+entries of original game archives. write_patch() writes them in the layout of PATCH_LAYOUT: since 10/11/2026 each
+replaced entry is a loose file with its record zeroed in the archive's .bh (write_patch_loose); until then the whole
+patched archives went (write_patch_archives, still there to go back).
 """
 import datetime
 import os
@@ -1327,9 +1328,224 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
 
 BUILD_STATE = '.fsmod_build.json'  # inside the patch folder: what the reused archives contain
 
+# How the patch replaces files that live inside the game's archives (changed 10/11/2026):
+#   'loose'    (default after 0.4.0) every replaced entry is a loose file Game/<entry name> and its 20-byte record is
+#              zeroed in a copy of the original .bh: the game then misses it in the .big and opens the loose file.
+#              The .big files never go in the patch (~50 MB instead of ~2 GB). Validated in game (ReStreet 2.1.4)
+#              for data0 (database, Lua script), data1 (menu crest, BIGF screen), data3 (face texture) and
+#              2dheads (photo); data7 follows the same .bh lookup but was not seen in game yet.
+#   'archives' (up to 0.4.0) the whole .big files go, with the replaced entries written inside them
+#              (write_patch_archives). To go back to it, set PATCH_LAYOUT = 'archives': nothing else changes
+#              (install/uninstall work from the file list of the patch).
+PATCH_LAYOUT = 'loose'
+PATCH_LAYOUTS = ('loose', 'archives')
+
 
 def write_patch(result, game, out_dir, progress=None):
-    """Writes the patch into out_dir, mirroring the game root (copy each folder over the game's folder):
+    """Writes the patch into out_dir, mirroring the game root (copy each folder over the game's folder), in the
+    layout of PATCH_LAYOUT: write_patch_loose or write_patch_archives."""
+    if PATCH_LAYOUT == 'archives':
+        return write_patch_archives(result, game, out_dir, progress)
+    if PATCH_LAYOUT != 'loose':
+        raise BuildError(f'unknown patch layout {PATCH_LAYOUT!r} (bug)')
+    return write_patch_loose(result, game, out_dir, progress)
+
+
+def _entries_by_file(result):
+    by_file = {}
+    for (short, name), data in result.entries.items():
+        if short not in PATCH_TARGETS:
+            raise BuildError(f'unknown archive {short} (bug)')
+        by_file.setdefault(short, {})[name] = data
+    return by_file
+
+
+def _start_patch_dir(out_dir):
+    """Reads and removes the build state (rewritten only when the whole write succeeds), keeps only Game/.
+    Returns (previous state {short: ...}, Game folder)."""
+    import json
+    import shutil
+    state_path = os.path.join(out_dir, BUILD_STATE)
+    previous = {}
+    if os.path.exists(state_path):
+        try:
+            with open(state_path, encoding='utf-8') as f:
+                previous = json.load(f).get('files', {})
+        except (OSError, ValueError):
+            previous = {}
+        os.remove(state_path)
+    game_out = os.path.join(out_dir, GAME_DATA)
+    os.makedirs(game_out, exist_ok=True)
+    for entry in os.listdir(out_dir):  # old layouts (GameData/, Mods/) and stray files
+        if entry != GAME_DATA:
+            path = os.path.join(out_dir, entry)
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+    return previous, game_out
+
+
+def _write_whole_archive(game, short, items, dst, prev):
+    """Writes the archive short whole into dst: the original with items {entry name: bytes} inside it, and its .bh
+    when it has one. An entry that fits its original space is written in place (zero padded; the index keeps the
+    original size); a bigger one is appended at the end (aligned to 0x40) and its offset/size are updated in the
+    BIG4 header and in the .bh, like ReStreet's installer does for data1.big (validated in game).
+    prev: this archive's state from the last build; when its source is the same and dst is still there, dst is
+    reused (the ranges written last time and the header are restored from the original, the appended tail is cut),
+    so data3.big (1.1 GB) is not copied on every build. Returns (paths written, state of this archive)."""
+    import shutil
+    src = game.target_path(short)
+    toc, hdr_len = big.read_toc_positions(src)
+    st = os.stat(src)
+    source = [st.st_size, st.st_mtime_ns]
+    reuse = bool(prev) and prev.get('source') == source and os.path.exists(dst) and \
+        os.path.getsize(dst) >= st.st_size
+    if not reuse:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(src, dst)
+    ranges, moved = [], {}
+    with open(dst, 'r+b') as out, open(src, 'rb') as orig:
+        if reuse:
+            out.truncate(st.st_size)
+            for offset, length in prev['ranges'] + [[0, hdr_len]]:
+                orig.seek(offset)
+                out.seek(offset)
+                out.write(orig.read(length))
+        end = st.st_size
+        for name, data in sorted(items.items()):
+            if name not in toc:
+                raise BuildError(f'{name} is not in {short} (bug)')
+            pos, offset, size = toc[name]
+            if len(data) <= size:
+                out.seek(offset)
+                out.write(data + bytes(size - len(data)))
+                ranges.append([offset, size])
+                continue
+            new_offset = end + (-end % big.ALIGN)
+            out.seek(end)
+            out.write(bytes(new_offset - end) + data)
+            end = new_offset + len(data)
+            out.seek(pos)
+            out.write(struct.pack('>II', new_offset, len(data)))
+            moved[name] = (offset, size, new_offset, len(data))
+        if moved:
+            out.seek(4)
+            out.write(struct.pack('<I', end))
+    written = [dst]
+
+    index = game.index_path(short)
+    if index:
+        with open(index, 'rb') as f:
+            bh = bytearray(f.read())
+        slots = {}
+        for i in range(struct.unpack('>I', bh[8:12])[0]):
+            off, size, _, _, h = struct.unpack('>IIIII', bh[16 + 20 * i:36 + 20 * i])
+            slots.setdefault((off, size, h), []).append(16 + 20 * i)
+        for name, (offset, size, new_offset, new_size) in moved.items():
+            hits = slots.get((offset, size, big.djb2(name.encode())), [])
+            if len(hits) != 1:
+                raise BuildError(f'{name}: not found once in {os.path.basename(index)} (bug)')
+            struct.pack_into('>II', bh, hits[0], new_offset, new_size)
+        bh_dst = dst[:-4] + '.bh'
+        with open(bh_dst, 'wb') as f:
+            f.write(bh)
+        written.append(bh_dst)
+    return written, {'source': source, 'ranges': ranges, 'moved': sorted(moved)}
+
+
+def zeroed_index(game, short, names):
+    """Bytes of the original .bh of archive short with the 20-byte records of names zeroed (offset, size, 0,
+    unknown, hash): the game no longer finds them in the .big and opens Game/<name> from disk. The .bh lists the
+    entries in the order of the .big's header; each record's hash is checked before it is zeroed."""
+    with open(game.index_path(short), 'rb') as f:
+        bh = bytearray(f.read())
+    order = {n: i for i, (n, _, _) in enumerate(big.read_toc_file(game.target_path(short)))}
+    for name in names:
+        if name not in order:
+            raise BuildError(f'{name} is not in {short} (bug)')
+        pos = 16 + 20 * order[name]
+        if struct.unpack('>I', bh[pos + 16:pos + 20])[0] != big.djb2(name.encode()):
+            raise BuildError(f'{name}: its record in {os.path.basename(game.index_path(short))} does not match (bug)')
+        bh[pos:pos + 20] = bytes(20)
+    return bytes(bh)
+
+
+def _write_file(path, data, written):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(data)
+    written.add(os.path.normcase(path))
+
+
+def _finish_patch_dir(out_dir, game_out, written, state, progress_total, step):
+    """Removes files of earlier builds and empty folders, then writes the build state."""
+    import json
+    for root, dirs, files in os.walk(game_out, topdown=False):
+        for n in files:
+            if os.path.normcase(os.path.join(root, n)) not in written:
+                os.remove(os.path.join(root, n))
+        for d in dirs:
+            path = os.path.join(root, d)
+            if not os.listdir(path):
+                os.rmdir(path)
+    with open(os.path.join(out_dir, BUILD_STATE), 'w', encoding='utf-8') as f:
+        json.dump({'layout': PATCH_LAYOUT, 'files': state}, f, indent=2)
+    step('files', progress_total, progress_total)
+
+
+def write_patch_loose(result, game, out_dir, progress=None):
+    """Writes the patch into out_dir (PATCH_LAYOUT 'loose', since 10/11/2026), mirroring the game root:
+
+      Game/data8.big, Game/data8.bh            database (the game reads d:\\data8.big over data0; unchanged)
+      Game/<.bh of every archive that has one> always: the original .bh with the records of the replaced entries
+                                                zeroed, or the plain original when nothing of it is replaced
+                                                (data0.bh, data1.bh, data3.bh, data7.bh, .../2dheads.bh)
+      Game/<entry name>                         every replaced entry (result.entries of an archive with a .bh) as a
+                                                loose file with the same bytes it would have inside the .big
+      Game/data/loc/locale*.big                 whole (no .bh, so no zeroing): the original with the new texts
+      Game/<internal name>                      loose files (result.loose), as before
+
+    The .big files of data0/1/3/7 and 2dheads never go: the game keeps its own (they must be the originals; the
+    install of the app puts them back when an earlier patch had replaced them). Every .bh goes even when it is the
+    original, so copying Game/ over any earlier install of this layout still leaves the game as this project says
+    (decision of the user, 21/10/2026). To write the old layout instead: PATCH_LAYOUT = 'archives'.
+    progress(step, done, total): step 'files' (the archives one by one, then the database and the loose files).
+    """
+    by_file = _entries_by_file(result)
+    previous, game_out = _start_patch_dir(out_dir)
+    step = progress or (lambda *_: None)
+    files_total = len(PATCH_TARGETS) + 1
+    written, state, entry_files = set(), {}, {}
+    loose_names = {n.lower() for n in result.loose}
+    for k, short in enumerate(sorted(PATCH_TARGETS)):
+        step('files', k, files_total)
+        items = by_file.get(short, {})
+        dst = os.path.join(game_out, PATCH_TARGETS[short])
+        if game.index_path(short) is None:  # locale: no index to zero, the archive goes whole
+            paths, state[short] = _write_whole_archive(game, short, items, dst, previous.get(short))
+            written.update(os.path.normcase(p) for p in paths)
+            continue
+        _write_file(dst[:-4] + '.bh', zeroed_index(game, short, sorted(items)), written)
+        for name, data in items.items():
+            key = name.lower()
+            if key in entry_files or key in loose_names:
+                raise BuildError(f'{name} would be written twice (bug)')
+            entry_files[key] = short
+            _write_file(os.path.join(game_out, *name.split('/')), data, written)
+
+    step('files', len(PATCH_TARGETS), files_total)
+    big_data, bh_data = big.build_patch([(DB_ENTRY, result.database)], game.db_bh_unknown)
+    _write_file(os.path.join(game_out, 'data8.big'), big_data, written)
+    _write_file(os.path.join(game_out, 'data8.bh'), bh_data, written)
+    for name, data in result.loose.items():
+        _write_file(os.path.join(game_out, *name.split('/')), data, written)
+    _finish_patch_dir(out_dir, game_out, written, state, files_total, step)
+    return out_dir
+
+
+def write_patch_archives(result, game, out_dir, progress=None):
+    """Writes the patch into out_dir (PATCH_LAYOUT 'archives': the layout up to 0.4.0), mirroring the game root:
 
       Game/data8.big, Game/data8.bh            database (the game reads d:\\data8.big over data0)
       Game/<path of every PATCH_TARGETS file>   whole archive: the original with the new entries, or the plain
@@ -1340,131 +1556,29 @@ def write_patch(result, game, out_dir, progress=None):
       Game/<internal name>                      loose files (result.loose): the game opens d:/<name> from disk
                                                 when no archive has it (validated with a country flag, 20/10)
 
-    An entry that fits its original space is written in place (zero padded; the index keeps the original size).
-    A bigger one is appended at the end of the archive (aligned to 0x40) and its offset/size are updated in the
-    BIG4 header and in the .bh, like ReStreet's installer does for data1.big (validated in game).
-    Archives are reused between builds (BUILD_STATE): the ranges written last time and the header are restored
-    from the original and the appended tail is cut, so data3.big (1.1 GB) and data7.big are not copied
-    on every build.
+    How each entry goes into its archive: _write_whole_archive (archives are reused between builds through
+    BUILD_STATE, so data3.big (1.1 GB) and data7.big are not copied on every build).
     Anything else in out_dir is removed.
     Every target always goes, changed or not: copying Game/ over any earlier install (or over a mod built before)
     then always leaves the game exactly as this project says (decision of the user, 21/10/2026).
     progress(step, done, total): step 'files' (the archives one by one, then the database and the loose files).
     """
-    import json
-    import shutil
-    import struct
-    by_file = {}
-    for (short, name), data in result.entries.items():
-        if short not in PATCH_TARGETS:
-            raise BuildError(f'unknown archive {short} (bug)')
-        by_file.setdefault(short, {})[name] = data
-
-    state_path = os.path.join(out_dir, BUILD_STATE)
-    previous = {}
-    if os.path.exists(state_path):
-        try:
-            with open(state_path, encoding='utf-8') as f:
-                previous = json.load(f).get('files', {})
-        except (OSError, ValueError):
-            previous = {}
-        os.remove(state_path)  # rewritten only when everything below succeeds
-
-    game_out = os.path.join(out_dir, GAME_DATA)
-    os.makedirs(game_out, exist_ok=True)
-    for entry in os.listdir(out_dir):  # old layouts (GameData/, Mods/) and stray files
-        if entry != GAME_DATA:
-            path = os.path.join(out_dir, entry)
-            if os.path.isdir(path):
-                shutil.rmtree(path)
-            else:
-                os.remove(path)
-
+    by_file = _entries_by_file(result)
+    previous, game_out = _start_patch_dir(out_dir)
     step = progress or (lambda *_: None)
     files_total = len(PATCH_TARGETS) + 1
     written, state = set(), {}
     for k, short in enumerate(sorted(PATCH_TARGETS)):
         step('files', k, files_total)
-        items = by_file.get(short, {})
-        src, dst = game.target_path(short), os.path.join(game_out, PATCH_TARGETS[short])
-        toc, hdr_len = big.read_toc_positions(src)
-        st = os.stat(src)
-        source = [st.st_size, st.st_mtime_ns]
-        prev = previous.get(short)
-        reuse = bool(prev) and prev.get('source') == source and os.path.exists(dst) and \
-            os.path.getsize(dst) >= st.st_size
-        if not reuse:
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copyfile(src, dst)
-        ranges, moved = [], {}
-        with open(dst, 'r+b') as out, open(src, 'rb') as orig:
-            if reuse:
-                out.truncate(st.st_size)
-                for offset, length in prev['ranges'] + [[0, hdr_len]]:
-                    orig.seek(offset)
-                    out.seek(offset)
-                    out.write(orig.read(length))
-            end = st.st_size
-            for name, data in sorted(items.items()):
-                if name not in toc:
-                    raise BuildError(f'{name} is not in {short} (bug)')
-                pos, offset, size = toc[name]
-                if len(data) <= size:
-                    out.seek(offset)
-                    out.write(data + bytes(size - len(data)))
-                    ranges.append([offset, size])
-                    continue
-                new_offset = end + (-end % big.ALIGN)
-                out.seek(end)
-                out.write(bytes(new_offset - end) + data)
-                end = new_offset + len(data)
-                out.seek(pos)
-                out.write(struct.pack('>II', new_offset, len(data)))
-                moved[name] = (offset, size, new_offset, len(data))
-            if moved:
-                out.seek(4)
-                out.write(struct.pack('<I', end))
-        written.add(os.path.normcase(dst))
-
-        index = game.index_path(short)
-        if index:
-            bh = bytearray(open(index, 'rb').read())
-            slots = {}
-            for i in range(struct.unpack('>I', bh[8:12])[0]):
-                off, size, _, _, h = struct.unpack('>IIIII', bh[16 + 20 * i:36 + 20 * i])
-                slots.setdefault((off, size, h), []).append(16 + 20 * i)
-            for name, (offset, size, new_offset, new_size) in moved.items():
-                hits = slots.get((offset, size, big.djb2(name.encode())), [])
-                if len(hits) != 1:
-                    raise BuildError(f'{name}: not found once in {os.path.basename(index)} (bug)')
-                struct.pack_into('>II', bh, hits[0], new_offset, new_size)
-            bh_dst = dst[:-4] + '.bh'
-            with open(bh_dst, 'wb') as f:
-                f.write(bh)
-            written.add(os.path.normcase(bh_dst))
-        state[short] = {'source': source, 'ranges': ranges, 'moved': sorted(moved)}
+        dst = os.path.join(game_out, PATCH_TARGETS[short])
+        paths, state[short] = _write_whole_archive(game, short, by_file.get(short, {}), dst, previous.get(short))
+        written.update(os.path.normcase(p) for p in paths)
 
     step('files', len(PATCH_TARGETS), files_total)
     big_data, bh_data = big.build_patch([(DB_ENTRY, result.database)], game.db_bh_unknown)
-    for name, data in (('data8.big', big_data), ('data8.bh', bh_data)):
-        with open(os.path.join(game_out, name), 'wb') as f:
-            f.write(data)
-        written.add(os.path.normcase(os.path.join(game_out, name)))
+    _write_file(os.path.join(game_out, 'data8.big'), big_data, written)
+    _write_file(os.path.join(game_out, 'data8.bh'), bh_data, written)
     for name, data in result.loose.items():
-        path = os.path.join(game_out, *name.split('/'))
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'wb') as f:
-            f.write(data)
-        written.add(os.path.normcase(path))
-    for root, dirs, files in os.walk(game_out, topdown=False):  # files of earlier builds, empty folders
-        for n in files:
-            if os.path.normcase(os.path.join(root, n)) not in written:
-                os.remove(os.path.join(root, n))
-        for d in dirs:
-            path = os.path.join(root, d)
-            if not os.listdir(path):
-                os.rmdir(path)
-    with open(state_path, 'w', encoding='utf-8') as f:
-        json.dump({'files': state}, f, indent=2)
-    step('files', files_total, files_total)
+        _write_file(os.path.join(game_out, *name.split('/')), data, written)
+    _finish_patch_dir(out_dir, game_out, written, state, files_total, step)
     return out_dir

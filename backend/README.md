@@ -152,32 +152,38 @@ original_files/
    └─ data/ui/imgAssets/heads/2dheads.big   (player photos)
 ```
 
-About 1.7 GB. They must be the untouched originals (never a modded copy): the patch contains whole copies
-of the files it changes, so a modded or outdated original would end up in the game. Another location can
+About 1.7 GB. They must be the untouched originals (never a modded copy): the patch carries copies of their
+`.bh` indexes (and whole locale files), and an index only fits the `.big` it came from, so a modded or
+outdated original would break the game. Another location can
 be used with the `FSMOD_ORIGINAL_FILES` environment variable (pointing to the folder that contains `Game`).
 
 ## patch/ (not in git — generated)
 
-Output of a build, rebuilt from the originals every time (ReStreet 2.x has no `Mods` overlay, so the
-changed game files go whole). Copy `Game/` over the game's `Game/` folder:
+Output of a build, rebuilt from the originals every time. Copy `Game/` over the game's `Game/` folder.
+Since 10/11/2026 (layout `loose`, `fsmod.builder.PATCH_LAYOUT`) the big archives never go: a game file the
+project replaces goes as a **loose file** and its 20-byte record is zeroed in a copy of the original `.bh`,
+so the game misses it in the `.big` and opens the loose file (about 50 MB instead of about 2 GB):
 
 ```
 patch/
 ├─ Game/
 │  ├─ data8.big   data8.bh     (database; the game reads d:\data8.big over data0)
-│  ├─ data1.big   data1.bh     (menu crests, kit thumbnails)              ┐
-│  ├─ data3.big   data3.bh     (team kits, heads)                         │ always all of them:
-│  ├─ data7.big   data7.bh     (far hair of scanned faces)                │ modified when the project
-│  ├─ data/loc/locale.big      (texts)                                    │ changes them, the plain
-│  ├─ data/loc/locale_ptbr.big (texts, pt-BR)                             │ original otherwise
-│  └─ data/ui/imgAssets/heads/2dheads.big/.bh   (player photos)           ┘
-├─ .fsmod_build.json           (internal: lets the next build reuse the big files)
+│  ├─ data0.bh  data1.bh  data3.bh  data7.bh                              ┐ always all of them: the original
+│  ├─ data/ui/imgAssets/heads/2dheads.bh                                  ┘ with records zeroed, or as it is
+│  ├─ data/loc/locale.big      (texts; no .bh, so it goes whole)
+│  ├─ data/loc/locale_ptbr.big (texts, pt-BR; whole)
+│  └─ data/...                 (loose files: new crests/kits/faces/photos/flags/balls…, and the replaced files)
+├─ .fsmod_build.json           (internal: lets the next build reuse the locale files)
 └─ patch.json                  (internal: project hash, file list)
 ```
 
-Every file the app can change always goes (about 2 GB), so copying `Game/` over any earlier install
-always leaves the game exactly as the project says: something removed from the project goes back to
-the original even when the project no longer touches that file.
+Every `.bh` always goes, so copying `Game/` over any earlier install of this layout leaves the game as the
+project says. The game's own `.big` files must be the originals: the app's **Install** puts them back when an
+earlier patch of the old layout had replaced them; by hand, copy the originals back first.
+
+**Old layout (`archives`, up to 0.4.0):** every game file the app can change went whole (`data0/1/3/7.big`,
+`2dheads.big`, their `.bh`, the locale files; about 2 GB). It is still in the code (`write_patch_archives`):
+set `PATCH_LAYOUT = 'archives'` in `core/fsmod/builder.py` to build it again; install/uninstall need no change.
 
 Keep a backup of the game's original files before copying (to remove the mod, copy them back; they are
 the same as `original_files/`). After installing, the game needs a new save to see new teams/players. Override the output folder with
