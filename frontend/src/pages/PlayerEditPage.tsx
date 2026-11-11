@@ -47,7 +47,7 @@ import { preferredPosition } from '@/lib/gloves'
 import { PlayerTeamsCard } from '@/components/common/PlayerTeams'
 import { cn } from '@/lib/utils'
 import { usePlayerDefaults, useProject, useSameAsGame, useWasEdited } from '@/state/project'
-import { useCatalog, useLookups, useStatus } from '@/state/queries'
+import { NO_NATIONALITY, useCatalog, useLookups, useStatus } from '@/state/queries'
 
 const PlayerPreview = lazy(() => import('@/components/common/PlayerPreview'))
 
@@ -128,11 +128,7 @@ function DataTab({ player }: { player: Player }) {
               label={t('base.birthdate')}
               entity={player.uid}
               field="birthdate"
-              hint={
-                !player.birthdate && defaults?.birthdate
-                  ? t('playerEdit.birthdateDefault', { date: defaults.birthdate.split('-').reverse().join('/') })
-                  : undefined
-              }
+              hint={!player.birthdate ? t('playerEdit.birthdateEmpty') : undefined}
             >
               <Input type="date" value={player.birthdate ?? ''} onChange={(e) => set({ birthdate: e.target.value || undefined })} />
             </Field>
@@ -164,6 +160,7 @@ function DataTab({ player }: { player: Player }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>{inherited(t, defaults && lookups.nation.get(defaults.nationality))}</SelectItem>
+                <SelectItem value={String(NO_NATIONALITY)}>{t('playerEdit.noNationality')}</SelectItem>
                 {(catalog?.nations ?? []).map((n) => (
                   <SelectItem key={n.id} value={String(n.id)}>
                     {n.name}

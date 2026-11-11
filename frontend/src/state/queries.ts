@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { api } from '@/api/client'
+import { useI18n } from '@/i18n'
 
 // Original game data and valid values never change while the app runs.
 const forever = { staleTime: Infinity, gcTime: Infinity, retry: false } as const
@@ -35,18 +36,22 @@ export function useOriginalPlayers(params: { team?: number; q?: string; offset?:
   })
 }
 
+/** Player.fields.nationality of a player with no nationality (a nation id the game does not have). */
+export const NO_NATIONALITY = 0
+
 /** Lookup helpers built from the catalog and the original lists. */
 export function useLookups() {
+  const { t } = useI18n()
   const leagues = useOriginalLeagues().data
   const teams = useOriginalTeams().data
   const catalog = useCatalog().data
   return useMemo(
     () => ({
       originalLeague: new Map((leagues ?? []).map((l) => [l.id, l])),
-      originalTeam: new Map((teams ?? []).map((t) => [t.id, t])),
+      originalTeam: new Map((teams ?? []).map((tm) => [tm.id, tm])),
       position: new Map((catalog?.positions ?? []).map((p) => [p.code, p.abbr])),
-      nation: new Map((catalog?.nations ?? []).map((n) => [n.id, n.name])),
+      nation: new Map([[NO_NATIONALITY, t('playerEdit.noNationality')], ...(catalog?.nations ?? []).map((n) => [n.id, n.name] as [number, string])]),
     }),
-    [leagues, teams, catalog],
+    [leagues, teams, catalog, t],
   )
 }

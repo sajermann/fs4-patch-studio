@@ -102,7 +102,9 @@ class AppState:
             pl = original_player.load(self.game, self.catalog(), playerid, uid, self.store.save_image)
             return pl.model_dump(mode='json', exclude_none=True)
         restored = original_team.restore_street_slots(data, self.catalog().db)
-        return original_player.absorb_game_links(data, load_player) or restored
+        absorbed = original_player.absorb_game_links(data, load_player)
+        dated = self.catalog().fill_template_birthdates(data)  # before v10 an empty birth date = the template's
+        return absorbed or restored or dated
 
     @property
     def store(self):

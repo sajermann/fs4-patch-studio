@@ -14,8 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # players in several teams and the game's own entries (original_id); 4 = street kits with a list of pieces per part;
 # 5 = world_tour (players of the friendly match); 6 = boots (the user's and edited game boots) and Player.boots;
 # 7 = goalkeeper gloves (the user's and edited game gloves) and Player.glove; 8 = balls (the user's and edited game
-# balls) and the ball of each stadium (originals.stadium_balls); 9 = created_at / updated_at of every entry
-CONTRACT_VERSION = 9
+# balls) and the ball of each stadium (originals.stadium_balls); 9 = created_at / updated_at of every entry;
+# 10 = a new player's empty birthdate means "no birth date" (before: the template's date, filled in on upgrade)
+CONTRACT_VERSION = 10
+NO_NATIONALITY = 0  # Player.fields['nationality'] of a player with no nationality
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
 Channel = Annotated[int, Field(ge=0, le=255)]
@@ -172,11 +174,13 @@ class Player(Dated):
     template: Optional[int] = None  # playerid whose record is cloned
     height: Optional[int] = None
     weight: Optional[int] = None
-    birthdate: Optional[str] = None  # YYYY-MM-DD
+    birthdate: Optional[str] = None  # YYYY-MM-DD; None = no birth date (written as day 0 since v10; before, the
+    # template's date: projects older than v10 get that date filled in when upgraded)
     foot: Optional[Literal['right', 'left']] = None
     skills: dict[str, int] = {}  # ATH DEF DRI GK PAS SHO SPE (1-99), TRI (0-4), overall
     appearance: dict[str, int] = {}  # generic head codes: headtypecode, hairtypecode, haircolorcode...
-    fields: dict[str, int] = {}  # any other column of the players table (advanced)
+    fields: dict[str, int] = {}  # any other column of the players table (advanced); nationality 0 = no nationality
+    # (NO_NATIONALITY: a nationid the game does not have; tested in game, nothing breaks)
     photo: Optional[str] = None  # menu photo, image path relative to the project folder
     face: Optional[ScannedFace] = None  # used when generic is False
     # boot per pitch surface: uid of a new Boot of the project; a surface left out (or whose boot is hidden) = the
@@ -196,6 +200,18 @@ class Player(Dated):
             data = dict(data)
             team, number, position = data.pop('team', None), data.pop('number', None), data.pop('position', None)
             data['teams'] = [{'team': team, 'number': number, 'position': position}] if team is not None else []
+        return data
+
+    @model_validator(mode='before')
+    @classmethod
+    def _null_fields(cls, data):
+        """Shared zips (e.g. from a source with no nationalities) may send "nationality": null = no nationality;
+        any other null column = not set."""
+        if isinstance(data, dict) and isinstance(data.get('fields'), dict) and None in data['fields'].values():
+            fields = {k: v for k, v in data['fields'].items() if v is not None}
+            if 'nationality' in data['fields'] and data['fields']['nationality'] is None:
+                fields['nationality'] = NO_NATIONALITY
+            data = {**data, 'fields': fields}
         return data
 
     @property
@@ -409,7 +425,7 @@ class WorldTour(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3, 4, 5, 6, 7, 8, 9] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []

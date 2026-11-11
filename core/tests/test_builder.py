@@ -463,6 +463,39 @@ def test_template_sources_match_what_the_builder_copies(game):
         assert players.value(row, players.field('height')) == d['height']
 
 
+def test_empty_birthdate_and_no_nationality_are_written_as_zero(game):
+    """Empty birth date = no birth date (day 0) and nationality 0 = no nationality: both tested in game."""
+    from fsmod import t3db
+    project = load_palmeiras()
+    roster = project.roster(project.teams[0].uid)
+    roster[0].birthdate = None
+    roster[1].fields = {**roster[1].fields, 'nationality': model.NO_NATIONALITY}
+    db = t3db.Database(builder.build(project, game, PALMEIRAS).database, game.meta)
+    players = db.by_name('players')
+    built = {players.value(r, players.field('playerid')): r for r in players.records}
+    first_new = min(pid for pid in built if pid >= builder.FIRST_NEW_PLAYERID)
+    assert players.value(built[first_new], players.field('birthdate')) == builder.NO_BIRTHDATE
+    assert players.value(built[first_new + 1], players.field('nationality')) == 0
+
+
+def test_null_nationality_of_a_shared_player_means_no_nationality():
+    p = model.Player.model_validate({'uid': 'u1', 'first_name': 'A', 'last_name': 'B',
+                                     'fields': {'nationality': None, 'preferredposition1': None}})
+    assert p.fields == {'nationality': model.NO_NATIONALITY}
+
+
+def test_projects_before_v10_keep_the_template_birthdate(game):
+    from fsmod.catalog import Catalog
+    catalog = Catalog(game)
+    data = load_palmeiras().model_dump(mode='json')
+    uid = data['players'][0]['uid']
+    data['players'][0]['birthdate'] = None
+    expected = catalog.player_defaults(model.load(data))[uid]['birthdate']
+    old = {**data, 'version': 9}
+    assert catalog.fill_template_birthdates(old) and old['players'][0]['birthdate'] == expected
+    assert not catalog.fill_template_birthdates({**data, 'version': 10})
+
+
 def test_street_kit_pieces_fill_every_teamkits_slot(game):
     """A chosen street piece goes to all of its teamkits slots (the game picks one at random) with its 3
     colors; parts left unset keep the template's pieces."""

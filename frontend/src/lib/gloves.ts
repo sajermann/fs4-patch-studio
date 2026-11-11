@@ -15,11 +15,17 @@ const FALLBACK_POSITION = 25 // ST
 /** The preferred position (players.preferredposition1) the build writes for a player (fsmod.gloves.preferred_position,
  * same rule): the goalkeeper's when a glove was picked (only goalkeepers wear their own glove), otherwise the
  * position he has in most of his teams (a tie: his first team's; SUB/RES and unknown do not count), ST without any.
- * An original player keeps the game's own unless the rule turns him into a goalkeeper or out of one. */
+ * An original player keeps the game's own unless the rule turns him into a goalkeeper or out of one.
+ * byGlove: the glove changed the result (without it he would not be a goalkeeper). */
 export function preferredPosition(player: Player): { position: number; byGlove: boolean } {
-  const byGlove = player.glove != null
+  const position = ruledPosition(player, player.glove != null)
+  const byGlove = player.glove != null && ruledPosition(player, false) !== GOALKEEPER
+  return { position, byGlove }
+}
+
+function ruledPosition(player: Player, glove: boolean): number {
   let computed = FALLBACK_POSITION
-  if (byGlove) computed = GOALKEEPER
+  if (glove) computed = GOALKEEPER
   else {
     const positions = player.teams.map((l) => l.position).filter((p): p is number => p != null && !NOT_A_POSITION.has(p))
     if (positions.length) {
@@ -30,8 +36,8 @@ export function preferredPosition(player: Player): { position: number; byGlove: 
     }
   }
   const current = player.original_id != null ? player.fields.preferredposition1 : undefined
-  if (current !== undefined && (computed === GOALKEEPER) === (current === GOALKEEPER)) return { position: current, byGlove }
-  return { position: computed, byGlove }
+  if (current !== undefined && (computed === GOALKEEPER) === (current === GOALKEEPER)) return current
+  return computed
 }
 
 /** Free codes left for new gloves: `total` (the game's free ones) and how many the project takes (new gloves in the

@@ -53,6 +53,12 @@ LAST_NEW_LEAGUEID = 4096  # leagues.leagueid: 12 bits from 1
 IMAGE_COUNTRIES = range(217, 256)
 STREET_SLOTS = {'top': 5, 'bottom': 2, 'sock': 2}  # teamkits *_geo_type_N / *_texture_pattern_N slots
 EPOCH = datetime.date(1582, 10, 14)
+NO_BIRTHDATE = 0  # players.birthdate of a player with no birth date (the column's day 0; tested in game)
+
+
+def _birth_days(birthdate):
+    """players.birthdate of a Player.birthdate (YYYY-MM-DD, or None = no birth date)."""
+    return (datetime.date.fromisoformat(birthdate) - EPOCH).days if birthdate else NO_BIRTHDATE
 MAX_ROSTER = 13
 MIN_ROSTER = 6  # the smallest roster of the game's own teams; with far fewer the game starts but a match crashes
 # teams of a league (new + original): the team selector loads every crest of the open league on both sides at
@@ -677,8 +683,8 @@ def _build_original_player(db, game, pl, assets_dir, nameid, face_templates, say
             db.put(players, row, 'height', pl.height)
         if 'weight' in f and pl.weight is not None:
             db.put(players, row, 'weight', pl.weight)
-        if 'birthdate' in f and pl.birthdate:
-            db.put(players, row, 'birthdate', (datetime.date.fromisoformat(pl.birthdate) - EPOCH).days)
+        if 'birthdate' in f:  # cleared = no birth date (day 0)
+            db.put(players, row, 'birthdate', _birth_days(pl.birthdate))
         if 'foot' in f and pl.foot:
             db.put(players, row, 'preferredfoot', 2 if pl.foot == 'left' else 1)
         for skill, v in pl.skills.items():
@@ -1070,8 +1076,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
                 db.put(players, row, 'height', pl.height)
             if pl.weight is not None:
                 db.put(players, row, 'weight', pl.weight)
-            if pl.birthdate:
-                db.put(players, row, 'birthdate', (datetime.date.fromisoformat(pl.birthdate) - EPOCH).days)
+            db.put(players, row, 'birthdate', _birth_days(pl.birthdate))  # empty = no birth date (day 0)
             if pl.foot:
                 db.put(players, row, 'preferredfoot', 2 if pl.foot == 'left' else 1)
             for skill, v in pl.skills.items():

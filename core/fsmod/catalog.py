@@ -40,6 +40,8 @@ HAIR_GROUPS = {
 
 
 def _days_to_iso(days):
+    if days == builder.NO_BIRTHDATE:
+        return None
     try:
         return (builder.EPOCH + datetime.timedelta(days=days)).isoformat()
     except OverflowError:
@@ -141,6 +143,27 @@ class Catalog:
                         'foot': tpl['foot'], 'nationality': tpl['nationality'],
                         'skills': tpl['skills'], 'appearance': tpl['appearance']}
         return out
+
+    def fill_template_birthdates(self, data):
+        """Projects saved before contract v10, where a new player's empty birth date meant the template's date: that
+        date is written in, so the build keeps giving them the same one (since v10 empty = no birth date). Changes
+        the project JSON in place; True when it changed something."""
+        version = data.get('version')
+        if isinstance(version, int) and version >= 10:
+            return False
+        empty = [p for p in data.get('players', []) if isinstance(p, dict) and p.get('original_id') is None
+                 and not p.get('birthdate')]
+        if not empty:
+            return False
+        from . import model
+        defaults = self.player_defaults(model.load(data))
+        changed = False
+        for p in empty:
+            date = defaults.get(p.get('uid'), {}).get('birthdate')
+            if date:
+                p['birthdate'] = date
+                changed = True
+        return changed
 
     @cached_property
     def leagues(self):
