@@ -97,7 +97,19 @@ def read_files(folder, face_id):
                 except (zlib.error, ValueError, struct.error) as e:  # truncated download, broken pack
                     raise FaceFormatError(f'{os.path.basename(path)}: damaged compressed file ({e})') from e
             out[kind] = data
+    # some packs ship a copy of the hair mesh under the hair textures name (FIFA 14 classic patch, 51793): without
+    # its two textures (coeff, cm) the detailed hair cannot be built, so the face goes without it (hairlod stays)
+    tex = out.get('hair_textures')
+    if tex is not None and _texture_count(tex) < 2:
+        del out['hair_textures']
     return out
+
+
+def _texture_count(data):
+    try:
+        return len(of_type(data, '<', TEXTURE))
+    except (ValueError, LookupError, struct.error):
+        return 0
 
 
 def write_files(folder, face_id, files):

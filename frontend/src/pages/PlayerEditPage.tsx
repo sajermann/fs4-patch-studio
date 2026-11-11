@@ -767,18 +767,18 @@ export function PlayerEditPage() {
   return (
     <div className={fill ? 'flex h-full min-h-[40rem] flex-col gap-4' : 'flex flex-col gap-4'}>
       <BackButton back={back} />
-      <div className="flex justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap justify-between gap-x-4 gap-y-3">
+        <div className="flex min-w-0 items-center gap-3">
           <PlayerAvatar player={player} className="size-10" />
           <div>
-            <h1 className="text-2xl font-semibold">{name || t('players.new')}</h1>
+            <h1 className="text-2xl font-semibold break-words">{name || t('players.new')}</h1>
             <EntryDates entry={player} />
           </div>
           {original && <OriginalBadge entry={player.uid} />}
           {!original && player.hidden && <OutOfPatchBadge alert />}
         </div>
         <div className="flex flex-col items-end justify-between">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <ShareSingleImport kind="players" entry={player} pathOf={(e) => playerPath(playerRef(e as Player))} />
             <ShareDownloadButton kind="players" uid={player.uid} unchanged={sameAsGame(player.uid)} />
             {!original && (

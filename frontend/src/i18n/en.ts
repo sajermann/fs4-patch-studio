@@ -673,8 +673,6 @@ export const en: Record<MessageKey, string> = {
   'leagueEdit.restoreOriginalDescription': 'Name, short name, order and images go back to the game’s, and so do the teams: who joined leaves and who left comes back (teams keep their other leagues).',
   'teamEdit.leagueFull': '(full: {max} teams)',
   'teamEdit.fullName': 'Full name',
-  'teamEdit.name10': 'Name up to 10',
-  'teamEdit.name7': 'Name up to 7',
   'teamEdit.abbreviation': 'Abbreviation (3)',
   'teamEdit.crest': 'Crest',
   'teamEdit.crestDescription': 'PNG with a transparent background. It goes to the menus, the jersey and the shorts.',

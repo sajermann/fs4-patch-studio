@@ -185,11 +185,11 @@ export function GloveEditPage() {
   return (
     <div className="space-y-4">
       <BackButton back={back} />
-      <div className="flex flex-wrap justify-between gap-2">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap justify-between gap-x-4 gap-y-3">
+        <div className="flex min-w-0 items-center gap-3">
           <GloveThumb glove={glove} className="size-12" />
           <div>
-            <h1 className="text-2xl font-semibold">{name}</h1>
+            <h1 className="text-2xl font-semibold break-words">{name}</h1>
             <EntryDates entry={glove} />
           </div>
           {original && <OriginalBadge entry={glove.uid} />}

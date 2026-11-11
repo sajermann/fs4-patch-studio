@@ -422,12 +422,14 @@ function problemText(t: TFunction, p: ShareProblem) {
   return p.message
 }
 
-function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+/** A titled part of the import review. `scroll`: the children scroll on their own (title and description stay put)
+ * and the section shrinks to share the dialog's height with the other lists. */
+function Section({ title, description, scroll, children }: { title: string; description?: string; scroll?: boolean; children: ReactNode }) {
   return (
-    <section className="space-y-1.5">
-      <h3 className="text-sm font-medium">{title}</h3>
-      {description && <p className="text-xs text-muted-foreground">{description}</p>}
-      {children}
+    <section className={scroll ? 'flex min-h-0 flex-col gap-1.5' : 'shrink-0 space-y-1.5'}>
+      <h3 className="shrink-0 text-sm font-medium">{title}</h3>
+      {description && <p className="shrink-0 text-xs text-muted-foreground">{description}</p>}
+      {scroll ? <div className="min-h-0 overflow-y-auto">{children}</div> : children}
     </section>
   )
 }
@@ -511,14 +513,15 @@ function ShareImportDialog<P extends Pending>({
   const linkText = (m: { kind: 'team' | 'league' | 'boot' | 'glove'; ref: string }) => t(`share.missing.${m.kind}` as MessageKey, { ref: m.ref })
   return (
     <Dialog open={!!pending} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
+      {/* only the lists scroll: the header, the notes under them and the buttons stay in view */}
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{t('share.dialogTitle', { count: items.length })}</DialogTitle>
           <DialogDescription>{t(selectable ? 'share.dialogDescriptionPick' : 'share.dialogDescription')}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 text-sm">
+        <div className="flex min-h-0 flex-col gap-4 text-sm">
           {selectable && items.length > 1 && (
-            <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <label className="flex w-fit shrink-0 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
               <Checkbox
                 checked={skipped.size === 0 ? true : picked === 0 ? false : 'indeterminate'}
                 onCheckedChange={(v) => setSkipped(v === true ? new Set() : new Set(items.map((i) => i.uid)))}
@@ -527,9 +530,9 @@ function ShareImportDialog<P extends Pending>({
             </label>
           )}
           {replaces.length > 0 && (
-            <Section title={t('share.replacesTitle', { count: replaces.length })} description={t('share.replacesDescription')}>
+            <Section scroll title={t('share.replacesTitle', { count: replaces.length })} description={t('share.replacesDescription')}>
               <table className="w-full text-left">
-                <thead className="text-xs text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-popover text-xs text-muted-foreground">
                   <tr>
                     {selectable && <th className="w-6 py-1 pr-2" />}
                     <th className="py-1 pr-3 font-normal">{t('share.colCurrent')}</th>
@@ -558,7 +561,7 @@ function ShareImportDialog<P extends Pending>({
             </Section>
           )}
           {fresh.length > 0 && (
-            <Section title={t('share.newTitle', { count: fresh.length })}>
+            <Section scroll title={t('share.newTitle', { count: fresh.length })}>
               <ul className="space-y-1">
                 {fresh.map((item) => (
                   <li key={item.uid} onClick={rowProps(item.uid).onClick} className={`flex items-start gap-2 border-t pt-1.5 ${rowProps(item.uid).className ?? ''}`}>
@@ -574,7 +577,7 @@ function ShareImportDialog<P extends Pending>({
           )}
           {missing.length > 0 && (
             <Section title={t('share.missingTitle', { count: missing.length })} description={t('share.missingDescription')}>
-              <ul className="space-y-1">
+              <ul className="max-h-32 space-y-1 overflow-y-auto">
                 {missing.map(([uid, links]) => (
                   <li key={uid} className={isOut(uid) ? 'opacity-50' : ''}>
                     <span className="font-medium">{name(byUid.get(uid)!)}</span>: {links.map(linkText).join(', ')}
@@ -584,11 +587,11 @@ function ShareImportDialog<P extends Pending>({
             </Section>
           )}
           {pending && pending.analysis.waitingPlayers.size > 0 && (
-            <p className="text-muted-foreground">{t('share.waitingPlayers', { count: pending.analysis.waitingPlayers.size })}</p>
+            <p className="shrink-0 text-muted-foreground">{t('share.waitingPlayers', { count: pending.analysis.waitingPlayers.size })}</p>
           )}
           {pending && pending.problems.length > 0 && (
             <Section title={t('share.problemsTitle', { count: pending.problems.length })}>
-              <ul className="space-y-1">
+              <ul className="max-h-32 space-y-1 overflow-y-auto">
                 {pending.problems.map((p, k) => (
                   <li key={k}>
                     <span className="font-medium">{p.name || unnamed}</span>: {problemText(t, p)}
@@ -598,10 +601,10 @@ function ShareImportDialog<P extends Pending>({
             </Section>
           )}
           {(missing.length > 0 || (pending?.analysis.waitingPlayers.size ?? 0) > 0) && (
-            <p className="rounded-md border bg-muted/40 p-2 text-xs text-muted-foreground">{t('share.order')}</p>
+            <p className="shrink-0 rounded-md border bg-muted/40 p-2 text-xs text-muted-foreground">{t('share.order')}</p>
           )}
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={onCancel}>
             {t('common.cancel')}
           </Button>

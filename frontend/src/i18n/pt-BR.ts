@@ -671,8 +671,6 @@ export const ptBR = {
   'leagueEdit.restoreOriginalDescription': 'Nome, nome curto, ordem e imagens voltam a ser os do jogo, e os times também: quem entrou sai e quem saiu volta (os times continuam nas outras ligas).',
   'teamEdit.leagueFull': '(cheia: {max} times)',
   'teamEdit.fullName': 'Nome completo',
-  'teamEdit.name10': 'Nome com até 10',
-  'teamEdit.name7': 'Nome com até 7',
   'teamEdit.abbreviation': 'Sigla (3)',
   'teamEdit.crest': 'Escudo',
   'teamEdit.crestDescription': 'PNG com fundo transparente. Ele vai para os menus, a camisa e o calção.',

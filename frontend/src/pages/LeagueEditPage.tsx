@@ -282,10 +282,10 @@ export function LeagueEditPage() {
   return (
     <div className="flex h-full flex-col gap-4">
       <BackButton back={back} />
-      <div className="flex justify-between">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap justify-between gap-x-4 gap-y-3">
+        <div className="flex min-w-0 items-center gap-2">
           <div>
-            <h1 className="text-2xl font-semibold">{l.name || t('leagues.new')}</h1>
+            <h1 className="text-2xl font-semibold break-words">{l.name || t('leagues.new')}</h1>
             <EntryDates entry={l} />
           </div>
           {original && <OriginalBadge entry={l.uid} league={l.original_id} />}
@@ -293,7 +293,7 @@ export function LeagueEditPage() {
           {!original && l.hidden && <OutOfPatchBadge alert />}
         </div>
         <div className="flex flex-col items-end justify-between">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <ShareSingleImport kind="leagues" entry={l} pathOf={(e) => leaguePath(leagueKey(e as League))} />
             <ShareDownloadButton kind="leagues" uid={l.uid} unchanged={sameAsGame(l.uid)} />
             {original ? (

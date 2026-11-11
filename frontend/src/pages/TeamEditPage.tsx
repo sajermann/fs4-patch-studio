@@ -42,20 +42,20 @@ function DataTab({ team }: { team: Team }) {
   const { t } = useI18n()
   const { updateTeam } = useProject()
   const set = (patch: Partial<Team>) => updateTeam(team.uid, patch)
-  const text = (key: 'short_name' | 'name_10' | 'name_7' | 'abbreviation', label: string, fallback: string) => (
+  // name_10 / name_7 are not edited here: the game only shows the 15-character name, and the build fills the
+  // other two from the full name when they are empty
+  const text = (key: 'short_name' | 'abbreviation', label: string, fallback: string) => (
     <Field label={label} entity={team.uid} field={key}>
       <Input value={team[key] ?? ''} placeholder={fallback} onChange={(e) => set({ [key]: e.target.value || undefined })} />
     </Field>
   )
   return (
     <Card className="shrink-0">
-      <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
-        <Field label={t('teamEdit.fullName')} entity={team.uid} field="name" className="sm:col-span-2">
+      <CardContent className="grid gap-4 pt-6 sm:grid-cols-[minmax(0,1fr)_8rem] lg:grid-cols-[minmax(0,5fr)_minmax(0,4fr)_8rem]">
+        <Field label={t('teamEdit.fullName')} entity={team.uid} field="name" className="sm:col-span-2 lg:col-span-1">
           <Input value={team.name} onChange={(e) => set({ name: e.target.value })} autoFocus={!team.name} />
         </Field>
         {text('short_name', t('leagueEdit.shortName'), team.name)}
-        {text('name_10', t('teamEdit.name10'), team.name.slice(0, 10))}
-        {text('name_7', t('teamEdit.name7'), team.name.slice(0, 7))}
         {text('abbreviation', t('teamEdit.abbreviation'), team.name.slice(0, 3).toUpperCase())}
       </CardContent>
     </Card>
@@ -284,11 +284,11 @@ export function TeamEditPage() {
   return (
     <div className={fill ? 'flex h-full min-h-[36rem] flex-col gap-4' : 'flex flex-col gap-4'}>
       <BackButton back={back} />
-      <div className="flex justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap justify-between gap-x-4 gap-y-3">
+        <div className="flex min-w-0 items-center gap-3">
           {team.crest && <img src={imageUrl(team.crest)} alt="" className="size-10 object-contain" />}
           <div>
-            <h1 className="text-2xl font-semibold">{team.name || t('teams.new')}</h1>
+            <h1 className="text-2xl font-semibold break-words">{team.name || t('teams.new')}</h1>
             <EntryDates entry={team} />
           </div>
           {original && <OriginalBadge entry={team.uid} team={team.original_id} />}
@@ -296,7 +296,7 @@ export function TeamEditPage() {
           {!original && !team.hidden && leagueHidden && <OutOfPatchBadge alert label={t('teams.leagueOutOfPatch')} />}
         </div>
         <div className="flex flex-col items-end justify-between">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <ShareSingleImport kind="teams" entry={team} pathOf={(e) => teamPath(teamKey(e as Team))} />
             <ShareDownloadButton kind="teams" uid={team.uid} unchanged={sameAsGame(team.uid)} />
             {!original && (
