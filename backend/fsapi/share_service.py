@@ -12,6 +12,8 @@ Zip format, only the manifest and the files it names, side by side at the root o
                     - its image fields (league image / wide_image, team crest and real kit pictures, player photo)
                       naming files of the zip (league-<uid>.png, team-<uid>-crest.png, player-<uid>.jpg...);
                     - a player with a real face: "face_files" = {path inside the face folder: file of the zip};
+                      face options it leaves out (hair_mode, paint_scalp: the app's own converter choices, which
+                      other tools making zips should not know) get the ones of a new face (scanface.NEW_FACE_OPTIONS);
                     - the ids the build gives (league_id, team_id, player_id) left null: each project gives its own.
 
 What each entry keeps (and the importing project resolves): a team its leagues, captain, set-piece takers and
@@ -275,6 +277,10 @@ class ShareService:
                         raise ShareZipError('invalid_target_uid', str(target))
                     item['uid'] = target
                 face_files = item.pop(FACE_FILES, None)
+                if kind == 'players' and isinstance(item.get('face'), dict):
+                    # the app's zips carry every face option; one made by another tool leaves the app's own
+                    # converter choices out: it gets the current options of a new face
+                    item['face'] = {**scanface.NEW_FACE_OPTIONS, **item['face']}
                 item[GAME_IDS[kind]] = None
                 for field_path, _ in list(image_slots(kind, item)):
                     name = _get(item, field_path)

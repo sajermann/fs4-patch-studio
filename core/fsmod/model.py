@@ -151,7 +151,9 @@ class ScannedFace(BaseModel):
     paint_scalp: bool = True  # paint the hair color on the scalp (scanface.paint_scalp). Missing = on, as older
     # versions saved it; new faces come with False (/api/facepack/use, 06/11/2026: it helps few faces and stains
     # others, e.g. the forehead of faces whose cap hangs over it, or the ears)
-    hair_mode: str = 'standard'  # hair converter, a key of scanface.HAIR_MODES (chosen by eye in the preview)
+    # hair converter, a key of scanface.HAIR_MODES (chosen by eye in the preview). Missing = 'standard', as older
+    # versions saved it; new faces come with scanface.NEW_FACE_HAIR_MODE ('volume', 12/11/2026: suits most faces)
+    hair_mode: str = 'standard'
     hair_thickness: float = 0.4  # strand thickness of the 'thick' hair modes (scanface.HAIR_THICKNESS)
 
 

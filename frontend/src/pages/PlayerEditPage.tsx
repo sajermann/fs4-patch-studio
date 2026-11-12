@@ -5,7 +5,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSP
 import { useNavigate, useParams } from 'react-router-dom'
 import type { View as PreviewView } from '@/components/common/PlayerPreview'
 import { api, ApiError, photoPreviewUrl, scannedFaceQuery, type FaceSource } from '@/api/client'
-import { HAIR_MODES, HAIR_THICKNESS, THICK_HAIR_MODES, type HairMode, type Player } from '@/api/types'
+import { HAIR_MODES, HAIR_THICKNESS, NEW_FACE_HAIR_MODE, THICK_HAIR_MODES, type HairMode, type Player } from '@/api/types'
 import { THUMBNAIL_CODES, ThumbnailField, ThumbnailPicker } from '@/components/common/AppearanceThumbnails'
 import { BaseDataDialog } from '@/components/common/BaseDataDialog'
 import { FacePicker, type BrowsedFace } from '@/components/common/FacePicker'
@@ -23,6 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -62,7 +63,7 @@ const FACE_MODE_LABELS: Record<string, MessageKey> = { haircolorcode: 'playerEdi
 /** Options of a real face (ScannedFace) being looked at, before "use this face". */
 type BrowseFaceOptions = { paint_scalp: boolean; hair_mode: HairMode; hair_thickness: number }
 // new faces: scalp paint off (user's decision, 06/11/2026: it helps few faces and stains others)
-const NEW_FACE_OPTIONS: BrowseFaceOptions = { paint_scalp: false, hair_mode: 'standard', hair_thickness: HAIR_THICKNESS.default }
+const NEW_FACE_OPTIONS: BrowseFaceOptions = { paint_scalp: false, hair_mode: NEW_FACE_HAIR_MODE, hair_thickness: HAIR_THICKNESS.default }
 // The profile label in the player card is not stored anywhere: the game shows the label of the highest of these
 // 7 bars. Confirmed in game: SHO -> Finisher, ATH -> Powerhouse.
 const STYLE_BY_SKILL: Record<string, string> = {
@@ -601,6 +602,11 @@ function AppearanceTab({ player }: { player: Player }) {
                     {HAIR_MODES.map((mode) => (
                       <SelectItem key={mode} value={mode}>
                         {t(HAIR_MODE_LABELS[mode])}
+                        {mode === NEW_FACE_HAIR_MODE && (
+                          <Badge variant="outline" className="ml-2 font-normal">
+                            {t('common.default')}
+                          </Badge>
+                        )}
                       </SelectItem>
                     ))}
                   </SelectContent>

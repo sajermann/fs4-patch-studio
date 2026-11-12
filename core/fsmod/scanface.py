@@ -49,6 +49,11 @@ HAIR_MODES = {
     'split_sharp': ('split', 'dense', 'sharp', 'pull'),  # bigger textures: loaded fine in game (Hugo Souza, 28/10)
     'split_sharp_thick': ('split', 'dense', 'sharp', 'thick', 'pull'),
 }
+# options of a face picked now or imported without them (ScannedFace: missing in a saved project means the old values,
+# 'standard' and True); saved faces keep theirs
+NEW_FACE_HAIR_MODE = 'volume'
+NEW_FACE_PAINT_SCALP = False
+NEW_FACE_OPTIONS = {'hair_mode': NEW_FACE_HAIR_MODE, 'paint_scalp': NEW_FACE_PAINT_SCALP}
 SPLIT_REACH = 1.0  # cm: cap triangles with a vertex farther than this above the scalp become strands ('split')
 SHARP_MAX = 2048  # px: largest side of the hair textures kept by 'sharp' (the template's are 256 and 512)
 THICK_GAMMA = 0.6  # exponent of the opacities in 'thick' (< 1: soft strand edges get more opaque)

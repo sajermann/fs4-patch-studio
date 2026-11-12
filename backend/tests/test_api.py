@@ -686,7 +686,7 @@ def test_real_face_from_a_pack(env):
     r = c.post('/api/facepack/use', json={'folder': pack, 'face_id': 274254, 'player': uid})
     # new faces come with the scalp paint off (plus name/credits when the pack's manifest.json lists the face)
     assert {k: v for k, v in r.json()['face'].items() if k not in ('name', 'credits', 'credits_url')} == \
-        {'source_id': 274254, 'pack': 'various-by-Colgado', 'paint_scalp': False}
+        {'source_id': 274254, 'pack': 'various-by-Colgado', 'paint_scalp': False, 'hair_mode': 'volume'}
     code = c.get('/api/facepack/hair-color', params={'folder': pack, 'face': 274254}).json()['haircolorcode']
     assert code in state.catalog().appearance_options['haircolorcode']  # suggested from the face's own hair
     assert c.get('/api/facepack/hair-color', params={'player': uid, 'face': 274254}).json()['haircolorcode'] == code

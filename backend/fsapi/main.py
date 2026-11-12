@@ -1202,9 +1202,9 @@ def create_app(state=None):
         keeps what the pack's manifest.json says about the face (name, credits, credits_url)."""
         faces_call(state.faces.copy_to_project, pick.folder, pick.face_id, state.store.folder, pick.player)
         pack, info = faces_call(state.faces.face_info, pick.folder, pick.face_id)
-        # scalp paint off by default for new faces (it helps few faces and stains others); a face saved without
-        # the field still means on (ScannedFace.paint_scalp), as older versions wrote it
-        return {'face': {'source_id': pick.face_id, 'pack': pack, 'paint_scalp': False, **info}}
+        # the app's current options for new faces (scalp paint off: it helps few faces and stains others; hair
+        # 'volume'); a face saved without them still means the old ones (ScannedFace.paint_scalp / hair_mode)
+        return {'face': {'source_id': pick.face_id, 'pack': pack, **scanface.NEW_FACE_OPTIONS, **info}}
 
     @app.get('/api/facepack/hair-color')
     def facepack_hair_color(face: int, folder: str | None = None, player: str | None = None):

@@ -188,6 +188,23 @@ def test_player_goes_with_his_face(env):
     for kind in scanface.REQUIRED:
         with open(os.path.join(face_dir, *scanface.FILES[kind].format(4242).split('/')), 'rb') as f:
             assert f.read() == b'RX3 ' + kind.encode()
+    # the app's zip carries the face options it was saved with (here the ones of a face saved without them)
+    assert (pl['face']['hair_mode'], pl['face']['paint_scalp']) == ('standard', True)
+
+    # a zip made by another tool leaves the app's converter options out: the import gives those of a new face
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        files = {n: z.read(n) for n in z.namelist()}
+    manifest = json.loads(files['manifest.json'])
+    for key in ('hair_mode', 'paint_scalp', 'hair_thickness'):
+        manifest['player']['face'].pop(key)
+    files['manifest.json'] = json.dumps(manifest).encode()
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, 'w') as z:
+        for n, b in files.items():
+            z.writestr(n, b)
+    save(client, {})
+    _, items = import_all(client, 'players', out.getvalue())
+    assert {k: items[0]['face'][k] for k in scanface.NEW_FACE_OPTIONS} == scanface.NEW_FACE_OPTIONS
 
 
 def test_inspect_changes_nothing_and_apply_takes_only_the_chosen(env):
