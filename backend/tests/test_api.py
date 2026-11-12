@@ -973,3 +973,29 @@ def test_appearance_thumbnails(env):
     assert len(catalog['appearance']['haircolorcode']) == 12
     assert 8 not in catalog['appearance_natural']['haircolorcode']
     assert [g['key'] for g in catalog['hair_groups']][:2] == ['afro', 'very_short']
+
+
+def test_build_settings_are_optional_and_validated(env):
+    c = env['client']
+    config = c.get('/api/config').json()
+    assert config['build_cores'] is None and config['build_memory_percent'] is None  # old files: the defaults
+    machine = c.get('/api/machine').json()
+    assert machine['workers'] >= 1 and machine['default_memory_percent'] == 50
+    assert machine['default_cores'] == max(1, (machine['cores'] or 1) - 1)
+    saved = c.put('/api/config', json={**config, 'build_cores': 2, 'build_memory_percent': 30}).json()
+    assert (saved['build_cores'], saved['build_memory_percent']) == (2, 30)
+    assert c.get('/api/machine').json()['workers'] <= 2
+    from fsmod import workers
+    saved = c.put('/api/config', json={**config, 'build_cores': 999, 'build_memory_percent': 100}).json()
+    assert saved['build_cores'] == (workers.cpu_cores() or 1) and saved['build_memory_percent'] == 90  # into range
+    saved = c.put('/api/config', json={**config, 'build_cores': 0, 'build_memory_percent': 5}).json()
+    assert (saved['build_cores'], saved['build_memory_percent']) == (1, 10)
+
+
+def test_build_settings_out_of_range_in_an_old_file_do_not_reset_the_config(tmp_path):
+    import json
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'game_dir': 'G:/game', 'build_cores': 999, 'build_memory_percent': 100}),
+                    encoding='utf-8')
+    config = settings.load_config(str(path))
+    assert config.game_dir == 'G:/game' and config.build_memory_percent == 90 and config.build_cores >= 1

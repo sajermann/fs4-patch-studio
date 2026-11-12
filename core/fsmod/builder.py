@@ -25,6 +25,7 @@ replaced entry is a loose file with its record zeroed in the archive's .bh (writ
 patched archives went (write_patch_archives, still there to go back).
 """
 import datetime
+import io
 import os
 import re
 import struct
@@ -33,8 +34,9 @@ from dataclasses import dataclass, field
 
 from PIL import Image
 
-from . import (balls, big, body, boots, chunk, crest, dbcrc, gamepatches, gloves, kit, leaguelogo, locale, model,
-               original_league, original_player, original_team, photo, preview, rx3tex, scanface, t3db, world_tour)
+from . import (balls, big, body, boots, buildcache, chunk, crest, dbcrc, facework, gamepatches, gloves, kit,
+               leaguelogo, locale, model, original_league, original_player, original_team, photo, preview, rx3tex,
+               scanface, t3db, workers, world_tour)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
 HIDDEN_LEAGUES = {382, 76, 2092, 2095, 2097}  # ids the league selector never shows
@@ -390,20 +392,37 @@ def _kit_files(game, tid, kind_n, colors, crest_img):
     return files, lines
 
 
-def _real_kit_files(game, tid, kind_n, real, assets_dir, crest_img, uid):
-    """(files, log lines) of one real kit (fsmod.kit.build_real; runs in the image pool)."""
+def _real_kit_files(game, tid, kind_n, real, assets_dir, crest_img, uid, cache=None):
+    """(files, log lines) of one real kit (fsmod.kit.build_real; runs in the image pool). cache: a
+    buildcache.BuildCache (files reused when the images, the ids and the app are the same)."""
     lines = []
-    images = {}
+    sources = {}
     for part in model.REAL_KIT_FILES:
         path = getattr(real, part)
         if path:
             try:
-                images[part] = Image.open(os.path.join(assets_dir, path))
-                images[part].load()
+                sources[part] = buildcache.file_bytes(os.path.join(assets_dir, path))
             except OSError as e:
                 raise BuildError(f'cannot read kit image {path}: {e}', uid) from e
+    k = None
+    if cache is not None:
+        crest_part = [] if 'thumbnail' in sources or crest_img is None else [crest_img.size, crest_img.tobytes()]
+        k = buildcache.key('real_kit', cache.game_key, tid, kind_n, *(
+            x for part in sorted(sources) for x in (part, sources[part])), *crest_part)
+        files = cache.get(k)
+        if files is not None:
+            return files, [f'{kit.kit_name(tid, kind_n)}: reused (cache)']
+    images = {}
+    for part, data in sources.items():
+        try:
+            images[part] = Image.open(io.BytesIO(data))
+            images[part].load()
+        except OSError as e:
+            raise BuildError(f'cannot read kit image {getattr(real, part)}: {e}', uid) from e
     files = kit.build_real(game, tid, kind_n, images['jersey'], images['shorts'], images.get('thumbnail'), crest_img,
                            log=lines.append)
+    if k is not None:
+        cache.put(k, files)
     return files, lines
 
 
@@ -553,7 +572,7 @@ def _build_original_league(db, game, lg, assets_dir, texts, entries, result, say
                 result.loose[name] = data
 
 
-def _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids):
+def _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids, cache=None):
     """Applies an original team entry (Team.original_id) to the game's own rows, texts and files, only where it
     differs from what was loaded (original_team.changes). player_ids: {new player uid: playerid}. Returns the jobs
     that make its image files (() -> ({internal name: bytes}, log lines)), run in the image pool."""
@@ -618,7 +637,8 @@ def _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids)
                 # a new jersey is a real kit of its own (crest painted in, FIFA 16 positions): built like a new team's
                 thumb = real.thumbnail if 'thumbnail' in parts else None
                 jobs.append(lambda n=n, real=real, thumb=thumb: _real_kit_files(
-                    game, tid, n, real.model_copy(update={'thumbnail': thumb}), assets_dir, crest_image(), tm.uid))
+                    game, tid, n, real.model_copy(update={'thumbnail': thumb}), assets_dir, crest_image(), tm.uid,
+                    cache))
                 continue
             if 'shorts' in parts or (ch.crest and crest_path):
                 # the game's own kit with the new shorts and/or crest (its jersey, crest decal and positions kept)
@@ -657,7 +677,7 @@ def _fit_body_type(db, players, row):
         db.put(players, row, 'bodytypecode', fitted)
 
 
-def _build_original_player(db, game, pl, assets_dir, nameid, face_templates, say):
+def _build_original_player(db, game, pl, assets_dir, nameid, faces, say):
     """Applies an original player entry (Player.original_id) to the game's own row, only where it differs from what
     was loaded (original_player.changes). Returns the jobs that make its files (photo, real face)."""
     pid = pl.original_id
@@ -710,8 +730,8 @@ def _build_original_player(db, game, pl, assets_dir, nameid, face_templates, say
             raise BuildError(f'{pl.shown_name}: cannot read photo {pl.photo}: {e}', pl.uid) from e
         jobs.append(lambda: ({photo.photo_name(pid): photo.photo_file(game, img)}, []))
     if not pl.generic and pl.face is not None and (ch.head or 'appearance' in f):
-        files = _face_files(pl, pid, db.get(players, row, 'haircolorcode'), game, assets_dir, face_templates)
-        jobs.append(lambda: (files, []))
+        task = faces.submit(pl, pid, db.get(players, row, 'haircolorcode'))
+        jobs.append(task.result)
     return jobs
 
 
@@ -726,18 +746,55 @@ def _edited_kit_files(game, tid, kind_n, shorts_path, crest_img):
     return {name: chunk.chunkzip(bytes(d))}, [f'{name}: edited']
 
 
-def _face_files(pl, pid, hair_color_code, game, assets_dir, templates):
-    """{loose file name: bytes} of a player's real face converted for its playerid."""
-    if not templates:
-        templates.update(scanface.template_files(game))
-    try:
-        files = scanface.read_files(scanface.project_face_dir(assets_dir, pl.uid), pl.face.source_id)
-        converted = scanface.convert(templates, files, pid, preview.hair_color(hair_color_code),
-                                     paint=pl.face.paint_scalp, hair_mode=pl.face.hair_mode,
-                                     hair_thickness=pl.face.hair_thickness)
-    except (ValueError, KeyError) as e:
-        raise BuildError(f'{pl.shown_name}: face {pl.face.source_id}: {e}', pl.uid) from e
-    return {scanface.ASSETS + name: chunk.chunkzip(data) for name, data in converted.items()}
+class _FaceTask:
+    """One real face being converted: result() = ({loose file name: bytes}, log lines)."""
+
+    def __init__(self, pl, task=None, files=None, cache=None, key=None):
+        self.pl, self.task, self.files, self.cache, self.key = pl, task, files, cache, key
+        self.lines = [f'face of {pl.shown_name}: reused (cache)'] if files is not None else []
+
+    def result(self):
+        if self.files is None:
+            try:
+                self.files = self.task.result()
+            except (ValueError, KeyError) as e:
+                raise BuildError(f'{self.pl.shown_name}: face {self.pl.face.source_id}: {e}', self.pl.uid) from e
+            if self.cache is not None:
+                self.cache.put(self.key, self.files)
+        return self.files, self.lines
+
+
+class _Faces:
+    """Converts the real faces of a build in worker processes (fsmod.workers, fsmod.facework): the conversion is
+    pure Python, so threads would run one at a time. A face already converted with the same inputs comes from the
+    cache. The pool starts with the first face that is not in the cache."""
+
+    def __init__(self, game, assets_dir, workers, cache, say):
+        self.game, self.assets_dir, self.workers, self.cache, self.say = game, assets_dir, workers, cache, say
+        self.pool = None
+
+    def submit(self, pl, pid, hair_color_code):
+        try:
+            files = scanface.read_files(scanface.project_face_dir(self.assets_dir, pl.uid), pl.face.source_id)
+        except (ValueError, KeyError, OSError) as e:
+            raise BuildError(f'{pl.shown_name}: face {pl.face.source_id}: {e}', pl.uid) from e
+        options = (pid, preview.hair_color(hair_color_code), pl.face.paint_scalp, pl.face.hair_mode,
+                   pl.face.hair_thickness)
+        k = None
+        if self.cache is not None:
+            k = buildcache.key('face', self.cache.game_key, *options, *(
+                x for name in sorted(files) for x in (name, files[name])))
+            cached = self.cache.get(k)
+            if cached is not None:
+                return _FaceTask(pl, files=cached, key=k)
+        if self.pool is None:
+            self.pool = workers.Pool(self.workers, facework.init, (scanface.template_files(self.game),),
+                                     log_fn=self.say, local_initializer=facework.init_here)
+        return _FaceTask(pl, self.pool.submit(facework.convert, files, *options), cache=self.cache, key=k)
+
+    def close(self):
+        if self.pool is not None:
+            self.pool.shutdown()
 
 
 def _rgb(value, what, entity):
@@ -929,11 +986,14 @@ def _set_preferred_positions(db, project, player_ids, say):
 
 
 def build(project, game, assets_dir, log=None, progress=None, boot_converter=None, glove_converter=None,
-          ball_converter=None):
+          ball_converter=None, worker_count=None, cache=None):
     """Builds the mod. assets_dir = folder that image paths (crests) are relative to. Hidden leagues/teams are
     left out (Project.visible); their ids stay reserved. progress(step, done, total) is called as the build goes
     (steps: BUILD_STEPS, then write_patch's). boot_converter / glove_converter / ball_converter: a boots.Converter /
-    gloves.Converter / balls.Converter to reuse (keeps its conversions)."""
+    gloves.Converter / balls.Converter to reuse (keeps its conversions). worker_count: threads for the image files and
+    processes for the real faces (None = fsmod.workers.plan(), the machine's defaults). cache: a
+    buildcache.BuildCache whose folder keeps the real faces and kits between builds (None = no cache); entries this
+    build did not use are deleted at the end."""
     result = BuildResult(database=b'', entries={})
     every = project
     project = project.visible()
@@ -1006,10 +1066,16 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
     original_pids = {db.get(db.table('players'), r, 'playerid') for r in db.table('players').records}
     reserved = reserved_player_ids(original_pids, game)
     result.assigned_player_ids = assign_player_ids(project, reserved | {p.player_id for p in every.players})
-    built_pids, face_templates = set(), {}
+    built_pids = set()
+    worker_count = workers.plan() if worker_count is None else max(1, int(worker_count))
+    if cache is not None:
+        cache.game_key = buildcache.game_fingerprint(game)
+    say(f'{worker_count} worker(s)' + (f', cache {cache.folder}' if cache is not None and cache.folder else ''))
+    faces = _Faces(game, assets_dir, worker_count, cache, say)
     # the image files of the teams (photos, crests, kits: Pillow, slow with big source images) are made in a thread
-    # pool while the loop edits the database (Pillow releases the GIL); jobs keeps their order for result.loose
-    pool = ThreadPoolExecutor(max_workers=os.cpu_count())
+    # pool while the loop edits the database (Pillow releases the GIL); the real faces in worker processes (_Faces);
+    # jobs keeps their order for result.loose
+    pool = ThreadPoolExecutor(max_workers=worker_count)
     jobs = []  # futures of (files, log lines)
     names = db.table('playernames')
     used_nameids = {db.get(names, r, 'nameid') for r in names.records}
@@ -1093,8 +1159,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
         except (BuildError, ValueError, KeyError) as e:
             raise BuildError(f'{pl.shown_name}: {e}', pl.uid) from e
         if not pl.generic and pl.face is not None:
-            files = _face_files(pl, pid, db.get(players, row, 'haircolorcode'), game, assets_dir, face_templates)
-            jobs.append(pool.submit(lambda files=files: (files, [])))  # made here: face_templates is shared
+            jobs.append(faces.submit(pl, pid, db.get(players, row, 'haircolorcode')))
         db.append('players', row, raw)
         say(f'   player {pid} {pl.shown_name}')
         return pid
@@ -1220,7 +1285,8 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
         for kind_n, kind in ((0, 'home'), (1, 'away'), (2, 'goalkeeper')):
             real = tm.real_kit(kind)
             if real:
-                jobs.append(pool.submit(_real_kit_files, game, tid, kind_n, real, assets_dir, crest_img, tm.uid))
+                jobs.append(pool.submit(_real_kit_files, game, tid, kind_n, real, assets_dir, crest_img, tm.uid,
+                                        cache))
             elif kind != 'goalkeeper':
                 jobs.append(pool.submit(_kit_files, game, tid, kind_n, kits[kind], crest_img))
 
@@ -1233,7 +1299,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
     # ---- the game's players edited in place (same playerid): their row, photo and head, only what changed
     original_jobs = set()
     for pl in project.original_players:
-        for job in _build_original_player(db, game, pl, assets_dir, nameid, face_templates, say):
+        for job in _build_original_player(db, game, pl, assets_dir, nameid, faces, say):
             future = pool.submit(job)
             jobs.append(future)
             original_jobs.add(future)
@@ -1275,7 +1341,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
     for k, tm in enumerate(project.original_teams):
         step('teams', len(project.new_teams) + k, len(project.teams))
         lids = _team_league_ids(tm, league_ids, existing)
-        for job in _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids):
+        for job in _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids, cache):
             future = pool.submit(job)
             jobs.append(future)
             original_jobs.add(future)
@@ -1294,7 +1360,11 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
                 say('  ' + line)
     finally:
         pool.shutdown(cancel_futures=True)
+        faces.close()
     step('images', len(jobs), len(jobs))
+    if cache is not None and cache.folder:
+        removed = cache.prune()
+        say(f'cache: {cache.hits} reused, {cache.misses} made, {removed} old entries removed')
 
     _build_boots(db, game, project, assets_dir, player_ids, entries, result, say, boot_converter)
     _build_gloves(db, game, project, assets_dir, player_ids, entries, result, say, glove_converter)

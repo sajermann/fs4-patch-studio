@@ -6,7 +6,7 @@ import sys
 import time
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 log = logging.getLogger('fsapi')
 
@@ -32,6 +32,8 @@ LEGACY_PROJECT_DIR = os.path.join(REPO_DIR, 'projeto')  # default before 24/10/2
 if CORE_DIR not in sys.path:
     sys.path.insert(0, CORE_DIR)
 
+from fsmod import workers  # noqa: E402 (after the core folder is on the path)
+
 
 class Config(BaseModel):
     game_dir: Optional[str] = None  # game root (the folder that holds Game; ReStreet 2.x layout)
@@ -41,6 +43,22 @@ class Config(BaseModel):
     face_pack_dir: Optional[str] = None  # FIFA 14 face pack folder, set in the settings (read in place, never written)
     players_base_file: Optional[str] = None  # players JSON (fsapi.ea_players contract), read in place, never written
     terms_version: Optional[int] = None  # version of the first-run notice the user accepted (game_setup.TERMS_VERSION)
+    # how much of the machine a build may use (fsmod.workers.plan): None = the defaults (all cores but one, 50% of the
+    # memory); added 11/11/2026, optional so older config files load unchanged. Out-of-range values (more cores than
+    # the machine has, memory outside 10-90%) are brought into range instead of refused: a refused file would make
+    # the app start with the defaults of every setting
+    build_cores: Optional[int] = None
+    build_memory_percent: Optional[int] = None
+
+    @field_validator('build_cores', mode='after')
+    @classmethod
+    def _cores_in_range(cls, v):
+        return workers.clamp_cores(v)
+
+    @field_validator('build_memory_percent', mode='after')
+    @classmethod
+    def _memory_in_range(cls, v):
+        return workers.clamp_memory_percent(v)
 
 
 def load_config(path=None):

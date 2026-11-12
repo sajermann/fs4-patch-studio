@@ -389,6 +389,19 @@ export interface Config {
   face_pack_dir?: string | null
   players_base_file?: string | null // players JSON (who each EA player id is), read in place
   terms_version?: number | null // version of the first-run notice the user accepted
+  build_cores?: number | null // cores the build may use (null = all but one)
+  build_memory_percent?: number | null // percent of the machine's memory the build may use (null = 50)
+}
+
+/** What the build may use on this machine (GET /api/machine); cores / memory_mb null when the system does not tell. */
+export interface MachineInfo {
+  cores: number | null
+  memory_mb: number | null
+  default_cores: number
+  default_memory_percent: number
+  memory_percent_range: [number, number] // allowed memory setting (10-90)
+  worker_memory_mb: number
+  workers: number
 }
 
 /** State of the first-run setup and of the game (GET /api/status → setup). */

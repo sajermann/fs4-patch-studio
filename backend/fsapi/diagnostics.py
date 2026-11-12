@@ -54,7 +54,18 @@ def environment_lines():
         + (f' | build {win.build}, service pack "{win.service_pack}"' if win else ''),
         f'python: {platform.python_version()} | packaged: {settings.FROZEN}',
         f'data folder: {settings.DATA_DIR}',
+        _machine_line(),
     ]
+
+
+def _machine_line():
+    try:
+        from fsmod import workers
+        info = workers.describe()
+        return (f'machine: {info["cores"] or "unknown"} cores, {info["memory_mb"] or "unknown"} MB of memory, '
+                f'{info["workers"]} build worker(s) by default')
+    except Exception as e:  # noqa: BLE001 (the log line must never stop the backend)
+        return f'machine: unknown ({type(e).__name__})'
 
 
 def log_files():

@@ -28,8 +28,8 @@ from .original_images import OriginalImages
 from .share_service import ShareService, ShareZipError
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
 from .project_store import BackupError, ProjectFileError, ProjectStore, file_slug, migrate_folder
-from fsmod import (appearance_thumbs, balls, boots, builder, gloves, kit, kitprint, model, original_league, original_player, original_team, photo,
-                   player_generator, preview, scanface, validation)
+from fsmod import (appearance_thumbs, balls, boots, buildcache, builder, gloves, kit, kitprint, model, original_league,
+                   original_player, original_team, photo, player_generator, preview, scanface, validation, workers)
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
 
@@ -78,6 +78,7 @@ class AppState:
         self.gloves = GloveService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.balls = BallService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.shares = ShareService(os.path.join(os.path.dirname(prints), 'cache'))
+        self.build_cache_dir = os.path.join(os.path.dirname(prints), 'cache', 'build')  # fsmod.buildcache
         self._catalog = None
 
     def upgrade_project(self):
@@ -230,6 +231,8 @@ def create_app(state=None):
         save_dir: str
         face_pack_dir: str | None = None
         terms_version: int
+        build_cores: int | None = None  # brought into range by settings.Config
+        build_memory_percent: int | None = None
 
     @app.post('/api/setup/apply')
     def setup_apply(req: SetupRequest):
@@ -260,7 +263,8 @@ def create_app(state=None):
             state.load_game(state.game.folder)
         state.config = state.config.model_copy(update={
             'game_dir': req.game_dir, 'save_dir': req.save_dir, 'face_pack_dir': req.face_pack_dir or None,
-            'terms_version': req.terms_version})
+            'terms_version': req.terms_version, 'build_cores': req.build_cores,
+            'build_memory_percent': req.build_memory_percent})
         settings.save_config(state.config, state.config_path)
         return {'imported': imported, 'setup': setup_state()}
 
@@ -272,6 +276,12 @@ def create_app(state=None):
     @app.get('/api/config')
     def get_config():
         return state.config.model_dump()
+
+    @app.get('/api/machine')
+    def machine():
+        """What the build may use on this machine (fsmod.workers.describe): cores and memory the system reports (None
+        when it does not), the defaults and the workers the saved settings give."""
+        return workers.describe(state.config.build_cores, state.config.build_memory_percent)
 
     @app.put('/api/config')
     def put_config(config: settings.Config):
@@ -1374,7 +1384,10 @@ def create_app(state=None):
             try:
                 result = build_patch(project, state.store, state.game, state.patch_dir, log=log, progress=progress,
                                      boot_converter=state.boots.converter, glove_converter=state.gloves.converter,
-                                     ball_converter=state.balls.converter)
+                                     ball_converter=state.balls.converter,
+                                     worker_count=workers.plan(state.config.build_cores,
+                                                               state.config.build_memory_percent),
+                                     cache=buildcache.BuildCache(state.build_cache_dir))
             except builder.BuildError as e:
                 prog['error'] = str(e)
                 raise HTTPException(422, {'code': 'build_failed', 'entity': e.entity, 'message': str(e)})

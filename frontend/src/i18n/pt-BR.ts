@@ -611,6 +611,24 @@ export const ptBR = {
   'setup.saveDirPlaceholder': '…\\Documentos\\fifastreet\\<perfil>\\4541097B',
   'setup.saveDirHint': 'Fica em Documentos\\fifastreet\\<perfil>\\4541097B (o app tenta achar sozinho ao verificar o jogo). Se não existir, abra o jogo uma vez.',
   'setup.facePackHint': 'Para usar faces reais nos jogadores. Dá para indicar depois nas Configurações.',
+  'buildResources.title': 'Desempenho do build',
+  'buildResources.description':
+    'Quanto do computador o app pode usar ao gerar o patch. A conversão das faces reais roda em vários processos ao mesmo tempo; cada um usa cerca de 300 MB.',
+  'buildResources.cores': 'Núcleos do processador',
+  'buildResources.coresHint':
+    'Este PC tem {cores}. Vazio = automático ({default}: todos menos um, para o PC não travar).',
+  'buildResources.coresUnknown': 'O sistema não informou quantos núcleos este PC tem: o app usa só 1.',
+  'buildResources.memory': 'Memória (% da máquina)',
+  'buildResources.memoryHint': 'Este PC tem {memory} GB. Vazio = automático (50%). Entre {low}% e {high}%.',
+  'buildResources.coresOutOfRange': 'Use de 1 a {max} núcleos (o que este PC tem).',
+  'buildResources.memoryOutOfRange': 'Use de {low}% a {high}% (o sistema e o próprio app precisam do resto).',
+  'buildResources.memoryUnknown': 'O sistema não informou a memória deste PC: o app usa só 1 processo.',
+  'buildResources.automatic': 'Automático ({value})',
+  'buildResources.summary':
+    'Com essas opções o build usa até {workers} processo(s) ao mesmo tempo. O resultado é sempre o mesmo; só muda a velocidade.',
+  'setup.advanced': 'Avançado: desempenho do build',
+  'setup.advancedHint':
+    'Opcional. Os valores automáticos servem para a maioria dos PCs; dá para mudar depois nas Configurações.',
   'setup.noticeTitle': 'Antes de começar, leia com atenção',
   'setup.noticeDescription': 'É preciso aceitar para continuar.',
   'setup.notice1': '**O save do jogo será apagado toda vez que você instalar ou desinstalar um patch.** O FIFA Street guarda ligas, times e jogadores dentro do save, então cada mod precisa de um save novo. Progresso, carreira e desbloqueios do save atual serão perdidos, e o app **não** guarda cópia.',

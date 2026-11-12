@@ -54,6 +54,10 @@ class GameSources:
     def _path(self, name):
         return os.path.join(self.folder, GAME_DATA, name)
 
+    def fingerprint_files(self):
+        """Full paths of the original files (fsmod.buildcache.game_fingerprint)."""
+        return [os.path.join(self.folder, f) for f in REQUIRED_FILES]
+
     def target_path(self, short_name):
         """Original archive by short name (e.g. 'data1.big', 'locale_ptbr.big')."""
         return self._path(PATCH_TARGETS[short_name])

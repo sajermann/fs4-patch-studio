@@ -332,6 +332,36 @@ def test_build_writes_the_real_face_as_loose_files(game, assets, tmp_path):
         assert chunk.decode(result.loose[scanface.ASSETS + name]) == data
 
 
+def test_faces_in_worker_processes_and_from_the_cache_are_the_same_files(game, assets, tmp_path):
+    """Real faces converted in worker processes, in this process (1 worker) and reused from the build cache give the
+    same bytes; the cache keeps one entry per face and drops entries the last build did not use."""
+    from fsmod import builder, buildcache
+    from test_builder import PALMEIRAS, load_palmeiras
+    import shutil
+    project = load_palmeiras()
+    shutil.copy(os.path.join(PALMEIRAS, 'escudo_palmeiras.png'), tmp_path)
+    face_players = project.roster(project.teams[0].uid)[:2]
+    for k, pl in enumerate(face_players):
+        pl.generic, pl.face = False, model.ScannedFace(source_id=FACE, hair_mode='standard' if k else 'split_sharp_thick')
+        scanface.write_files(scanface.project_face_dir(str(tmp_path), pl.uid), FACE, facepack.read_face(assets, FACE))
+
+    def faces_of(result):
+        return {n: d for n, d in result.loose.items() if n.startswith(scanface.ASSETS)}
+
+    single = faces_of(builder.build(project, game, str(tmp_path), worker_count=1))
+    assert single and faces_of(builder.build(project, game, str(tmp_path), worker_count=2)) == single
+    cache = buildcache.BuildCache(str(tmp_path / 'cache'))
+    assert faces_of(builder.build(project, game, str(tmp_path), worker_count=2, cache=cache)) == single
+    assert (cache.hits, cache.misses) == (0, 2)
+    stale = tmp_path / 'cache' / 'ab' / ('ab' * 32 + '.zip')
+    stale.parent.mkdir(exist_ok=True)
+    stale.write_bytes(b'old')
+    cache = buildcache.BuildCache(str(tmp_path / 'cache'))
+    result = builder.build(project, game, str(tmp_path), worker_count=2, cache=cache)
+    assert faces_of(result) == single and (cache.hits, cache.misses) == (2, 0) and not stale.exists()
+    assert any('reused (cache)' in line for line in result.log)
+
+
 def test_hair_color_suggested_from_the_face():
     """The player's hair color (used by the scalp paint) is suggested from the face's own hair."""
     codes = range(len(preview.HAIR_COLORS))

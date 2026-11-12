@@ -55,6 +55,7 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `POST /api/setup/apply` `{game_dir, save_dir, face_pack_dir, terms_version}` | saves the first-run choices; imports the 12 originals from the game (only official files) when the app does not have them verified |
 | `POST /api/dialog/folder?initial=` | Windows folder picker on this machine; `{folder}` or null |
 | `GET/PUT /api/config` | local settings |
+| `GET /api/machine` | cores and memory of this machine and how many worker processes the build uses (`fsmod.workers`; settings `build_cores`, `build_memory_percent`, empty = all cores but one and 50% of the memory) |
 | `GET/PUT /api/project`, `POST /api/project/validate` | project (contract v2) + validation issues (`code`, `severity`, `entity`, `field`, pt-BR `message`) + `defaults` (per player: values inherited from the template player where the project leaves a field unset) |
 | `POST /api/teams/{uid}/generate-players` | body: the draft project; returns the `Player`s that complete the roster of that new team up to 13 (strikers named Player 01, 02... skipping the names the team already has, skills at the middle, the rest random); the client adds them to the draft |
 | `GET /api/project/backup` | zip of the project folder (`database.json` + `images/` + `faces/` + `boots/` + `gloves/` + `balls/`), downloaded by the "Fazer backup" button |

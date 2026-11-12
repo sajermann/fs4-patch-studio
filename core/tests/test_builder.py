@@ -820,3 +820,18 @@ def test_real_kits_use_the_packs_resolution(game):
     assert kit.limited_size('shorts', (4000, 2000)) == (2048, 1024)
     assert kit.limited_size('thumbnail', (1024, 1024)) == (512, 512)
     assert kit.limited_size('jersey', (2048, 2048)) is None
+
+
+def test_real_kits_are_reused_from_the_build_cache(game, tmp_path):
+    from PIL import Image
+    from fsmod import buildcache, model
+    for name, size in (('j.png', (1024, 1024)), ('s.png', (1024, 512))):
+        Image.new('RGB', size, (10, 120, 30)).save(tmp_path / name)
+    real = model.RealKit(jersey='j.png', shorts='s.png')
+    cache = buildcache.BuildCache(str(tmp_path / 'cache'))
+    cache.game_key = buildcache.game_fingerprint(game)
+    made, lines = builder._real_kit_files(game, 150000, 0, real, str(tmp_path), None, 'tm', cache)
+    reused, lines2 = builder._real_kit_files(game, 150000, 0, real, str(tmp_path), None, 'tm', cache)
+    assert reused == made and (cache.hits, cache.misses) == (1, 1) and 'cache' in lines2[0]
+    other, _ = builder._real_kit_files(game, 150001, 0, real, str(tmp_path), None, 'tm', cache)  # another teamid
+    assert cache.misses == 2 and set(other) != set(made)

@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError, api } from '@/api/client'
+import { BuildResourcesFields } from '@/components/common/BuildResources'
 import type { GameCheck, Status } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,6 +15,7 @@ import { PreferencesMenu } from '@/components/layout/PreferencesMenu'
 import { useI18n } from '@/i18n'
 import { rich } from '@/i18n/rich'
 import { APP_VERSION } from '@/lib/about'
+import { buildResourcesErrors, useMachine, type BuildResourcesValue } from '@/lib/buildResources'
 
 /** Folder field with a "browse" button (Windows folder picker opened by the backend). */
 function FolderInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
@@ -113,6 +115,10 @@ export function SetupPage({ status }: { status: Status }) {
   const [checking, setChecking] = useState(false)
   const [accepted, setAccepted] = useState(cfg.terms_version === status.setup.terms_version)
   const [applying, setApplying] = useState(false)
+  const [build, setBuild] = useState<BuildResourcesValue>({
+    build_cores: cfg.build_cores ?? null,
+    build_memory_percent: cfg.build_memory_percent ?? null,
+  })
   const originalsOk = check?.originals.verified ?? status.setup.originals.verified
   const firstRun = status.setup.required
 
@@ -133,7 +139,8 @@ export function SetupPage({ status }: { status: Status }) {
 
   // official files, or the app's own patch (only when the app already has the originals to undo it)
   const gameOk = !!check?.valid && (check.official || (check.app_patch && originalsOk))
-  const canGo = gameOk && !!saveDir.trim() && accepted && !applying
+  const buildErrors = buildResourcesErrors(useMachine(), build)
+  const canGo = gameOk && !!saveDir.trim() && accepted && !applying && !buildErrors.cores && !buildErrors.memory
 
   const apply = async () => {
     setApplying(true)
@@ -143,6 +150,8 @@ export function SetupPage({ status }: { status: Status }) {
         save_dir: saveDir.trim(),
         face_pack_dir: facePackDir.trim() || null,
         terms_version: status.setup.terms_version,
+        build_cores: build.build_cores ?? null,
+        build_memory_percent: build.build_memory_percent ?? null,
       })
       if (r.imported.length) toast.success(t('setup.imported', { count: r.imported.length }))
       await queryClient.invalidateQueries()
@@ -190,6 +199,13 @@ export function SetupPage({ status }: { status: Status }) {
             <FolderInput value={facePackDir} onChange={setFacePackDir} placeholder={t('settings.facePackPlaceholder')} />
             <p className="text-xs text-muted-foreground">{t('setup.facePackHint')}</p>
           </Step>
+          <details className="group rounded-md border px-4 py-3">
+            <summary className="cursor-pointer text-sm font-medium">{t('setup.advanced')}</summary>
+            <div className="mt-3 space-y-3">
+              <p className="text-xs text-muted-foreground">{t('setup.advancedHint')}</p>
+              <BuildResourcesFields value={build} onChange={(patch) => setBuild({ ...build, ...patch })} />
+            </div>
+          </details>
         </CardContent>
       </Card>
 

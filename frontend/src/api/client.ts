@@ -16,6 +16,7 @@ import type {
   GameCheck,
   Catalog,
   Config,
+  MachineInfo,
   FacePack,
   FacePlayer,
   ImageUpload,
@@ -113,6 +114,8 @@ export const api = {
   status: () => request<Status>('/api/status'),
   config: () => request<Config>('/api/config'),
   saveConfig: (config: Config) => request<Config>('/api/config', json('PUT', config)),
+  /** Cores and memory of this machine and the build's defaults (fsmod.workers). */
+  machine: () => request<MachineInfo>('/api/machine'),
 
   project: () => request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; changed_leagues: number[] }>('/api/project'),
   /** Replaces the project with a backup zip (database.json + images + faces). */
@@ -292,7 +295,14 @@ export const api = {
   openLogs: () => request<{ folder: string }>('/api/logs/open', { method: 'POST' }),
 
   setupCheck: (gameDir: string) => request<GameCheck>('/api/setup/check', json('POST', { game_dir: gameDir })),
-  setupApply: (setup: { game_dir: string; save_dir: string; face_pack_dir: string | null; terms_version: number }) =>
+  setupApply: (setup: {
+    game_dir: string
+    save_dir: string
+    face_pack_dir: string | null
+    terms_version: number
+    build_cores?: number | null
+    build_memory_percent?: number | null
+  }) =>
     request<{ imported: string[]; setup: SetupState }>('/api/setup/apply', json('POST', setup)),
   /** Checks a players JSON against the contract (usable players, skipped records, first problems). */
   checkPlayersBase: (file: string) =>

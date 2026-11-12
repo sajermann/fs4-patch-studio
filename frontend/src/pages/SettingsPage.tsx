@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ApiError, api } from '@/api/client'
 import type { Config, Status } from '@/api/types'
+import { BuildResourcesFields } from '@/components/common/BuildResources'
 import { Field } from '@/components/common/form'
 import { PlayersBaseCard } from '@/components/common/PlayersBaseCard'
 import { ProjectJsonCard } from '@/components/common/ProjectJsonCard'
@@ -24,6 +25,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n'
 import { rich } from '@/i18n/rich'
+import { buildResourcesErrors, useMachine, type BuildResourcesValue } from '@/lib/buildResources'
 import { useStatus } from '@/state/queries'
 
 function Line({ ok, warn, children }: { ok: boolean; warn?: boolean; children: ReactNode }) {
@@ -129,6 +131,51 @@ function SaveCard({ status }: { status: Status }) {
   )
 }
 
+/** How much of the machine the build may use (saved on its own: the folders card checks the face pack). */
+function BuildCard({ status }: { status: Status }) {
+  const { t } = useI18n()
+  const queryClient = useQueryClient()
+  const [value, setValue] = useState<BuildResourcesValue>({
+    build_cores: status.config.build_cores ?? null,
+    build_memory_percent: status.config.build_memory_percent ?? null,
+  })
+  const [saving, setSaving] = useState(false)
+  const errors = buildResourcesErrors(useMachine(), value)
+  const invalid = !!(errors.cores || errors.memory)
+  const save = async () => {
+    setSaving(true)
+    try {
+      const percent = value.build_memory_percent
+      await api.saveConfig({
+        ...status.config,
+        build_cores: value.build_cores ?? null,
+        build_memory_percent: percent ?? null,
+      })
+      await queryClient.invalidateQueries({ queryKey: ['status'] })
+      await queryClient.invalidateQueries({ queryKey: ['machine'] })
+      toast.success(t('settings.saved'))
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'))
+    } finally {
+      setSaving(false)
+    }
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('buildResources.title')}</CardTitle>
+        <CardDescription>{t('buildResources.description')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <BuildResourcesFields value={value} onChange={(patch) => setValue({ ...value, ...patch })} />
+        <Button onClick={() => void save()} disabled={saving || invalid}>
+          {saving && <Loader2 className="animate-spin" />} {t('settings.save')}
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function SettingsPage() {
   const { t } = useI18n()
   const status = useStatus().data
@@ -221,6 +268,7 @@ export function SettingsPage() {
           </Button>
         </CardContent>
       </Card>
+      <BuildCard status={status} />
       <PlayersBaseCard status={status} />
       <SaveCard status={status} />
       <ProjectJsonCard />
