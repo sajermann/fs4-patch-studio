@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api } from '@/api/client'
 import type { League, LeagueKey, OriginalPlayer, Player, PlayerDefaults, PlayerRef, Project, Team, TeamKey, TeamLink } from '@/api/types'
 import { OriginalPlayerAvatar, PlayerAvatar } from '@/components/common/PlayerPhoto'

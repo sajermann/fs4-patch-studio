@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Loader2, Pencil, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api } from '@/api/client'
 import type { Project } from '@/api/types'
 import {

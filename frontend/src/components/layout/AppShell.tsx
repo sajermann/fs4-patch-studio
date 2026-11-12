@@ -22,6 +22,7 @@ import { useProject } from '@/state/project'
 import { useCatalog, useOriginalLeagues, useOriginalStadiums, useOriginalTeams, useStatus } from '@/state/queries'
 import { ErrorBoundary } from './ErrorBoundary'
 import { LoadError } from './LoadError'
+import { NotificationBell } from './NotificationBell'
 import { PreferencesMenu } from './PreferencesMenu'
 import { ProjectActions } from './ProjectActions'
 
@@ -164,8 +165,9 @@ export function AppShell() {
         </div>
       </aside>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="z-10 flex shrink-0 justify-end border-b bg-background/95 px-6 py-3 backdrop-blur">
+        <header className="z-10 flex shrink-0 items-center justify-end gap-2 border-b bg-background/95 px-6 py-3 backdrop-blur">
           <ProjectActions />
+          <NotificationBell />
         </header>
         <GameWarnings />
         <main className="min-h-0 flex-1 overflow-auto p-6">

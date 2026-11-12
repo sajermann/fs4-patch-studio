@@ -391,6 +391,53 @@ export interface Config {
   terms_version?: number | null // version of the first-run notice the user accepted
   build_cores?: number | null // cores the build may use (null = all but one)
   build_memory_percent?: number | null // percent of the machine's memory the build may use (null = 50)
+  language?: 'pt-BR' | 'en' | null // interface language; changed only through api.saveLanguage
+}
+
+export type NotificationKind = 'error' | 'warning' | 'success' | 'info'
+export type NotificationReadState = 'all' | 'read' | 'unread'
+
+/** A message the interface showed in a toast, kept by the backend (notification center). */
+export interface AppNotification {
+  id: number
+  kind: NotificationKind
+  title: string
+  description?: string | null
+  created_at: string // ISO 8601
+  read: boolean
+  language?: string | null // interface language it was written in
+  entity?: string | null // uid of the league/team/player it is about
+}
+
+export interface NewNotification {
+  kind: NotificationKind
+  title: string
+  description?: string
+  created_at?: string
+  language?: string
+  entity?: string
+}
+
+export interface NotificationQuery {
+  offset?: number
+  limit?: number
+  kind?: NotificationKind
+  state?: NotificationReadState
+}
+
+export interface NotificationPage {
+  total: number // matching the filters
+  unread: number // all unread ones
+  items: AppNotification[]
+}
+
+/** The given ids, or (all) every notification matching the filters except `exclude`. */
+export interface NotificationSelection {
+  ids?: number[]
+  all?: boolean
+  kind?: NotificationKind
+  state?: NotificationReadState
+  exclude?: number[]
 }
 
 /** What the build may use on this machine (GET /api/machine); cores / memory_mb null when the system does not tell. */
@@ -568,6 +615,8 @@ export interface BuildResponse {
   assigned_boot_codes: Record<string, number>
   assigned_glove_codes: Record<string, number>
   assigned_ball_codes: Record<string, number>
+  cache_reused_files?: number // files of the patch that came from the build cache (real faces and kits)
+  duration_s?: number // how long the build took
   patch: PatchStatus
 }
 

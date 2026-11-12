@@ -1,7 +1,7 @@
 import { Dices, Plus, UserMinus, UserPlus } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api } from '@/api/client'
 import type { PlayerRef, Team, TeamKey, TeamLink } from '@/api/types'
 import { EntityIssues, FieldIssues, NumberInput, OriginalBadge } from '@/components/common/form'

@@ -110,6 +110,7 @@ def test_build_then_install_into_a_fake_game(env):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body['patch']['up_to_date'] is True
+    assert body['duration_s'] >= 0 and 0 <= body['cache_reused_files'] <= len(body['patch']['files'])
     prog = c.get('/api/patch/progress').json()  # what the screen polls while building
     assert not prog['running'] and prog['error'] is None and prog['step'] == 'files' and prog['done'] == prog['total']
     assert prog['steps'][0] == 'database' and prog['elapsed'] >= 0

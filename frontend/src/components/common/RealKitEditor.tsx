@@ -1,6 +1,6 @@
 import { Eye, Loader2, LoaderCircle, Trash2, Upload, X } from 'lucide-react'
 import { lazy, Suspense, useRef, useState } from 'react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api, imageUrl } from '@/api/client'
 import type { RealKit, RealKitFile, RealKitSlot, Team } from '@/api/types'
 import { ColorInput, Field, FieldIssues, NumberInput } from '@/components/common/form'

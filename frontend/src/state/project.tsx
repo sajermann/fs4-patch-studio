@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api, bumpProjectImagesRevision } from '@/api/client'
 import { LoadError } from '@/components/layout/LoadError'
 import { useI18n } from '@/i18n'

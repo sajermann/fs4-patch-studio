@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { api } from '@/api/client'
+import type { NotificationQuery } from '@/api/types'
 import { useI18n } from '@/i18n'
 
 // Original game data and valid values never change while the app runs.
@@ -55,3 +56,19 @@ export function useLookups() {
     [leagues, teams, catalog, t],
   )
 }
+
+// notification center: the screens show their own errors (a toast would add a notification on every failure)
+export const useUnreadNotifications = () =>
+  useQuery({
+    queryKey: ['notifications', 'unread'],
+    queryFn: () => api.notifications({ state: 'unread', limit: 5 }),
+    meta: { errorShown: true },
+  })
+
+export const useNotificationPage = (q: NotificationQuery) =>
+  useQuery({
+    queryKey: ['notifications', 'page', q],
+    queryFn: () => api.notifications(q),
+    placeholderData: (prev) => prev,
+    meta: { errorShown: true },
+  })

@@ -1,6 +1,6 @@
 import { Loader2, Trash2, Upload, User } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api, originalPhotoUrl, photoPreviewUrl } from '@/api/client'
 import type { OriginalPlayer, Player } from '@/api/types'
 import { FieldIssues } from '@/components/common/form'

@@ -39,6 +39,11 @@ import type {
   ShareInspect,
   ShareKind,
   Status,
+  AppNotification,
+  NewNotification,
+  NotificationPage,
+  NotificationQuery,
+  NotificationSelection,
 } from './types'
 import { hasMessage, translate } from '@/i18n'
 
@@ -57,6 +62,8 @@ export class ApiError extends Error {
   status: number
   code?: string
   issues?: Issue[]
+  /** uid of the league/team/player the error is about (build_failed) */
+  entity?: string
   /** the message without the technical text */
   summary: string
   /** unexpected errors (`internal_error`, files, project file): the exception text, the file it was about and the
@@ -74,6 +81,7 @@ export class ApiError extends Error {
     this.status = status
     this.code = typeof d.code === 'string' ? d.code : undefined
     this.issues = Array.isArray(d.issues) ? (d.issues as Issue[]) : undefined
+    this.entity = typeof d.entity === 'string' ? d.entity : undefined
     this.error = error
     this.path = typeof d.path === 'string' ? d.path : undefined
     this.logFile = typeof d.log_file === 'string' ? d.log_file : undefined
@@ -114,6 +122,21 @@ export const api = {
   status: () => request<Status>('/api/status'),
   config: () => request<Config>('/api/config'),
   saveConfig: (config: Config) => request<Config>('/api/config', json('PUT', config)),
+  /** The interface language (new notifications are written in it); PUT /api/config keeps it as it is. */
+  saveLanguage: (language: string) => request<Config>('/api/config/language', json('PUT', { language })),
+
+  /** One page of the notifications, newest first. */
+  notifications: (q: NotificationQuery) => {
+    const qs = new URLSearchParams()
+    Object.entries(q).forEach(([k, v]) => v !== undefined && v !== '' && qs.set(k, String(v)))
+    return request<NotificationPage>(`/api/notifications?${qs}`)
+  },
+  addNotification: (n: NewNotification) => request<AppNotification>('/api/notifications', json('POST', n)),
+  /** Marks the selection read (read=false: unread again). */
+  markNotifications: (sel: NotificationSelection, read = true) =>
+    request<{ changed: number; unread: number }>(`/api/notifications/read?read=${read}`, json('POST', sel)),
+  deleteNotifications: (sel: NotificationSelection) =>
+    request<{ deleted: number; unread: number }>('/api/notifications/delete', json('POST', sel)),
   /** Cores and memory of this machine and the build's defaults (fsmod.workers). */
   machine: () => request<MachineInfo>('/api/machine'),
 

@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import time
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, field_validator
 
@@ -35,6 +35,9 @@ if CORE_DIR not in sys.path:
 from fsmod import workers  # noqa: E402 (after the core folder is on the path)
 
 
+Language = Literal['pt-BR', 'en']
+
+
 class Config(BaseModel):
     game_dir: Optional[str] = None  # game root (the folder that holds Game; ReStreet 2.x layout)
     save_dir: Optional[str] = None  # profile folder of the save (<Documents>\fifastreet\<profile>\4541097B)
@@ -49,6 +52,14 @@ class Config(BaseModel):
     # the app start with the defaults of every setting
     build_cores: Optional[int] = None
     build_memory_percent: Optional[int] = None
+    # interface language (added 12/11/2026, optional: older files load unchanged); new notifications are written in it.
+    # A value this version does not know (written by a newer one) is dropped instead of refusing the whole file
+    language: Optional[Language] = None
+
+    @field_validator('language', mode='before')
+    @classmethod
+    def _known_language(cls, v):
+        return v if v in ('pt-BR', 'en') else None
 
     @field_validator('build_cores', mode='after')
     @classmethod

@@ -1,6 +1,6 @@
 import { ClipboardCopy, FolderOpen, Loader2 } from 'lucide-react'
 import { useState } from 'react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { useI18n } from '@/i18n'

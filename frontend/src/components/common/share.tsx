@@ -1,7 +1,7 @@
 import { Download, FileUp, Trash2 } from 'lucide-react'
 import { useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api, saveBlob } from '@/api/client'
 import type { Dated, ShareKind, ShareProblem } from '@/api/types'
 import {
@@ -248,8 +248,8 @@ export function ZipImportButton({
     try {
       const r = await read(file)
       if (!r.items.length) {
-        toast.error(t('share.nothing'))
-        r.problems.forEach((p) => toast.warning(`${p.name || t('common.unnamed')}: ${problemText(t, p)}`))
+        // one message with every problem of the zip, one per line
+        toast.error(t('share.nothing'), { description: problemLines(t, r.problems), classNames: { description: 'whitespace-pre-line' } })
         return
       }
       const p = { ...r, analysis: analyzeShare(kind, draft, r.items) }
@@ -355,8 +355,10 @@ export function SingleZipImport({
     try {
       const r = await read(file)
       if (r.items.length !== 1) {
-        toast.error(r.items.length ? t('share.single.many', { count: r.items.length }) : t('share.nothing'))
-        r.problems.forEach((p) => toast.warning(`${p.name || unnamed}: ${problemText(t, p)}`))
+        toast.error(r.items.length ? t('share.single.many', { count: r.items.length }) : t('share.nothing'), {
+          description: problemLines(t, r.problems),
+          classNames: { description: 'whitespace-pre-line' },
+        })
         return
       }
       const incoming = r.items[0]
@@ -420,6 +422,11 @@ export function ShareSingleImport({ kind, entry, pathOf }: { kind: ShareKind; en
 function problemText(t: TFunction, p: ShareProblem) {
   for (const key of [`share.problem.${p.code}`, `apiError.${p.code}`]) if (hasMessage(key)) return t(key)
   return p.message
+}
+
+/** The problems of a zip as one text, one per line ("name: problem"); undefined when there are none. */
+function problemLines(t: TFunction, problems: ShareProblem[]) {
+  return problems.map((p) => `${p.name || t('common.unnamed')}: ${problemText(t, p)}`).join('\n') || undefined
 }
 
 /** A titled part of the import review. `scroll`: the children scroll on their own (title and description stay put)

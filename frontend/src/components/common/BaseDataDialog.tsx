@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Check, LoaderCircle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api } from '@/api/client'
 import type { BasePlayer, Player } from '@/api/types'
 import { Button } from '@/components/ui/button'

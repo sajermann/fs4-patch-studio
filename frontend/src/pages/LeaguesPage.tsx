@@ -1,7 +1,7 @@
 import { DateCells, DateHeads } from '@/components/common/dates'
 import { Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import type { League, OriginalLeague } from '@/api/types'
 import { EntityIssues, OriginalBadge } from '@/components/common/form'
 import {

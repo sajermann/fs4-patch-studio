@@ -6,8 +6,15 @@ React + Vite + TypeScript + Tailwind + shadcn/ui. Code is English; the UI is tra
   `tsc`). Components use `const { t } = useI18n()` and `t('key', { param })`; code outside React uses `translate()`.
   `rich()` renders `` `code` `` and `**bold**` inside long texts. Backend messages are translated by their `code`
   (validation issues: `issue.<code>` with the issue params, `lib/issues.ts`; HTTP errors: `apiError.<code>`, in
-  `ApiError`), falling back to the backend's pt-BR text. The choice is saved in the browser (`fsmod.lang`); default
-  = the browser language. New language: add a dictionary and an entry in `LANGS`.
+  `ApiError`), falling back to the backend's pt-BR text. The choice is saved in the backend's settings (`language`,
+  `PUT /api/config/language`; it wins when the app opens) and in the browser (`fsmod.lang`, for the first paint);
+  default = the browser language. New language: add a dictionary and an entry in `LANGS`.
+- **Toasts and notifications** (`src/lib/notify.ts`): always `import { toast } from '@/lib/notify'`, never from
+  `sonner` — same calls, and every toast also goes to the notification center (bell in the header,
+  `components/layout/NotificationBell.tsx`; page `/notifications`, paged by the backend with filters in the URL;
+  dialog in `components/common/notifications.tsx`). Pass `{ entity: uid }` when a message is about a league, team or
+  player: the notification links to it. While the backend does not answer, notifications wait in the browser
+  (`fsmod.notifications.pending`) and are sent when it comes back.
 - **Theme** (`src/lib/theme.tsx`): light / dark / system, class `dark` on `<html>`, saved in `fsmod.theme`; the inline
   script in `index.html` applies it before the first paint. Both pickers are in `components/layout/PreferencesMenu.tsx`
   (sidebar footer and the setup screen).

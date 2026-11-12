@@ -24,6 +24,7 @@ from .boot_service import BootService, BootZipError
 from .glove_service import GloveService, GloveZipError
 from .dialogs import browse_folder, open_file, save_file
 from .faces import FaceError, FaceService
+from .notifications import KINDS as notification_kinds, NewNotification, NotificationStore, ReadState, Selection
 from .original_images import OriginalImages
 from .share_service import ShareService, ShareZipError
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
@@ -65,6 +66,8 @@ class AppState:
         self.upgrade_project()
         self.build_lock = threading.Lock()
         self.build_progress = {'running': False}  # last/current build, read by GET /api/patch/progress
+        self.notifications = NotificationStore(os.path.join(
+            os.path.dirname(os.path.abspath(self.config_path or settings.CONFIG_PATH)), 'notifications.json'))
 
     def load_game(self, folder):
         """(Re)reads the originals folder: after importing originals nothing cached from the old files stays."""
@@ -285,9 +288,52 @@ def create_app(state=None):
 
     @app.put('/api/config')
     def put_config(config: settings.Config):
+        # the language changes only through PUT /api/config/language: the screens send back the config they loaded,
+        # which may hold the language from before the user switched it
+        config = config.model_copy(update={'language': state.config.language})
         state.config = config
         settings.save_config(config, state.config_path)
         return config.model_dump()
+
+    class LanguageRequest(BaseModel):
+        language: settings.Language
+
+    @app.put('/api/config/language')
+    def put_language(req: LanguageRequest):
+        """The interface language the user picked; new notifications are written in it."""
+        if state.config.language != req.language:
+            state.config = state.config.model_copy(update={'language': req.language})
+            settings.save_config(state.config, state.config_path)
+        return state.config.model_dump()
+
+    # ---------------------------------------------------------------- notifications
+    @app.get('/api/notifications')
+    def list_notifications(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=500),
+                           kind: str | None = None, state_filter: ReadState = Query('all', alias='state')):
+        """One page of the notifications, newest first: {total (matching the filters), unread (all), items}."""
+        if kind is not None and kind not in notification_kinds:
+            raise HTTPException(422, {'code': 'invalid_kind', 'message': f'Tipo inválido: {kind}'})
+        return state.notifications.page(offset, limit, kind, state_filter)
+
+    @app.get('/api/notifications/{nid}')
+    def get_notification(nid: int):
+        found = state.notifications.get(nid)
+        if found is None:
+            raise HTTPException(404, {'code': 'notification_not_found', 'message': 'Notificação não encontrada.'})
+        return found
+
+    @app.post('/api/notifications')
+    def add_notification(req: NewNotification):
+        return state.notifications.add(req, state.config.language)
+
+    @app.post('/api/notifications/read')
+    def read_notifications(sel: Selection, read: bool = True):
+        """Marks the selection read (?read=false: unread again)."""
+        return {'changed': state.notifications.mark(sel, read), 'unread': state.notifications.unread_count()}
+
+    @app.post('/api/notifications/delete')
+    def delete_notifications(sel: Selection):
+        return {'deleted': state.notifications.delete(sel), 'unread': state.notifications.unread_count()}
 
     # ---------------------------------------------------------------- project
     def load_project():
@@ -1381,13 +1427,14 @@ def create_app(state=None):
                 if not line.startswith(' '):  # leagues / teams / summary, not every player and file
                     prog['message'] = line
 
+            cache = buildcache.BuildCache(state.build_cache_dir)
             try:
                 result = build_patch(project, state.store, state.game, state.patch_dir, log=log, progress=progress,
                                      boot_converter=state.boots.converter, glove_converter=state.gloves.converter,
                                      ball_converter=state.balls.converter,
                                      worker_count=workers.plan(state.config.build_cores,
                                                                state.config.build_memory_percent),
-                                     cache=buildcache.BuildCache(state.build_cache_dir))
+                                     cache=cache)
             except builder.BuildError as e:
                 prog['error'] = str(e)
                 raise HTTPException(422, {'code': 'build_failed', 'entity': e.entity, 'message': str(e)})
@@ -1397,6 +1444,10 @@ def create_app(state=None):
             finally:
                 prog.update(running=False, finished_at=time.time())
         return {'log': result.log, 'assigned_league_ids': result.assigned_league_ids,
+                # for "N files, X new and Y reused from the cache, in T": files of the patch the cache gave, and the
+                # build's time in seconds
+                'cache_reused_files': cache.reused_files,
+                'duration_s': round(prog['finished_at'] - prog['started_at'], 1),
                 'assigned_team_ids': result.assigned_team_ids,
                 'assigned_player_ids': result.assigned_player_ids,
                 'assigned_boot_codes': result.assigned_boot_codes,

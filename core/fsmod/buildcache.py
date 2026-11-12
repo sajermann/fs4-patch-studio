@@ -75,6 +75,7 @@ class BuildCache:
         self.folder = folder
         self.used = set()
         self.hits = self.misses = 0
+        self.reused_files = 0  # files (internal names) the hits gave: each one becomes a file of the patch
 
     def _path(self, k):
         return os.path.join(self.folder, k[:2], k + '.zip')
@@ -92,6 +93,7 @@ class BuildCache:
             self.misses += 1
             return None
         self.hits += 1
+        self.reused_files += len(files)
         return files
 
     def put(self, k, files):

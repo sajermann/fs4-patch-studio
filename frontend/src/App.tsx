@@ -1,14 +1,18 @@
-import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { AppShell } from '@/components/layout/AppShell'
 import { ErrorBoundary } from '@/components/layout/ErrorBoundary'
 import { LoadError } from '@/components/layout/LoadError'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { I18nProvider, translate, useI18n } from '@/i18n'
+import { api } from '@/api/client'
+import type { Config } from '@/api/types'
+import { I18nProvider, onLanguageChange, translate, useI18n } from '@/i18n'
 import { logClientError } from '@/lib/clientLog'
+import { flushNotifications, onNotificationsChanged } from '@/lib/notify'
 import { ThemeProvider } from '@/lib/theme'
 import { BallEditPage } from '@/pages/BallEditPage'
 import { BallsPage } from '@/pages/BallsPage'
@@ -20,6 +24,7 @@ import { LeagueEditPage } from '@/pages/LeagueEditPage'
 import { LeaguesPage } from '@/pages/LeaguesPage'
 import { PatchesPage } from '@/pages/PatchesPage'
 import { PlayerEditPage } from '@/pages/PlayerEditPage'
+import { NotificationsPage } from '@/pages/NotificationsPage'
 import { PlayersPage } from '@/pages/PlayersPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { SetupPage } from '@/pages/SetupPage'
@@ -44,6 +49,42 @@ const queryClient = new QueryClient({
   mutationCache: new MutationCache({ onError: (error) => logClientError('mutation', error) }),
 })
 
+/** The interface language lives in the backend's settings: the saved one wins when the app opens (the browser's copy
+ * is only for the first paint), and every switch is saved there (new notifications are written in it). */
+function LanguageSync({ config }: { config: Config }) {
+  const { lang, setLang } = useI18n()
+  const queryClient = useQueryClient()
+  const applied = useRef(false)
+  useEffect(() => {
+    if (applied.current) return
+    applied.current = true
+    if (config.language && config.language !== lang) setLang(config.language)
+    else if (!config.language) void api.saveLanguage(lang).catch((e) => logClientError('save language', e))
+  }, [config.language, lang, setLang])
+  useEffect(
+    () =>
+      onLanguageChange((next) => {
+        api
+          .saveLanguage(next)
+          .then(() => queryClient.invalidateQueries({ queryKey: ['status'] }))
+          .catch((e) => logClientError('save language', e))
+      }),
+    [queryClient],
+  )
+  return null
+}
+
+/** The bell and the notifications page refresh whenever a toast reaches the backend; the ones queued while the
+ * backend was down are sent as soon as the app talks to it again. */
+function NotificationsSync() {
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    void flushNotifications()
+    return onNotificationsChanged(() => void queryClient.invalidateQueries({ queryKey: ['notifications'] }))
+  }, [queryClient])
+  return null
+}
+
 function Gate() {
   const { t } = useI18n()
   const { data: status, error, refetch } = useStatus()
@@ -56,9 +97,22 @@ function Gate() {
     )
   }
   // first run (or the originals / folders / notice changed): nothing else opens before the setup screen
-  if (status.setup.required) return <SetupPage status={status} />
+  const sync = (
+    <>
+      <LanguageSync config={status.config} />
+      <NotificationsSync />
+    </>
+  )
+  if (status.setup.required)
+    return (
+      <>
+        {sync}
+        <SetupPage status={status} />
+      </>
+    )
   return (
     <ProjectProvider>
+      {sync}
       <Routes>
         <Route path="setup" element={<SetupPage status={status} />} />
         <Route element={<AppShell />}>
@@ -80,6 +134,7 @@ function Gate() {
           <Route path="world-tour" element={<WorldTourPage />} />
           <Route path="patches" element={<PatchesPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="notifications" element={<NotificationsPage />} />
           <Route path="*" element={<Navigate to="/teams" replace />} />
         </Route>
       </Routes>

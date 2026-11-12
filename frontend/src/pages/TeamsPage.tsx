@@ -1,7 +1,7 @@
 import { DateCells, DateHeads } from '@/components/common/dates'
 import { Lock, LockOpen, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api } from '@/api/client'
 import type { OriginalTeam, Player, Team } from '@/api/types'
 import { EntityIssues, OriginalBadge, OriginalCrest, TeamCrest } from '@/components/common/form'

@@ -54,7 +54,12 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `POST /api/setup/check` `{game_dir}` | checks a game folder: ReStreet root, version (`online-patch.json`), SHA-1 of the 12 files against the official ones (`fsapi/game_setup.py`), guess of the save folder |
 | `POST /api/setup/apply` `{game_dir, save_dir, face_pack_dir, terms_version}` | saves the first-run choices; imports the 12 originals from the game (only official files) when the app does not have them verified |
 | `POST /api/dialog/folder?initial=` | Windows folder picker on this machine; `{folder}` or null |
-| `GET/PUT /api/config` | local settings |
+| `GET/PUT /api/config` | local settings (`PUT` keeps the saved `language`) |
+| `PUT /api/config/language` `{language}` | interface language (`pt-BR` / `en`); new notifications are written in it |
+| `GET /api/notifications?offset=&limit=&kind=&state=` | one page of the notification center, newest first: `{total, unread, items}` (`kind` error/warning/success/info, `state` all/read/unread). Kept in `notifications.json` next to `config.json` (`fsapi/notifications.py`; older files open unchanged, a broken one is kept aside and the list starts empty) |
+| `GET /api/notifications/{id}` | one notification |
+| `POST /api/notifications` `{kind, title, description, created_at, language, entity}` | adds one (the UI sends every toast; `entity` = uid of the league/team/player it is about) |
+| `POST /api/notifications/read?read=true` / `POST /api/notifications/delete` | marks read (or unread) / deletes a selection: `{ids}` or `{all: true, kind, state, exclude}` (every one matching the filters, on every page) |
 | `GET /api/machine` | cores and memory of this machine and how many worker processes the build uses (`fsmod.workers`; settings `build_cores`, `build_memory_percent`, empty = all cores but one and 50% of the memory) |
 | `GET/PUT /api/project`, `POST /api/project/validate` | project (contract v2) + validation issues (`code`, `severity`, `entity`, `field`, pt-BR `message`) + `defaults` (per player: values inherited from the template player where the project leaves a field unset) |
 | `POST /api/teams/{uid}/generate-players` | body: the draft project; returns the `Player`s that complete the roster of that new team up to 13 (strikers named Player 01, 02... skipping the names the team already has, skills at the middle, the rest random); the client adds them to the draft |

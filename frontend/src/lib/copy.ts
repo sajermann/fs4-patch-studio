@@ -1,4 +1,4 @@
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { api, ApiError } from '@/api/client'
 import type { Player, Project } from '@/api/types'
 import { translate, useI18n } from '@/i18n'

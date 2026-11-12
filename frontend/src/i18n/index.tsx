@@ -26,7 +26,7 @@ function initialLang(): Lang {
 }
 
 // module-level copy of the current language, for code that runs outside React (ApiError, plain helpers)
-let currentLang: Lang = initialLang()
+let lang: Lang = initialLang()
 
 const format = (template: string, params?: Params) =>
   params
@@ -41,9 +41,22 @@ export function hasMessage(key: string): key is MessageKey {
   return key in ptBR
 }
 
+/** The interface language right now (for code outside React). */
+export const currentLang = () => lang
+
 /** Translation in the current language; also usable outside components (it does not re-render anything). */
 export function translate(key: MessageKey, params?: Params): string {
-  return format(DICTIONARIES[currentLang][key] ?? ptBR[key] ?? key, params)
+  return format(DICTIONARIES[lang][key] ?? ptBR[key] ?? key, params)
+}
+
+const languageListeners = new Set<(lang: Lang) => void>()
+
+/** Called whenever the user switches the language (the backend keeps it: LanguageSync). */
+export function onLanguageChange(listener: (lang: Lang) => void) {
+  languageListeners.add(listener)
+  return () => {
+    languageListeners.delete(listener)
+  }
 }
 
 interface I18nContextValue {
@@ -55,9 +68,10 @@ interface I18nContextValue {
 const I18nContext = createContext<I18nContextValue | null>(null)
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>(currentLang)
+  const [current, setLangState] = useState<Lang>(lang)
   const setLang = useCallback((next: Lang) => {
-    currentLang = next
+    lang = next
+    languageListeners.forEach((listener) => listener(next))
     try {
       localStorage.setItem(STORAGE_KEY, next)
     } catch {
@@ -66,12 +80,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     setLangState(next)
   }, [])
   useEffect(() => {
-    document.documentElement.lang = lang
+    document.documentElement.lang = current
     document.title = translate('app.documentTitle')
-  }, [lang])
+  }, [current])
   // a new `t` per language, so memoized code that depends on it recomputes
-  const t = useCallback<TFunction>((key, params) => format(DICTIONARIES[lang][key] ?? ptBR[key] ?? key, params), [lang])
-  const value = useMemo(() => ({ lang, setLang, t }), [lang, setLang, t])
+  const t = useCallback<TFunction>((key, params) => format(DICTIONARIES[current][key] ?? ptBR[key] ?? key, params), [current])
+  const value = useMemo(() => ({ lang: current, setLang, t }), [current, setLang, t])
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
 }
 

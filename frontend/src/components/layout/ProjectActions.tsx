@@ -2,9 +2,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, ChevronDown, CircleAlert, Download, FileArchive, Hammer, Loader2, RotateCcw, Save, Trash2, Undo2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { toast } from 'sonner'
+import { toast } from '@/lib/notify'
 import { ApiError, api } from '@/api/client'
-import type { Issue, Project } from '@/api/types'
+import type { Issue } from '@/api/types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,27 +28,11 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { BuildProgressDialog } from '@/components/layout/BuildProgress'
-import { useI18n, type TFunction } from '@/i18n'
+import { useI18n } from '@/i18n'
 import { issueText } from '@/lib/issues'
-import { leagueKey, leaguePath, playerPath, playerRef, teamKey, teamPath } from '@/lib/players'
+import { entityLink } from '@/lib/entityLink'
 import { useProject } from '@/state/project'
 import { useStatus } from '@/state/queries'
-
-function entityLink(t: TFunction, project: Project, uid: string | null) {
-  if (!uid) return null
-  const unnamed = t('common.unnamed')
-  const league = project.leagues.find((l) => l.uid === uid)
-  if (league) return { label: t('issues.linkLeague', { name: league.name || unnamed }), to: leaguePath(leagueKey(league)) }
-  const team = project.teams.find((tm) => tm.uid === uid)
-  if (team) return { label: t('issues.linkTeam', { name: team.name || unnamed }), to: teamPath(teamKey(team)) }
-  const player = project.players.find((p) => p.uid === uid)
-  if (player)
-    return {
-      label: t('issues.linkPlayer', { name: `${player.first_name} ${player.last_name}`.trim() || unnamed }),
-      to: playerPath(playerRef(player)),
-    }
-  return null
-}
 
 function IssuesDialog({ open, onOpenChange, issues }: { open: boolean; onOpenChange: (v: boolean) => void; issues: Issue[] }) {
   const { t } = useI18n()
@@ -145,10 +129,17 @@ export function ProjectActions() {
       const r = await api.buildPatch()
       await queryClient.invalidateQueries({ queryKey: ['project'] })
       await queryClient.invalidateQueries({ queryKey: ['status'] })
-      toast.success(t('patch.built', { count: r.patch.files?.length ?? 0 }))
+      const count = r.patch.files?.length ?? 0
+      const reused = Math.min(r.cache_reused_files ?? 0, count)
+      const seconds = Math.round(r.duration_s ?? 0)
+      const time =
+        seconds < 60
+          ? t('patch.durationSeconds', { seconds })
+          : t('patch.durationMinutes', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 })
+      toast.success(t('patch.built'), { description: t('patch.builtDetail', { count, made: count - reused, reused, time }) })
     } catch (e) {
       if (e instanceof ApiError && e.issues) setIssuesOpen(true)
-      toast.error(e instanceof ApiError ? e.message : t('patch.buildFailed'))
+      toast.error(e instanceof ApiError ? e.message : t('patch.buildFailed'), { entity: e instanceof ApiError ? e.entity : undefined })
     } finally {
       setBuilding(false)
     }

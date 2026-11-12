@@ -833,5 +833,6 @@ def test_real_kits_are_reused_from_the_build_cache(game, tmp_path):
     made, lines = builder._real_kit_files(game, 150000, 0, real, str(tmp_path), None, 'tm', cache)
     reused, lines2 = builder._real_kit_files(game, 150000, 0, real, str(tmp_path), None, 'tm', cache)
     assert reused == made and (cache.hits, cache.misses) == (1, 1) and 'cache' in lines2[0]
+    assert cache.reused_files == len(reused)  # every file of the hit is counted
     other, _ = builder._real_kit_files(game, 150001, 0, real, str(tmp_path), None, 'tm', cache)  # another teamid
     assert cache.misses == 2 and set(other) != set(made)
