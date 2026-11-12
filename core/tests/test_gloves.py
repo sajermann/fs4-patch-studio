@@ -162,6 +162,20 @@ def test_build_points_goalkeepers_to_their_gloves(game, folder):
     assert sorted(code for _, code in converter.calls) == [6, GAME_GLOVE]
 
 
+def test_goalkeeper_without_glove_files_gets_the_default(game, folder):
+    project = load_palmeiras()
+    zero, own = project.players[:2]
+    for pl, code in ((zero, 0), (own, 3)):  # no glove picked: the code comes from the appearance/template
+        pl.glove = None
+        pl.appearance = {**pl.appearance, 'gkglovetypecode': code}
+        pl.teams = [lk.model_copy(update={'position': gloves.GOALKEEPER}) for lk in pl.teams]
+    result = builder.build(project, game, folder_with_palmeiras(folder))
+    pids = result.assigned_player_ids
+    db = t3db.Database(result.database, game.meta)
+    assert player_row(db, pids[zero.uid]) == {'gkglovetypecode': gloves.DEFAULT_CODE, 'preferredposition1': 0}
+    assert player_row(db, pids[own.uid]) == {'gkglovetypecode': 3, 'preferredposition1': 0}  # has files: kept
+
+
 def test_original_player_glove_counts_as_a_change(game, catalog, tmp_path):
     pl = original_player.load(game, catalog, 158023, 'jg_messi', lambda name, data: None)
     pl.photo = None

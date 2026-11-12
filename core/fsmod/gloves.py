@@ -27,6 +27,7 @@ GLOVE_DIR = 'data/sceneassets/gkglove/'
 MESH = GLOVE_DIR + 'gkglove_0_0.rx3'
 FILES = ('gkglove_0_{}_cm.rx3', 'gkglove_0_{}_textures.rx3')  # color, maps
 TEMPLATE_CODE = 1  # game glove whose files a converted one is written into
+DEFAULT_CODE = 1  # the game's default glove: a goalkeeper whose code has no files (e.g. 0) wears this one
 CODES = range(1, 64)  # players.gkglovetypecode is 0-63; 0 = no glove of its own
 FIELD = 'gkglovetypecode'
 GOALKEEPER = 0  # preferredposition1 / teamplayerlinks.position of the goalkeeper

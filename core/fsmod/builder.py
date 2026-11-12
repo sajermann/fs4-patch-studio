@@ -968,11 +968,14 @@ def _build_gloves(db, game, project, assets_dir, player_ids, entries, result, sa
             db.put(players, players.records[k], gloves.FIELD, code)
 
 
-def _set_preferred_positions(db, project, player_ids, say):
+def _set_preferred_positions(db, game, project, player_ids, result, say):
     """players.preferredposition1 of every project player by the app's rule (gloves.preferred_position): goalkeeper
     with a picked glove, else his most common team position. An original player keeps the game's unless the rule
-    makes him a goalkeeper or takes him out of goal."""
+    makes him a goalkeeper or takes him out of goal. A goalkeeper whose gkglovetypecode has no glove files (most
+    often 0, from the template row, when no glove was picked) gets the game's default glove: the game would load
+    gkglove_0_0_cm, which does not exist, and show a broken texture."""
     players = db.table('players')
+    with_files = set(gloves.game_codes(game)) | set(result.assigned_glove_codes.values())
     for pl in project.players:
         pid = pl.original_id if pl.is_original else player_ids.get(pl.uid)
         for k in (db.rows('players', 'playerid', pid) if pid is not None else []):
@@ -983,6 +986,11 @@ def _set_preferred_positions(db, project, player_ids, say):
                 db.put(players, row, 'preferredposition1', position)
                 if pl.is_original:
                     say(f'original player {pid} "{pl.shown_name}": preferred position {position}')
+            code = db.get(players, row, gloves.FIELD)
+            if position == gloves.GOALKEEPER and code not in with_files:
+                db.put(players, row, gloves.FIELD, gloves.DEFAULT_CODE)
+                say(f'player {pid} "{pl.shown_name}": goalkeeper without glove files ({code}), default glove '
+                    f'{gloves.DEFAULT_CODE}')
 
 
 def build(project, game, assets_dir, log=None, progress=None, boot_converter=None, glove_converter=None,
@@ -1368,7 +1376,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
 
     _build_boots(db, game, project, assets_dir, player_ids, entries, result, say, boot_converter)
     _build_gloves(db, game, project, assets_dir, player_ids, entries, result, say, glove_converter)
-    _set_preferred_positions(db, project, player_ids, say)
+    _set_preferred_positions(db, game, project, player_ids, result, say)
     _build_balls(db, game, project, assets_dir, entries, result, say, ball_converter)
     apply_original_changes(db, project.originals)
     try:
