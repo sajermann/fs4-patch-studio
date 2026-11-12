@@ -1,13 +1,19 @@
-"""Real faces (FIFA 14 packs) for the player's Visual tab: pick the pack folder, gallery, 3D preview, copy.
+"""Real faces (FIFA 14-16 packs) for the player's Visual tab: the pack folders of the settings, a paged gallery of
+all their faces, 3D preview, copy.
 
-The pack stays where the user keeps it (read in place, never written); picking a face copies only that face's
-files into the project (scanface.PROJECT_DIR/<player uid>/). The 3D preview shows the face already converted
-(fsmod.scanface, ~3 s), so it is what the game will draw; conversions and thumbnails are cached in memory.
+The packs stay where the user keeps them (read in place, never written); picking a face copies only that face's
+files into the project (scanface.PROJECT_DIR/<player uid>/) and what the pack's manifest.json says about it (name,
+credits) into the player. The 3D preview shows the face already converted (fsmod.scanface, ~3 s), so it is what the
+game will draw; conversions are cached in memory, the packs' lists in memory until their folders change, and the
+gallery thumbnails also on disk (<data dir>/cache/faces/thumbs).
 """
+import hashlib
 import logging
 import os
 import struct
 import threading
+import unicodedata
+import uuid
 from collections import OrderedDict
 
 from fsmod import facepack, preview, scanface
@@ -60,12 +66,26 @@ class _Lru:
             return value
 
 
+def fold(text):
+    """Text for searching: no accents, no case."""
+    return ''.join(c for c in unicodedata.normalize('NFD', text) if not unicodedata.combining(c)).casefold()
+
+
+def same_folder(a, b):
+    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
+THUMB_VERSION = 1  # bump when facepack.thumbnail draws differently: the disk cache starts over
+
+
 class FaceService:
-    def __init__(self, game):
+    def __init__(self, game, cache_root=None):
         self.game = game
         self._template = None
         self._converted = _Lru(6)
         self._thumbs = _Lru(600)
+        self._thumb_dir = os.path.join(cache_root, 'faces', 'thumbs') if cache_root else None
+        self._packs = {}  # normalized folder -> (stamp, pack): read again only when the pack's folders change
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------ pack
@@ -75,16 +95,94 @@ class FaceService:
             raise FaceError('facepack_not_found', 'Pasta sem faces do FIFA 14 (procure a pasta que contém “screenassets”).')
         return assets
 
-    def list(self, folder):
+    def pack(self, folder):
+        """{'folder', 'name', 'faces', 'warnings'} of a pack folder (FaceError when it has no faces): every complete
+        face (facepack.list_faces) with what the pack's manifest.json says about it (name, credits, credits_url).
+        Kept in memory and read again only when one of the pack's folders or its manifest changes."""
         assets = self.assets(folder)
-        return {'folder': os.path.normpath(folder), 'name': facepack.pack_name(assets),
-                'faces': facepack.list_faces(assets)}
+        key = os.path.normcase(os.path.normpath(folder))
+        stamp = _pack_stamp(assets)
+        with self._lock:
+            known = self._packs.get(key)
+        if known and known[0] == stamp:
+            return known[1]
+        manifest, warnings = facepack.read_manifest(assets)
+        if warnings:
+            log.warning('face pack %s: manifest.json %s', folder, warnings)
+        faces = [{**f, **manifest.get(f['id'], {})} for f in facepack.list_faces(assets)]
+        pack = {'folder': os.path.normpath(folder), 'name': facepack.pack_name(assets), 'faces': faces,
+                'warnings': warnings}
+        with self._lock:
+            self._packs[key] = (stamp, pack)
+        return pack
+
+    def packs(self, folders):
+        """[{'folder', 'name', 'count', 'warnings', 'error'}] of the folders, in their order; a folder without faces
+        has error = its FaceError code (and name = the folder name) instead of refusing the others."""
+        out = []
+        for folder in folders:
+            try:
+                p = self.pack(folder)
+                out.append({'folder': p['folder'], 'name': p['name'], 'count': len(p['faces']),
+                            'warnings': p['warnings'], 'error': None})
+            except FaceError as e:
+                out.append({'folder': os.path.normpath(folder), 'name': os.path.basename(os.path.normpath(folder)),
+                            'count': 0, 'warnings': [], 'error': e.code})
+        return out
+
+    def page(self, folders, offset=0, limit=60, q='', pack=None):
+        """One page of the faces of all the packs (in the order of the folders, then by id): {'total' (matching the
+        filters), 'items', 'packs' (self.packs)}. q looks in the id, the name, the credits and the pack name (no
+        accents, no case); pack = folder of one pack only."""
+        packs = self.packs(folders)
+        query = fold(q.strip())
+        matching = []
+        for summary in packs:
+            if summary['error'] or (pack and not same_folder(pack, summary['folder'])):
+                continue
+            p = self.pack(summary['folder'])
+            for face in p['faces']:
+                if query and not any(query in fold(str(v)) for v in (face['id'], face.get('name'), face.get('credits'),
+                                                                     p['name']) if v is not None):
+                    continue
+                matching.append({**face, 'folder': p['folder'], 'pack': p['name']})
+        return {'total': len(matching), 'items': matching[offset:offset + limit], 'packs': packs}
+
+    def face_info(self, folder, face_id):
+        """What the pack's manifest says about one face: {'name', 'credits', 'credits_url'} (keys only when known)."""
+        for face in self.pack(folder)['faces']:
+            if face['id'] == face_id:
+                return {k: face[k] for k in ('name', 'credits', 'credits_url') if face.get(k)}
+        return {}
 
     def thumbnail(self, key, files):
         try:
-            return self._thumbs.get(key, lambda: facepack.thumbnail(files))
+            return self._thumbs.get(key, lambda: self._thumb_on_disk(key, lambda: facepack.thumbnail(files)))
         except (ValueError, LookupError, ArithmeticError, TypeError, OSError, struct.error) as e:
             raise _unsupported(key, e) from e
+
+    def _thumb_on_disk(self, key, make):
+        """Gallery thumbnails are drawn from the 3D head (slow with thousands of faces): kept as PNG files in the
+        cache folder, named after the face's files (their path, size and date)."""
+        if not self._thumb_dir:
+            return make()
+        name = hashlib.sha1(repr((THUMB_VERSION, key)).encode()).hexdigest()
+        path = os.path.join(self._thumb_dir, name[:2], f'{name}.png')
+        try:
+            with open(path, 'rb') as f:
+                return f.read()
+        except OSError:
+            pass
+        data = make()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f'{path}.{uuid.uuid4().hex}.tmp'  # requests run in parallel threads: write whole, then rename
+            with open(tmp, 'wb') as f:
+                f.write(data)
+            os.replace(tmp, path)
+        except OSError as e:  # no cache: the thumbnail still goes out
+            log.warning('face thumbnail not cached: %s', e)
+        return data
 
     def _pack_files(self, assets, face_id):
         try:
@@ -139,6 +237,20 @@ class FaceService:
         if isinstance(result, FaceError):
             raise result
         return result
+
+
+def _pack_stamp(assets):
+    """Changes when a face is added to / removed from the pack (the dates of its folders) or its manifest changes."""
+    paths = [os.path.join(assets, os.path.dirname(f)) for f in scanface.FILES.values()]
+    paths += [os.path.join(facepack.pack_root(assets), facepack.PHOTOS), facepack.manifest_path(assets)]
+    out = []
+    for path in dict.fromkeys(paths):
+        try:
+            st = os.stat(path)
+            out.append((st.st_size, st.st_mtime_ns))
+        except OSError:
+            out.append(None)
+    return tuple(out)
 
 
 def _stamp(base, face_id):

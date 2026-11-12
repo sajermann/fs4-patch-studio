@@ -17,7 +17,8 @@ import type {
   Catalog,
   Config,
   MachineInfo,
-  FacePack,
+  FacePackPage,
+  FacePackSummary,
   FacePlayer,
   ImageUpload,
   InstallResponse,
@@ -290,8 +291,21 @@ export const api = {
     form.append('file', file)
     return request<ImageUpload>('/api/images', { method: 'POST', body: form })
   },
-  /** Faces of the FIFA 14 pack folder of the settings (read in place), or of `folder` (checking it before saving). */
-  facePack: (folder?: string) => request<FacePack>(`/api/facepack${folder ? `?${new URLSearchParams({ folder })}` : ''}`),
+  /** One page of the faces of all the face pack folders of the settings (read in place), or only of `folder` (picked
+   * on the player screen for that visit). */
+  facePage: (q: { offset: number; limit: number; q?: string; pack?: string; folder?: string }) => {
+    const params = new URLSearchParams({ offset: String(q.offset), limit: String(q.limit) })
+    if (q.q) params.set('q', q.q)
+    if (q.pack) params.set('pack', q.pack)
+    if (q.folder) params.set('folder', q.folder)
+    return request<FacePackPage>(`/api/facepack?${params}`)
+  },
+  /** The face pack folders of the settings, or `folders` (checking them before saving the settings). */
+  facePacks: (folders?: string[]) => {
+    const params = new URLSearchParams()
+    folders?.forEach((f) => params.append('folder', f))
+    return request<{ packs: FacePackSummary[] }>(`/api/facepack/packs${folders ? `?${params}` : ''}`)
+  },
   /** Opens the Windows folder picker on this machine; null when cancelled. */
   browseFacePack: () => request<{ folder: string | null }>('/api/facepack/browse', { method: 'POST' }),
   /** Copies one face of the pack into the project (faces/<player uid>/). */
@@ -321,7 +335,7 @@ export const api = {
   setupApply: (setup: {
     game_dir: string
     save_dir: string
-    face_pack_dir: string | null
+    face_pack_dirs: string[]
     terms_version: number
     build_cores?: number | null
     build_memory_percent?: number | null

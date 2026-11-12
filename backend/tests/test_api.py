@@ -547,6 +547,93 @@ def test_face_in_an_unknown_format_is_reported(env):
     assert c.get('/api/preview/scanned-check', params={**q, 'face': 2}).json()['detail']['code'] == 'face_not_found'
 
 
+def fake_face_pack(root, ids, manifest=None, screenassets=False):
+    """A pack folder with the files the gallery looks for (empty: enough to list, not to draw)."""
+    assets = root / 'screenassets' if screenassets else root
+    for fid in ids:
+        for sub, name in (('heads', f'head_{fid}_0.rx3'), ('faces', f'face_{fid}_0_0_0_0_0_0_0_0_textures.rx3')):
+            (assets / sub).mkdir(parents=True, exist_ok=True)
+            (assets / sub / name).write_bytes(b'')
+    if manifest is not None:
+        (root / 'manifest.json').write_text(manifest if isinstance(manifest, str) else json.dumps(manifest), 'utf-8')
+    return str(root)
+
+
+def test_face_packs_gallery_pages_several_folders_with_their_manifests(env):
+    c, state = env['client'], env['state']
+    colgado = fake_face_pack(env['tmp'] / 'colgado', [3, 1, 2], {
+        'type': 'fs4-faces', 'version': 1, 'credits': 'Colgado', 'credits_url': 'www.colgado.com',
+        'faces': [{'id': 1, 'name': 'Luis Brahim Palma'},
+                  {'id': '2', 'name': 'Joséph Ávila', 'credits': 'Other', 'credits_url': 'javascript:alert(1)'},
+                  {'id': 99, 'name': 'Not in the pack'}, {'name': 'no id'}, {'id': 1, 'name': 'repeated'}]},
+        screenassets=True)
+    mixed = fake_face_pack(env['tmp'] / 'mixed', [1, 5], '{broken')
+    missing = str(env['tmp'] / 'nothing')
+    state.config.face_pack_dirs = [colgado, mixed, missing]
+
+    packs = {p['name']: p for p in c.get('/api/facepack/packs').json()['packs']}
+    assert packs['colgado']['count'] == 3 and packs['nothing']['error'] == 'facepack_not_found'
+    assert {w['code']: w.get('count') for w in packs['colgado']['warnings']} == \
+        {'manifest_bad_entries': 2, 'manifest_bad_links': 1}
+    assert [w['code'] for w in packs['mixed']['warnings']] == ['manifest_invalid_json']  # works as without one
+
+    page = c.get('/api/facepack', params={'limit': 2}).json()
+    assert page['total'] == 5 and [(f['pack'], f['id']) for f in page['items']] == [('colgado', 1), ('colgado', 2)]
+    rest = c.get('/api/facepack', params={'offset': 2, 'limit': 10}).json()['items']
+    assert [(f['pack'], f['id']) for f in rest] == [('colgado', 3), ('mixed', 1), ('mixed', 5)]  # same id, two packs
+    first, second, third = page['items'] + rest[:1]
+    assert (first['name'], first['credits'], first['credits_url']) == \
+        ('Luis Brahim Palma', 'Colgado', 'https://www.colgado.com')  # the pack's credits
+    assert (second['credits'], 'credits_url' in second) == ('Other', False)  # its own credits; a bad link is dropped
+    assert 'name' not in third and 'credits' not in third  # not in the manifest: only its id
+    assert 'name' not in rest[1]  # broken manifest
+
+    search = lambda **q: [(f['pack'], f['id']) for f in c.get('/api/facepack', params=q).json()['items']]  # noqa: E731
+    assert search(q='joseph avila') == [('colgado', 2)]  # accents and case ignored
+    assert search(q='colgado') == [('colgado', 1), ('colgado', 2), ('colgado', 3)]  # pack name and credits
+    assert search(q='5') == [('mixed', 5)]
+    assert search(pack=mixed) == [('mixed', 1), ('mixed', 5)]
+
+    # the pack is read again when its manifest changes
+    (env['tmp'] / 'mixed' / 'manifest.json').write_text(json.dumps(
+        {'type': 'fs4-faces', 'faces': [{'id': 5, 'name': 'Fixed', 'credits_url': 'https://x.org/a'}]}), 'utf-8')
+    os.utime(env['tmp'] / 'mixed' / 'manifest.json', ns=(1, 1))
+    assert c.get('/api/facepack', params={'pack': mixed, 'q': '5'}).json()['items'][0]['name'] == 'Fixed'
+    assert c.get('/api/facepack/packs', params={'folder': [mixed]}).json()['packs'][0]['warnings'] == []
+
+    # a folder picked on the player screen for that visit: only its faces, paged, with its manifest; settings untouched
+    other = fake_face_pack(env['tmp'] / 'just-downloaded', [7, 8, 9], {'type': 'fs4-faces', 'credits': 'New',
+                                                                     'faces': [{'id': 8, 'name': 'Fresh'}]})
+    state.config.face_pack_dirs = []
+    page = c.get('/api/facepack', params={'folder': other, 'limit': 2}).json()
+    assert page['total'] == 3 and [f['id'] for f in page['items']] == [7, 8] and page['items'][1]['name'] == 'Fresh'
+    assert [p['name'] for p in page['packs']] == ['just-downloaded']
+    assert c.get('/api/facepack', params={'folder': other, 'q': 'fresh'}).json()['total'] == 1
+    assert c.get('/api/facepack', params={'folder': missing}).json()['detail']['code'] == 'facepack_not_found'
+    assert state.config.face_pack_dirs == []
+
+
+def test_face_pack_manifest_is_ignored_when_it_is_not_ours(env):
+    from fsmod import facepack
+    for i, data in enumerate(({'type': 'other', 'faces': []}, [1, 2], {'type': 'fs4-faces', 'version': 2, 'faces': []},
+                              {'type': 'fs4-faces', 'faces': {'1': 'x'}})):
+        root = fake_face_pack(env['tmp'] / f'p{i}', [1], data)
+        faces, warnings = facepack.read_manifest(facepack.assets_dir(root))
+        assert faces == {} and len(warnings) == 1, data
+    root = fake_face_pack(env['tmp'] / 'none', [1])
+    assert facepack.read_manifest(facepack.assets_dir(root)) == ({}, [])
+
+
+def test_old_settings_with_one_face_pack_folder(tmp_path):
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'face_pack_dir': 'F:\\Faces\\A'}), 'utf-8')
+    assert settings.load_config(str(path)).face_pack_dirs == ['F:\\Faces\\A']
+    path.write_text(json.dumps({'face_pack_dir': None}), 'utf-8')
+    assert settings.load_config(str(path)).face_pack_dirs == []
+    config = settings.Config(face_pack_dirs=[' F:\\Faces\\A ', 'f:\\faces\\a\\', '', 'F:\\Faces\\B'])
+    assert config.face_pack_dirs == ['F:\\Faces\\A', 'F:\\Faces\\B']
+
+
 def test_real_face_from_a_pack(env):
     """FIFA 14 pack read in place: gallery, converted preview, copy into the project, validation."""
     from fsmod import facepack
@@ -554,27 +641,18 @@ def test_real_face_from_a_pack(env):
     if not facepack.assets_dir(pack):
         pytest.skip('face pack not available')
     c, state = env['client'], env['state']
-    face_ids = lambda r: {f['id'] for f in r.json()['faces']}  # noqa: E731 (no count: the pack grows)
-    r = c.get('/api/facepack', params={'folder': pack})
-    assert r.status_code == 200 and 274254 in face_ids(r)
-    face = next(f for f in r.json()['faces'] if f['id'] == 274254)
-    assert face['player'] is None  # no players base in the settings: the face shows only its id
-    base = env['tmp'] / 'players.json'
-    base.write_text(json.dumps({'players': {'274254': {'name': 'Dorny Romero', 'club': 'X', 'extra': 1}}}), 'utf-8')
-    state.config.players_base_file = str(base)
-    face = next(f for f in c.get('/api/facepack', params={'folder': pack}).json()['faces'] if f['id'] == 274254)
-    assert face['player'] == {'name': 'Dorny Romero', 'club': 'X'}  # who the face is, from the players base
     assert c.get('/api/facepack').json()['detail']['code'] == 'facepack_not_set'  # not set in the settings yet
-    state.config.face_pack_dir = pack
-    assert 274254 in face_ids(c.get('/api/facepack'))  # the folder of the settings
-    assert c.get('/api/facepack', params={'folder': str(env['tmp'])}).json()['detail']['code'] == 'facepack_not_found'
+    state.config.face_pack_dirs = [pack]
+    r = c.get('/api/facepack', params={'q': '274254'})
+    assert r.status_code == 200 and 274254 in {f['id'] for f in r.json()['items']}
     assert c.get('/api/facepack/thumb.png', params={'folder': pack, 'face': 274254}).content[:4] == b'\x89PNG'
 
     project, _ = palmeiras_v2(c)
     uid = project['players'][0]['uid']
     r = c.post('/api/facepack/use', json={'folder': pack, 'face_id': 274254, 'player': uid})
-    # new faces come with the scalp paint off
-    assert r.json() == {'face': {'source_id': 274254, 'pack': 'various-by-Colgado', 'paint_scalp': False}}
+    # new faces come with the scalp paint off (plus name/credits when the pack's manifest.json lists the face)
+    assert {k: v for k, v in r.json()['face'].items() if k not in ('name', 'credits', 'credits_url')} == \
+        {'source_id': 274254, 'pack': 'various-by-Colgado', 'paint_scalp': False}
     code = c.get('/api/facepack/hair-color', params={'folder': pack, 'face': 274254}).json()['haircolorcode']
     assert code in state.catalog().appearance_options['haircolorcode']  # suggested from the face's own hair
     assert c.get('/api/facepack/hair-color', params={'player': uid, 'face': 274254}).json()['haircolorcode'] == code

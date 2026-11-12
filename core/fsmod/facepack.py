@@ -4,15 +4,17 @@ A pack folder holds screenassets/ (heads/, faces/, hair/, hairlod/: see scanface
 ui/imgAssets/heads/p<id>.dds (player photos), or the same folders straight in the pack root, without screenassets/
 (both layouts work). The user may point at the pack root, at screenassets itself or at a folder with one pack inside. Packs are read in place and never written; the app never ships packs.
 The pack's database is the PC version (compressed names that fsmod.t3db does not read), so the ids say nothing
-about who the player is: the gallery shows each face rendered from the front.
+about who the player is: the gallery shows each face rendered from the front, and an optional manifest.json at the
+pack's root (read_manifest) tells the player's name and who made each face.
 """
 import io
+import json
 import os
 import re
 
 from PIL import Image
 
-from . import rx3mesh, rx3tex
+from . import rx3mesh, rx3tex, weblink
 from .scanface import FILES, REQUIRED, read_files
 
 SCREENASSETS = 'screenassets'
@@ -66,6 +68,91 @@ def list_faces(assets):
             out.append({'id': fid, 'hair': has['hair'] and has['hair_textures'], 'hairlod': has['hairlod'],
                         'photo': os.path.isfile(_photo_path(assets, fid))})
     return sorted(out, key=lambda f: f['id'])
+
+
+# ------------------------------------------------------------------ manifest.json (who each face is, credits)
+
+MANIFEST = 'manifest.json'
+MANIFEST_TYPE = 'fs4-faces'
+MANIFEST_VERSION = 1  # highest version this app reads; a newer manifest is ignored (with a warning)
+MANIFEST_MAX_BYTES = 32 * 1024 * 1024
+FACE_TEXT_FIELDS = ('name', 'credits')
+
+
+def manifest_path(assets):
+    """Where a pack's manifest.json is: its root (the folder that holds faces/, heads/... or screenassets/)."""
+    return os.path.join(pack_root(assets), MANIFEST)
+
+
+def _text(value):
+    return value.strip() or None if isinstance(value, str) else None
+
+
+def _face_id(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def read_manifest(assets):
+    """(faces, warnings) of the pack's manifest.json, written by whoever made or gathered the pack (the app only
+    reads it). faces = {face id: {'name', 'credits', 'credits_url'}} (keys only when known) of the faces it lists;
+    a face without credits of its own (neither `credits` nor `credits_url`) gets the pack's (top-level) ones, a face
+    with any of them keeps only its own. warnings = [{'code', 'count'?, 'detail'?}]:
+      manifest_unreadable / manifest_invalid_json / manifest_wrong_type / manifest_newer_version: the whole file is
+        ignored (the pack works as if it had none);
+      manifest_bad_entries: entries skipped (not an object, missing/invalid id, repeated id), the rest is used;
+      manifest_bad_links: credits_url that are not http(s) addresses, dropped.
+    No manifest.json = ({}, [])."""
+    path = manifest_path(assets)
+    if not os.path.isfile(path):
+        return {}, []
+    try:
+        if os.path.getsize(path) > MANIFEST_MAX_BYTES:
+            return {}, [{'code': 'manifest_unreadable', 'detail': 'file too large'}]
+        with open(path, 'rb') as f:
+            text = f.read().decode('utf-8-sig')
+    except (OSError, UnicodeError) as e:
+        return {}, [{'code': 'manifest_unreadable', 'detail': str(e)}]
+    try:
+        data = json.loads(text)
+    except ValueError as e:
+        return {}, [{'code': 'manifest_invalid_json', 'detail': str(e)}]
+    if not isinstance(data, dict) or data.get('type') != MANIFEST_TYPE or not isinstance(data.get('faces', []), list):
+        return {}, [{'code': 'manifest_wrong_type'}]
+    version = data.get('version', 1)
+    if isinstance(version, int) and not isinstance(version, bool) and version > MANIFEST_VERSION:
+        return {}, [{'code': 'manifest_newer_version', 'detail': str(version)}]
+
+    bad_links = 0
+
+    def link(value):
+        nonlocal bad_links
+        url = weblink.normalize(value)
+        if url is None and _text(value):
+            bad_links += 1
+        return url
+
+    pack_credits = {'credits': _text(data.get('credits')), 'credits_url': link(data.get('credits_url'))}
+    faces, bad = {}, 0
+    for entry in data.get('faces', []):
+        fid = _face_id(entry.get('id')) if isinstance(entry, dict) else None
+        if fid is None or fid in faces:
+            bad += 1
+            continue
+        own = {'credits': _text(entry.get('credits')), 'credits_url': link(entry.get('credits_url'))}
+        face = {'name': _text(entry.get('name')), **(own if any(own.values()) else pack_credits)}
+        faces[fid] = {k: v for k, v in face.items() if v}
+    warnings = []
+    if bad:
+        warnings.append({'code': 'manifest_bad_entries', 'count': bad})
+    if bad_links:
+        warnings.append({'code': 'manifest_bad_links', 'count': bad_links})
+    return faces, warnings
 
 
 def read_face(assets, face_id):

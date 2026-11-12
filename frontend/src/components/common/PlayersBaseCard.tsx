@@ -93,7 +93,6 @@ export function PlayersBaseCard({ status }: { status: Status }) {
       }
       await api.saveConfig({ ...status.config, players_base_file: path })
       await queryClient.invalidateQueries({ queryKey: ['status'] })
-      await queryClient.invalidateQueries({ queryKey: ['facepack'] })
       toast.success(path ? t('playersBase.saved') : t('playersBase.removed'))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'))

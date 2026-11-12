@@ -6,7 +6,7 @@ import sys
 import time
 from typing import Literal, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 log = logging.getLogger('fsapi')
 
@@ -43,7 +43,9 @@ class Config(BaseModel):
     save_dir: Optional[str] = None  # profile folder of the save (<Documents>\fifastreet\<profile>\4541097B)
     project_dir: str = DEFAULT_PROJECT_DIR
     backups_dir: str = os.path.join(DATA_DIR, 'backups')
-    face_pack_dir: Optional[str] = None  # FIFA 14 face pack folder, set in the settings (read in place, never written)
+    # FIFA 14-16 face pack folders, set in the settings (read in place, never written); one pack per folder. Until
+    # 12/11/2026 there was a single `face_pack_dir`: it becomes the only item of the list (_one_face_pack_dir)
+    face_pack_dirs: list[str] = []
     players_base_file: Optional[str] = None  # players JSON (fsapi.ea_players contract), read in place, never written
     terms_version: Optional[int] = None  # version of the first-run notice the user accepted (game_setup.TERMS_VERSION)
     # how much of the machine a build may use (fsmod.workers.plan): None = the defaults (all cores but one, 50% of the
@@ -55,6 +57,29 @@ class Config(BaseModel):
     # interface language (added 12/11/2026, optional: older files load unchanged); new notifications are written in it.
     # A value this version does not know (written by a newer one) is dropped instead of refusing the whole file
     language: Optional[Language] = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def _one_face_pack_dir(cls, data):
+        if isinstance(data, dict) and 'face_pack_dir' in data:
+            data = dict(data)
+            old = data.pop('face_pack_dir')
+            if 'face_pack_dirs' not in data:
+                data['face_pack_dirs'] = [old] if isinstance(old, str) and old.strip() else []
+        return data
+
+    @field_validator('face_pack_dirs', mode='after')
+    @classmethod
+    def _clean_face_pack_dirs(cls, v):
+        """Trimmed, without empty items or repeated folders (same folder in another case / with a trailing slash)."""
+        out, seen = [], set()
+        for folder in v:
+            folder = folder.strip()
+            key = os.path.normcase(os.path.normpath(folder)) if folder else None
+            if key and key not in seen:
+                seen.add(key)
+                out.append(folder)
+        return out
 
     @field_validator('language', mode='before')
     @classmethod

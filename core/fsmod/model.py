@@ -9,14 +9,17 @@ from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from . import weblink
+
 # project file format: bump it whenever the layout changes (older files are converted when read, and an app that
 # predates the new number refuses the file instead of dropping what it does not know). 3 = teams in several leagues,
 # players in several teams and the game's own entries (original_id); 4 = street kits with a list of pieces per part;
 # 5 = world_tour (players of the friendly match); 6 = boots (the user's and edited game boots) and Player.boots;
 # 7 = goalkeeper gloves (the user's and edited game gloves) and Player.glove; 8 = balls (the user's and edited game
 # balls) and the ball of each stadium (originals.stadium_balls); 9 = created_at / updated_at of every entry;
-# 10 = a new player's empty birthdate means "no birth date" (before: the template's date, filled in on upgrade)
-CONTRACT_VERSION = 10
+# 10 = a new player's empty birthdate means "no birth date" (before: the template's date, filled in on upgrade);
+# 11 = name, credits and credits_url of a real face (copied from the face pack's manifest.json)
+CONTRACT_VERSION = 11
 NO_NATIONALITY = 0  # Player.fields['nationality'] of a player with no nationality
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
@@ -134,6 +137,16 @@ class ScannedFace(BaseModel):
     folder (scanface.PROJECT_DIR/<player uid>/, pack names) when the user picks it; the build converts them."""
     source_id: int  # id of the face in the pack (its file names)
     pack: Optional[str] = None  # pack folder it came from, for reference only
+    # what the pack's manifest.json (fsmod.facepack.read_manifest) said about the face when it was picked: kept here
+    # so the app shows it without the pack folder, and the player's share zip carries it. Missing = nothing known
+    name: Optional[str] = None
+    credits: Optional[str] = None
+    credits_url: Optional[str] = None  # http(s) only (fsmod.weblink.normalize)
+
+    @field_validator('credits_url', mode='before')
+    @classmethod
+    def _web_link(cls, v):
+        return weblink.normalize(v) if isinstance(v, str) else None
     paint_scalp: bool = True  # paint the hair color on the scalp (scanface.paint_scalp). Missing = on, as older
     # versions saved it; new faces come with False (/api/facepack/use, 06/11/2026: it helps few faces and stains
     # others, e.g. the forehead of faces whose cap hangs over it, or the ears)
@@ -425,7 +438,7 @@ class WorldTour(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10, 11] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []

@@ -52,7 +52,7 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 |---|---|
 | `GET /api/status` | missing original files, config, `setup` (first-run state: `required`/`reasons`, the app's originals checked, ReStreet version, patch installed in the game and files changed outside the app — cheap, only changed files are hashed), project, patch state (`up_to_date` = built from the saved project) |
 | `POST /api/setup/check` `{game_dir}` | checks a game folder: ReStreet root, version (`online-patch.json`), SHA-1 of the 12 files against the official ones (`fsapi/game_setup.py`), guess of the save folder |
-| `POST /api/setup/apply` `{game_dir, save_dir, face_pack_dir, terms_version}` | saves the first-run choices; imports the 12 originals from the game (only official files) when the app does not have them verified |
+| `POST /api/setup/apply` `{game_dir, save_dir, face_pack_dirs, terms_version}` | saves the first-run choices; imports the 12 originals from the game (only official files) when the app does not have them verified |
 | `POST /api/dialog/folder?initial=` | Windows folder picker on this machine; `{folder}` or null |
 | `GET/PUT /api/config` | local settings (`PUT` keeps the saved `language`) |
 | `PUT /api/config/language` `{language}` | interface language (`pt-BR` / `en`); new notifications are written in it |
@@ -113,12 +113,13 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `GET /api/preview/game-head/{playerid}/{asset}` | one of the game's own scanned heads as it is (same assets as `/api/preview/scanned`) |
 | `GET /api/preview/kit/{jersey\|shorts}.png?color=r,g,b&crest=images/x.png` | team kit texture: solid color + crest decal + shading (shorts also cover the socks) |
 | `GET /api/preview/face.png?headtypecode=&eyebrowcode=&sideburnscode=&facialhaircolorcode=&facialhairtypecode=&skintypecode=&skintonecode=` | face texture the game picks (skin, eyebrows, beard baked in) |
-| `GET /api/facepack[?folder=]` | complete faces of the FIFA 14 face pack folder of the settings (`face_pack_dir`), or of `folder` (to check it before saving); read in place, never written. Each face says who the player is (`player`: name, club, nationality from the players base of the settings, `players_base_file`, by EA player id; `null` without a base or for an unknown id) |
+| `GET /api/facepack?offset=&limit=&q=&pack=` | one page of the faces of all the face pack folders of the settings (`face_pack_dirs`, one pack per folder; read in place, never written), in their order, then by id: `{total, items, packs}`. Item: `{id, hair, hairlod, photo, folder, pack}` + `name`, `credits`, `credits_url` when the pack's `manifest.json` lists the face (below). `q` looks in id, name, credits and pack name (no accents, no case); `pack` = folder of one pack. Packs are indexed in memory and read again when their folders or manifest change |
+| `GET /api/facepack/packs[?folder=…]` | the face pack folders of the settings, or the `folder`s given (checked before saving): `[{folder, name, count, warnings, error}]` (`error: facepack_not_found` = folder without faces; `warnings` = problems of its `manifest.json`) |
 | `POST /api/players-base/check` `{file}` | checks a players JSON against the contract (`fsapi/ea_players.py`): `{players, skipped, problems}`; 400 with `code` when the file cannot be used |
 | `POST /api/players-base/browse` | Windows file picker for the players JSON; `{file}` or null |
 | `POST /api/facepack/browse` | opens the Windows folder picker on this machine (tkinter, topmost); `{folder}` or null when cancelled |
-| `GET /api/facepack/thumb.png?face=&folder=\|player=` | face seen from the front (gallery), from the pack or from the project |
-| `POST /api/facepack/use` `{folder, face_id, player}` | copies that face's pack files into the project (`faces/<player uid>/`); the client then sets `player.face` (comes with `paint_scalp: false`) |
+| `GET /api/facepack/thumb.png?face=&folder=\|player=` | face seen from the front (gallery), from the pack or from the project; also kept on disk in `cache/faces/thumbs/` |
+| `POST /api/facepack/use` `{folder, face_id, player}` | copies that face's pack files into the project (`faces/<player uid>/`); the client then sets `player.face` (comes with `paint_scalp: false` and the face's `name`, `credits`, `credits_url` from the pack's manifest, kept in the player and in its share zip) |
 | `GET /api/facepack/hair-color?face=&folder=\|player=` | `{haircolorcode}`: the game hair color closest to the face's own hair (`scanface.hair_rgb` + `preview.nearest_hair_color`), suggested when a face is looked at; `null` without hair |
 | `GET /api/preview/scanned/{head.glb\|hair.glb\|hairlod.glb\|face.png\|eyes.png\|hair.png\|cap.png\|strands.png}?face=&haircolor=&folder=\|player=` | real face converted exactly like the build will (`fsmod.scanface`, ~3 s, cached) |
 | `GET /api/preview/lodhead.glb` | head every player has at the normal play camera (`body/playerlod_head.rx3`) |
@@ -137,6 +138,42 @@ Errors: every error comes back as `{"detail": {"code", ...}}`. Unexpected ones a
 `database.json` that cannot be opened is a 409 `project_unreadable` / `project_too_new` / `project_invalid` (the file
 is never touched). Errors with a code are logged (with the time) as well as the tracebacks; a broken `config.json` is
 kept aside as `config.broken-<time>.json` and the app starts with the defaults.
+
+## Face packs and their manifest.json
+
+Real faces come from FIFA 14–16 face packs the user keeps on disk and lists in the settings (`face_pack_dirs`, one
+pack per folder; the folder holds `faces/`, `heads/`, `hair/`, `hairlod/`, directly or inside `screenassets/`). The app
+only reads them. Files of a face `<id>`: `faces/face_<id>_0_0_0_0_0_0_0_0_textures.rx3` and `heads/head_<id>_0.rx3`
+(required), `heads/eyes_<id>_0_textures.rx3`, `hair/hair_<id>_0_0.rx3` (hair mesh) + `hair/hair_<id>_0_textures.rx3`
+(hair texture; both or no hair), `hairlod/hairlod_<id>_0_0.rx3` (far hair). On the player screen a folder can also
+be opened for that visit only (`GET /api/facepack?folder=`): only its faces, the settings unchanged. Face files are named by an id (`face_<id>_…`), which says nothing about who the player is, so each
+pack may have a `manifest.json` at its root (next to `faces/`… or to `screenassets/`), made by whoever sets the folder:
+
+```json
+{
+  "type": "fs4-faces",
+  "version": 1,
+  "credits": "Colgado",
+  "credits_url": "https://www.soccergaming.com",
+  "faces": [
+    { "id": 51318, "name": "Luis Brahim Palma" },
+    { "id": 51371, "name": "Michael Alexander", "credits": "Other author", "credits_url": "https://example.com" }
+  ]
+}
+```
+
+- `type` must be `"fs4-faces"`; `version` (default 1) higher than the app knows = the file is ignored.
+- `faces[].id` (number, or digits as text) is required; everything else is optional.
+- `credits` / `credits_url` at the top are the pack's: they apply to every listed face without credits of its own. A
+  face with `credits` or `credits_url` of its own uses only its own (useful for a folder that gathers faces of several
+  authors: leave the top empty and credit each face).
+- `credits_url`: only `http://` / `https://` addresses (an address without scheme, `www.site.com`, gets `https://`);
+  anything else is dropped.
+- A face the manifest does not list shows only its id; an entry whose face files are not in the pack is not shown.
+- A broken file (invalid JSON, wrong `type`) is reported in the gallery and the pack works as if it had none; bad
+  entries (no id, repeated id) are skipped one by one.
+- When a face is used, its `name`, `credits` and `credits_url` are copied into the player (`ScannedFace`), so they
+  stay without the pack and go with the player in its share zip.
 
 Both folders below mirror the root folder of a ReStreet 2.x install, so it is always clear where each
 file comes from or goes to: `Game/` here = `Game/` in the game (ReStreet 1.x called it `GameData`).

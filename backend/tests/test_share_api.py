@@ -164,7 +164,9 @@ def test_player_goes_with_his_face(env):
         with open(path, 'wb') as f:
             f.write(b'RX3 ' + kind.encode())
     save(client, {'players': [player(teams=(('t1', 10), (1, 7)), photo=image(client), generic=False,
-                                     face={'source_id': 4242}, boots={'street': 'b1'}, glove=3)]})
+                                     face={'source_id': 4242, 'pack': 'colgado', 'name': 'Luis Palma',
+                                           'credits': 'Colgado', 'credits_url': 'https://colgado.com'},
+                                     boots={'street': 'b1'}, glove=3)]})
     data = export(client, 'players', ['p1'])
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         item = json.loads(z.read('manifest.json'))['player']
@@ -176,7 +178,10 @@ def test_player_goes_with_his_face(env):
     save(client, {})
     _, items = import_all(client, 'players', data)
     pl = items[0]
-    assert pl['face']['source_id'] == 4242 and pl['generic'] is False
+    assert pl['generic'] is False
+    face = {k: pl['face'].get(k) for k in ('source_id', 'pack', 'name', 'credits', 'credits_url')}
+    assert face == {'source_id': 4242, 'pack': 'colgado', 'name': 'Luis Palma', 'credits': 'Colgado',
+                    'credits_url': 'https://colgado.com'}  # who the face is and who made it go with it
     assert [lk['team'] for lk in pl['teams']] == ['t1', 1]
     for kind in scanface.REQUIRED:
         with open(os.path.join(face_dir, *scanface.FILES[kind].format(4242).split('/')), 'rb') as f:

@@ -263,6 +263,10 @@ export interface ScannedFace {
   paint_scalp?: boolean // hair color painted on the scalp by the converter (missing = true, as older versions saved it; new faces come with false)
   hair_mode?: HairMode // hair converter (default 'standard')
   hair_thickness?: number // strand thickness of the 'split_sharp_thick' converter (0..0.9, default 0.4)
+  // what the pack's manifest.json said about the face when it was picked (kept: shown without the pack folder)
+  name?: string
+  credits?: string
+  credits_url?: string // http(s) only
 }
 
 /** Hair converters of fsmod.scanface.HAIR_MODES, in the order shown in the editor. */
@@ -272,12 +276,45 @@ export type HairMode = (typeof HAIR_MODES)[number]
 export const THICK_HAIR_MODES: readonly HairMode[] = ['split_sharp_thick']
 export const HAIR_THICKNESS = { default: 0.4, max: 0.9, step: 0.1 }
 
+/** A face of a pack folder of the settings; name and credits only when the pack's manifest.json lists it. */
 export interface FacePackFace {
   id: number
   hair: boolean
   hairlod: boolean
   photo: boolean
-  player: FacePlayer | null // who the face is (EA players base, by id); null when the base does not know the id
+  folder: string // the pack folder (with id, identifies the face: the same id may exist in several packs)
+  pack: string // the pack's name (its folder name)
+  name?: string
+  credits?: string
+  credits_url?: string
+}
+
+/** A problem of a pack's manifest.json (fsmod.facepack.read_manifest). */
+export interface FacePackWarning {
+  code:
+    | 'manifest_unreadable'
+    | 'manifest_invalid_json'
+    | 'manifest_wrong_type'
+    | 'manifest_newer_version'
+    | 'manifest_bad_entries'
+    | 'manifest_bad_links'
+  count?: number
+  detail?: string
+}
+
+/** A face pack folder of the settings. */
+export interface FacePackSummary {
+  folder: string
+  name: string
+  count: number
+  warnings: FacePackWarning[]
+  error: string | null // 'facepack_not_found': a folder without faces
+}
+
+export interface FacePackPage {
+  total: number
+  items: FacePackFace[]
+  packs: FacePackSummary[]
 }
 
 export interface FacePlayer {
@@ -298,12 +335,6 @@ export interface BasePlayer extends FacePlayer {
   preferred_foot?: 'Right' | 'Left'
   nation_id?: number // game nation matching `nationality`
   skills?: Record<string, number> // ATH..SPE (1-99) and TRI (0-4), converted from the FIFA attributes
-}
-
-export interface FacePack {
-  folder: string
-  name: string
-  faces: FacePackFace[]
 }
 
 /** Changes to the game's own leagues, teams and stadiums (only what differs from the game). */
@@ -386,7 +417,7 @@ export interface Config {
   save_dir: string | null
   project_dir: string
   backups_dir: string
-  face_pack_dir?: string | null
+  face_pack_dirs?: string[] // face pack folders (FIFA 14-16), one pack each, read in place
   players_base_file?: string | null // players JSON (who each EA player id is), read in place
   terms_version?: number | null // version of the first-run notice the user accepted
   build_cores?: number | null // cores the build may use (null = all but one)

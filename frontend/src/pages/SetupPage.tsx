@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from '@/lib/notify'
 import { ApiError, api } from '@/api/client'
 import { BuildResourcesFields } from '@/components/common/BuildResources'
+import { FacePackFolders } from '@/components/common/FacePackFolders'
+import { cleanFolders } from '@/lib/folders'
 import type { GameCheck, Status } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -110,7 +112,7 @@ export function SetupPage({ status }: { status: Status }) {
   const cfg = status.config
   const [gameDir, setGameDir] = useState(cfg.game_dir ?? '')
   const [saveDir, setSaveDir] = useState(cfg.save_dir ?? '')
-  const [facePackDir, setFacePackDir] = useState(cfg.face_pack_dir ?? '')
+  const [facePackDirs, setFacePackDirs] = useState(cfg.face_pack_dirs ?? [])
   const [check, setCheck] = useState<GameCheck | null>(null)
   const [checking, setChecking] = useState(false)
   const [accepted, setAccepted] = useState(cfg.terms_version === status.setup.terms_version)
@@ -148,7 +150,7 @@ export function SetupPage({ status }: { status: Status }) {
       const r = await api.setupApply({
         game_dir: gameDir.trim(),
         save_dir: saveDir.trim(),
-        face_pack_dir: facePackDir.trim() || null,
+        face_pack_dirs: cleanFolders(facePackDirs),
         terms_version: status.setup.terms_version,
         build_cores: build.build_cores ?? null,
         build_memory_percent: build.build_memory_percent ?? null,
@@ -196,7 +198,7 @@ export function SetupPage({ status }: { status: Status }) {
             <p className="text-xs text-muted-foreground">{t('setup.saveDirHint')}</p>
           </Step>
           <Step n={3} title={t('settings.facePackDir')}>
-            <FolderInput value={facePackDir} onChange={setFacePackDir} placeholder={t('settings.facePackPlaceholder')} />
+            <FacePackFolders value={facePackDirs} onChange={setFacePackDirs} />
             <p className="text-xs text-muted-foreground">{t('setup.facePackHint')}</p>
           </Step>
           <details className="group rounded-md border px-4 py-3">

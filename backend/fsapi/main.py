@@ -75,7 +75,7 @@ class AppState:
         prints = os.path.join(os.path.dirname(os.path.abspath(self.config_path or settings.CONFIG_PATH)),
                               'originals_fingerprints.json')
         self.originals = game_setup.Originals(folder, prints)
-        self.faces = FaceService(self.game)
+        self.faces = FaceService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.original_images = OriginalImages(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.boots = BootService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.gloves = GloveService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
@@ -232,7 +232,7 @@ def create_app(state=None):
     class SetupRequest(BaseModel):
         game_dir: str
         save_dir: str
-        face_pack_dir: str | None = None
+        face_pack_dirs: list[str] = []
         terms_version: int
         build_cores: int | None = None  # brought into range by settings.Config
         build_memory_percent: int | None = None
@@ -250,8 +250,9 @@ def create_app(state=None):
         if not game_setup.is_save_dir(req.save_dir):
             fail('save_dir_invalid', 'Pasta do save não encontrada: abra o jogo uma vez (ele cria a pasta) e indique '
                                      'a pasta 4541097B dentro de Documentos\\fifastreet\\<perfil>.')
-        if req.face_pack_dir:
-            faces_call(state.faces.list, req.face_pack_dir)
+        face_pack_dirs = [f for f in req.face_pack_dirs if f.strip()]
+        for folder in face_pack_dirs:
+            faces_call(state.faces.pack, folder)
         checked = game_setup.check_game(req.game_dir)
         if not checked['accepted']:  # another mod (or a patch copied by hand): the app could not undo it
             fail('game_files_not_official', 'Os arquivos do jogo não são os originais do ReStreet (o jogo já tem algum '
@@ -265,7 +266,7 @@ def create_app(state=None):
             imported = state.originals.import_from(req.game_dir)
             state.load_game(state.game.folder)
         state.config = state.config.model_copy(update={
-            'game_dir': req.game_dir, 'save_dir': req.save_dir, 'face_pack_dir': req.face_pack_dir or None,
+            'game_dir': req.game_dir, 'save_dir': req.save_dir, 'face_pack_dirs': face_pack_dirs,
             'terms_version': req.terms_version, 'build_cores': req.build_cores,
             'build_memory_percent': req.build_memory_percent})
         settings.save_config(state.config, state.config_path)
@@ -1116,20 +1117,31 @@ def create_app(state=None):
     @app.post('/api/facepack/browse')
     def facepack_browse():
         """Opens the Windows folder picker on the user's machine; {'folder': path or None (cancelled)}."""
-        return {'folder': browse_folder(state.config.face_pack_dir, 'Pasta do pack de faces (FIFA 14)')}
+        dirs = state.config.face_pack_dirs
+        return {'folder': browse_folder(dirs[-1] if dirs else None, 'Pasta do pack de faces (FIFA 14)')}
+
+    @app.get('/api/facepack/packs')
+    def facepack_packs(folder: list[str] | None = Query(None)):
+        """The face pack folders of the settings, or the `folder`s given (to check them before saving the settings):
+        [{folder, name, count, warnings, error}] (error = facepack_not_found for a folder without faces; warnings =
+        problems of its manifest.json, fsmod.facepack.read_manifest)."""
+        return {'packs': state.faces.packs(folder if folder is not None else state.config.face_pack_dirs)}
 
     @app.get('/api/facepack')
-    def facepack_list(folder: str | None = None):
-        """Complete faces of a pack folder: the one in the settings (face_pack_dir), or `folder` (to check a folder
-        before saving it in the settings). Each face says who the player is (`player`: name, club, nationality from
-        the players base of the settings, fsapi.ea_players) when there is a base and it knows the id."""
-        folder = folder or state.config.face_pack_dir
-        if not folder:
+    def facepack_page(offset: int = Query(0, ge=0), limit: int = Query(60, ge=1, le=500), q: str = '',
+                      pack: str | None = None, folder: str | None = None):
+        """One page of the faces of all the face pack folders of the settings, in their order, then by id:
+        {total (matching q and pack), items, packs}. Each item: {id, hair, hairlod, photo, folder, pack (name) and,
+        when the pack's manifest.json lists it, name, credits, credits_url}. q looks in the id, name, credits and pack
+        name; pack = folder of one pack only. folder = a folder picked on the player screen for that visit only (only
+        its faces, the settings are not used nor changed)."""
+        if folder:
+            faces_call(state.faces.pack, folder)  # facepack_not_found for a folder without faces
+            return state.faces.page([folder], offset, limit, q)
+        if not state.config.face_pack_dirs:
             raise HTTPException(404, {'code': 'facepack_not_set',
                                       'message': 'Indique a pasta do pack de faces nas Configurações.'})
-        pack = faces_call(state.faces.list, folder)
-        base = state.config.players_base_file
-        return {**pack, 'faces': [{**f, 'player': ea_players.summary(base, f['id'])} for f in pack['faces']]}
+        return state.faces.page(state.config.face_pack_dirs, offset, limit, q, pack)
 
     # ---------------------------------------------------------------- players base (who each EA player id is)
     class PlayersBaseFile(BaseModel):
@@ -1186,11 +1198,13 @@ def create_app(state=None):
 
     @app.post('/api/facepack/use')
     def facepack_use(pick: FacePick):
-        """Copies the face's files into the project (faces/<player uid>/); the client then sets player.face."""
+        """Copies the face's files into the project (faces/<player uid>/); the client then sets player.face, which
+        keeps what the pack's manifest.json says about the face (name, credits, credits_url)."""
         pack = faces_call(state.faces.copy_to_project, pick.folder, pick.face_id, state.store.folder, pick.player)
+        info = faces_call(state.faces.face_info, pick.folder, pick.face_id)
         # scalp paint off by default for new faces (it helps few faces and stains others); a face saved without
         # the field still means on (ScannedFace.paint_scalp), as older versions wrote it
-        return {'face': {'source_id': pick.face_id, 'pack': pack, 'paint_scalp': False}}
+        return {'face': {'source_id': pick.face_id, 'pack': pack, 'paint_scalp': False, **info}}
 
     @app.get('/api/facepack/hair-color')
     def facepack_hair_color(face: int, folder: str | None = None, player: str | None = None):

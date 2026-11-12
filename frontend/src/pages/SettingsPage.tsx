@@ -1,11 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle2, CircleAlert, FolderOpen, Loader2, Settings2, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, CircleAlert, Loader2, Settings2, Trash2 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from '@/lib/notify'
 import { ApiError, api } from '@/api/client'
 import type { Config, Status } from '@/api/types'
 import { BuildResourcesFields } from '@/components/common/BuildResources'
+import { FacePackFolders } from '@/components/common/FacePackFolders'
+import { cleanFolders } from '@/lib/folders'
 import { Field } from '@/components/common/form'
 import { PlayersBaseCard } from '@/components/common/PlayersBaseCard'
 import { ProjectJsonCard } from '@/components/common/ProjectJsonCard'
@@ -190,34 +192,26 @@ export function SettingsPage() {
   if (!status || !config) return <Loader2 className="animate-spin" />
 
   const set = (patch: Partial<Config>) => setConfig({ ...config, ...patch })
-  const browseFaces = async () => {
-    try {
-      const { folder } = await api.browseFacePack()
-      if (folder) set({ face_pack_dir: folder })
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('folder.dialogFailed'))
-    }
-  }
 
   const save = async () => {
     setSaving(true)
     try {
-      const facePackDir = config.face_pack_dir?.trim() || null
-      if (facePackDir) {
-        try {
-          const pack = await api.facePack(facePackDir) // checks the folder before keeping it
-          toast.info(t('settings.facePackFound', { count: pack.faces.length }))
-        } catch (e) {
-          toast.error(e instanceof ApiError ? e.message : t('settings.facePackInvalid'))
+      const facePackDirs = cleanFolders(config.face_pack_dirs ?? [])
+      if (facePackDirs.length) {
+        const { packs } = await api.facePacks(facePackDirs) // checks the folders before keeping them
+        const missing = packs.find((p) => p.error)
+        if (missing) {
+          toast.error(t('settings.facePackInvalid', { folder: missing.folder }))
           return
         }
+        toast.info(t('settings.facePackFound', { count: packs.reduce((n, p) => n + p.count, 0), packs: packs.length }))
       }
       // the game and save folders change only through the setup screen (it checks them)
       await api.saveConfig({
         ...config,
         game_dir: status.config.game_dir,
         save_dir: status.config.save_dir,
-        face_pack_dir: facePackDir,
+        face_pack_dirs: facePackDirs,
         players_base_file: status.config.players_base_file, // saved by its own card
       })
       await queryClient.invalidateQueries({ queryKey: ['status'] })
@@ -251,17 +245,7 @@ export function SettingsPage() {
             label={t('settings.facePackDir')}
             hint={t('settings.facePackDirHint')}
           >
-            <div className="flex gap-1">
-              <Input
-                value={config.face_pack_dir ?? ''}
-                onChange={(e) => set({ face_pack_dir: e.target.value })}
-                placeholder={t('settings.facePackPlaceholder')}
-                className="font-mono"
-              />
-              <Button variant="outline" onClick={() => void browseFaces()} title={t('folder.browseHint')}>
-                <FolderOpen /> {t('common.browse')}
-              </Button>
-            </div>
+            <FacePackFolders value={config.face_pack_dirs ?? []} onChange={(face_pack_dirs) => set({ face_pack_dirs })} />
           </Field>
           <Button onClick={save} disabled={saving}>
             {saving && <Loader2 className="animate-spin" />} {t('settings.save')}

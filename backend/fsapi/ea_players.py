@@ -1,7 +1,8 @@
-"""Players base the user points to in the settings (players_base_file): who each EA player id is. Scanned-face packs
-name their files only by that id (face_<id>_...), so the face gallery shows and searches the players' names with it.
+"""Players base the user points to in the settings (players_base_file): who each EA player id is, for "Usar dados
+da base" on a player (search by name/id/club and copy the record's fields). The face gallery does not use it (since
+12/11/2026 each face pack tells who its faces are in its own manifest.json, fsmod.facepack.read_manifest).
 
-No base ships with the app: each user makes their own and points to it; without one the faces show only their id. The file is read in place, never written.
+No base ships with the app: each user makes their own and points to it. The file is read in place, never written.
 
 CONTRACT (what the app reads; any other field is ignored, so a richer base works too):
     {"players": {"<EA player id>": {"name": "Lamine Yamal", "club": "FC Barcelona", "nationality": "Spain",
@@ -10,7 +11,7 @@ CONTRACT (what the app reads; any other field is ignored, so a richer base works
                                     "preferred_foot": "Left"}}}
   * "players": object whose keys are EA player ids (digits) and whose values are objects; an empty object {} is an
     id the base knows nobody has data for yet and is ignored without a warning;
-  * "name": required, non-empty text (what the gallery shows and searches); "club", "nationality": optional text;
+  * "name": required, non-empty text (what the search shows and looks in); "club", "nationality": optional text;
   * optional, for "Usar dados da base" on a player (each one is offered only when present and valid):
     "first_name", "last_name", "jersey_name" (text), "birth_date" (YYYY-MM-DD), "height_cm", "weight_kg" (whole
     numbers), "preferred_foot" ("Right" / "Left"), "nationality" (English name, matched to the game's nations);
@@ -25,7 +26,7 @@ import os
 import re
 import unicodedata
 
-SUMMARY_FIELDS = ('name', 'club', 'nationality')  # what the gallery shows of each face
+SUMMARY_FIELDS = ('name', 'club', 'nationality')  # what the search shows of each player
 TEXT_FIELDS = SUMMARY_FIELDS + ('first_name', 'last_name', 'jersey_name')
 NUMBER_FIELDS = ('height_cm', 'weight_kg')
 # FIFA attributes -> FIFA Street bars: the weights of EA's card stats (PAC SHO PAS DRI DEF PHY, +GK). Checked
@@ -155,18 +156,6 @@ def check(path):
     """{'players': usable records, 'skipped': records that break the contract, 'problems': first examples}."""
     players, problems = _read(path)
     return {'players': len(players), 'skipped': len(problems), 'problems': problems[:MAX_EXAMPLES]}
-
-
-def summary(path, player_id):
-    """{'name', 'club', 'nationality'} (the ones the base has) of an EA player id, or None (no base, unusable base,
-    or an id the base does not know)."""
-    if not path:
-        return None
-    try:
-        rec = _read(path)[0].get(player_id)
-    except PlayersBaseError:
-        return None
-    return {k: rec[k] for k in SUMMARY_FIELDS if k in rec} if rec else None
 
 
 def _fold(text):

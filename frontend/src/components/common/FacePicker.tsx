@@ -1,13 +1,13 @@
-import { useQuery } from '@tanstack/react-query'
-import { Check, FolderOpen, LoaderCircle, Search, Settings, Undo2, X } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { AlertTriangle, Check, FolderOpen, LoaderCircle, Settings, Undo2, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from '@/lib/notify'
 import { ApiError, api, faceThumbUrl } from '@/api/client'
-import type { FacePack, FacePackFace, Player, ScannedFace } from '@/api/types'
-import { matches } from '@/components/common/list'
+import type { FacePackFace, FacePackSummary, Player, ScannedFace } from '@/api/types'
+import { CreditsLink } from '@/components/common/CreditsLink'
+import { ALL, FilterSelect, Pager, SearchInput } from '@/components/common/list'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useProject } from '@/state/project'
@@ -19,14 +19,17 @@ export interface BrowsedFace {
   face: FacePackFace
 }
 
-// Real faces from a FIFA 14 pack (user's choice, 21/10): the pack stays where the user keeps it (the backend reads
-// it in place; the folder is set in the settings, 23/10); the gallery shows each face from the front (the
-// pack's ids say nothing about who the player is); clicking one shows it converted in the 3D preview; "use this
-// face" copies only that face's files into the project. "Browse another folder" (24/10) opens another pack only while
-// this screen is open: leaving it goes back to the folder of the settings. Names (25/10): the backend tells who each
-// face is from the EA players base (the face id is the EA player id); the gallery shows the name and searches by id
-// or name (accents ignored).
-const fold = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+// Real faces from FIFA 14-16 packs (user's choice, 21/10): the packs stay where the user keeps them (the backend
+// reads them in place; the folders are set in the settings, several since 12/11); the gallery shows each face from
+// the front, one page at a time (the backend pages and searches: there may be thousands of faces); clicking one shows
+// it converted in the 3D preview; "use this face" copies only that face's files into the project. Who the face is
+// and who made it come from the pack's manifest.json (12/11; before, from the players base): a face it does not list
+// shows only its id. The same id may exist in two packs: a face is its folder + id. "Browse another folder" (24/10,
+// kept on 12/11 at the user's request) shows only the faces of a folder picked here, for this visit (e.g. a face just
+// downloaded, to try it without adding it to the settings); a face used from it is copied like any other.
+const SEARCH_DELAY_MS = 300
+
+const sameFace = (a: { folder: string; id: number }, b: { folder: string; id: number }) => a.folder === b.folder && a.id === b.id
 
 export function FacePicker({
   player,
@@ -45,38 +48,59 @@ export function FacePicker({
 }) {
   const { t } = useI18n()
   const { updatePlayer } = useProject()
-  const defaultDir = useStatus().data?.config.face_pack_dir
-  const [otherDir, setOtherDir] = useState<string | null>(null) // folder picked here, for this visit only
-  const packDir = otherDir ?? defaultDir
-  const packQuery = useQuery({
-    queryKey: ['facepack', packDir],
-    queryFn: () => api.facePack(otherDir ?? undefined),
-    enabled: !!packDir,
-    retry: false,
-  })
-  const pack: FacePack | null = packQuery.data ?? null
-  const [picking, setPicking] = useState(false)
-  const [filter, setFilter] = useState('')
+  const folders = useStatus().data?.config.face_pack_dirs ?? []
+  // folder picked here for this visit only (e.g. a face just downloaded): only its faces; leaving the screen forgets it
+  const [otherDir, setOtherDir] = useState<string | null>(null)
   const [choosing, setChoosing] = useState(false)
+  const [filter, setFilter] = useState('')
+  const [search, setSearch] = useState('') // filter after the user stops typing
+  const [pack, setPack] = useState(ALL)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [picking, setPicking] = useState(false)
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(filter.trim())
+      setPage(1)
+    }, SEARCH_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [filter])
+
+  const pageQuery = useQuery({
+    queryKey: ['facepack', otherDir ?? folders, search, pack, page, pageSize],
+    queryFn: () =>
+      api.facePage({
+        offset: (page - 1) * pageSize,
+        limit: pageSize,
+        q: search,
+        ...(otherDir ? { folder: otherDir } : { pack: pack === ALL ? undefined : pack }),
+      }),
+    enabled: !!otherDir || folders.length > 0,
+    retry: false,
+    placeholderData: keepPreviousData,
+  })
+  const data = pageQuery.data
+  const packs: FacePackSummary[] = data?.packs ?? []
+  const pages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))
+
+  const showFolder = (folder: string | null) => {
+    setOtherDir(folder)
+    setPack(ALL)
+    setPage(1)
+    onBrowse(null)
+  }
 
   const browseOther = async () => {
     setChoosing(true)
     try {
-      const { folder } = await api.browseFolder(packDir)
-      if (folder) {
-        setOtherDir(folder)
-        onBrowse(null)
-      }
+      const { folder } = await api.browseFolder(otherDir ?? folders[folders.length - 1] ?? null)
+      if (folder) showFolder(folder)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('folder.pickFailed'))
     } finally {
       setChoosing(false)
     }
-  }
-
-  const backToDefault = () => {
-    setOtherDir(null)
-    onBrowse(null)
   }
 
   const pick = async () => {
@@ -98,23 +122,33 @@ export function FacePicker({
     }
   }
 
-  const faces = useMemo(
-    () => (pack?.faces ?? []).filter((f) => matches(fold(filter), String(f.id), f.player && fold(f.player.name))),
-    [pack, filter],
+  const current = player.face
+  const isCurrent = (f: FacePackFace) => !!current && current.source_id === f.id && (!current.pack || current.pack === f.pack)
+  const goToSettings = (label: string) => (
+    <Button variant="outline" size="sm" asChild>
+      <Link to="/settings">
+        <Settings /> {label}
+      </Link>
+    </Button>
   )
-  const currentPlayer = player.face && pack?.faces.find((f) => f.id === player.face?.source_id)?.player
 
   return (
     <div className="flex flex-col gap-3">
-      {player.face && (
+      {current && (
         <div className="flex items-center gap-3 rounded-md border p-2">
-          <img src={faceThumbUrl({ player: player.uid, face: player.face.source_id })} alt="" className="size-14 rounded bg-muted object-contain" />
+          <img src={faceThumbUrl({ player: player.uid, face: current.source_id })} alt="" className="size-14 rounded bg-muted object-contain" />
           <div className="min-w-0 text-sm">
             <p className="font-medium">
-              {currentPlayer ? `${currentPlayer.name} · ` : ''}
-              {t('faces.face', { id: player.face.source_id })}
+              {current.name ? `${current.name} · ` : ''}
+              {t('faces.face', { id: current.source_id })}
             </p>
-            <p className="truncate text-xs text-muted-foreground">{t('faces.copiedInProject', { pack: player.face.pack ?? t('faces.unknownPack') })}</p>
+            <p className="truncate text-xs text-muted-foreground">{t('faces.copiedInProject', { pack: current.pack ?? t('faces.unknownPack') })}</p>
+            {(current.credits || current.credits_url) && (
+              <p className="truncate text-xs text-muted-foreground">
+                {t('credits.by', { credits: '' })}
+                <CreditsLink credits={current.credits} url={current.credits_url} />
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -128,8 +162,8 @@ export function FacePicker({
             <span className="min-w-0 truncate font-mono" title={otherDir}>
               {otherDir}
             </span>
-            <Button variant="ghost" size="sm" onClick={backToDefault}>
-              <Undo2 /> {defaultDir ? t('faces.backToDefault') : t('faces.closeFolder')}
+            <Button variant="ghost" size="sm" onClick={() => showFolder(null)}>
+              <Undo2 /> {folders.length ? t('faces.backToDefault') : t('faces.closeFolder')}
             </Button>
           </>
         ) : (
@@ -137,65 +171,69 @@ export function FacePicker({
         )}
       </div>
 
-      {!packDir ? (
+      {!otherDir && !folders.length ? (
         <div className="flex flex-col items-start gap-2 rounded-md border border-dashed p-3 text-sm">
           <p className="text-muted-foreground">{t('faces.setPackFirst')}</p>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/settings">
-              <Settings /> {t('faces.goToSettings')}
-            </Link>
-          </Button>
+          {goToSettings(t('faces.goToSettings'))}
         </div>
-      ) : packQuery.isLoading ? (
+      ) : pageQuery.isLoading ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <LoaderCircle className="size-4 animate-spin" /> {t('faces.opening')}
         </p>
-      ) : packQuery.error ? (
+      ) : pageQuery.error ? (
         <div className="flex flex-col items-start gap-2 rounded-md border border-destructive/40 p-3 text-sm">
-          <p className="text-destructive">
-            {packQuery.error instanceof ApiError ? packQuery.error.message : t('faces.openFailed')}
-          </p>
-          {!otherDir && (
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/settings">
-                <Settings /> {t('faces.checkSettings')}
-              </Link>
-            </Button>
-          )}
+          <p className="text-destructive">{pageQuery.error instanceof ApiError ? pageQuery.error.message : t('faces.openFailed')}</p>
+          {!otherDir && goToSettings(t('faces.checkSettings'))}
         </div>
       ) : null}
 
-      {pack && (
+      {data && (
         <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm">
-              <span className="font-medium">{pack.name}</span> <span className="text-muted-foreground">· {t('faces.count', { count: pack.faces.length })}</span>
-            </p>
-            <div className="relative w-44">
-              <Search className="absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('faces.filter')} className="h-7 pl-7 text-xs" />
-            </div>
+          <PackProblems packs={packs} />
+          <div className="flex flex-wrap items-center gap-2">
+            {packs.length > 1 && (
+              <FilterSelect
+                value={pack}
+                onChange={(v) => {
+                  setPack(v)
+                  setPage(1)
+                }}
+                className="w-48"
+                options={[
+                  { value: ALL, label: t('faces.allPacks', { count: packs.reduce((n, p) => n + p.count, 0) }) },
+                  ...packs.filter((p) => !p.error).map((p) => ({ value: p.folder, label: t('faces.packOption', { name: p.name, count: p.count }) })),
+                ]}
+              />
+            )}
+            <SearchInput value={filter} onChange={setFilter} placeholder={t('faces.filter')} className="min-w-40 flex-1" />
+            {pageQuery.isFetching && <LoaderCircle className="size-4 animate-spin text-muted-foreground" />}
           </div>
           <div className="grid max-h-[26rem] grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-1.5 overflow-y-auto rounded-md border bg-muted/30 p-1.5">
-            {faces.map((f) => {
-              const selected = browsing?.face.id === f.id && browsing.folder === pack.folder
-              const current = player.face?.source_id === f.id
+            {data.items.map((f) => {
+              const selected = !!browsing && sameFace({ folder: browsing.folder, id: browsing.face.id }, f)
+              const choose = () => onBrowse(selected ? null : { folder: f.folder, face: f })
               return (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => onBrowse(selected ? null : { folder: pack.folder, face: f })}
+                <div
+                  key={`${f.folder}|${f.id}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={choose}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      choose()
+                    }
+                  }}
                   className={cn(
-                    'relative flex flex-col items-center rounded-md border bg-background p-1 text-xs hover:border-primary',
+                    'relative flex cursor-pointer flex-col items-center rounded-md border bg-background p-1 text-xs hover:border-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
                     selected && 'border-primary ring-2 ring-primary/40',
                   )}
-                  title={[
-                    f.player ? [f.player.name, f.player.club, f.player.nationality].filter(Boolean).join(' · ') : t('faces.unknownPlayer'),
-                    t('faces.face', { id: f.id }) + (f.hair ? '' : ` ${t('faces.noHair')}`),
-                  ].join('\n')}
+                  title={[f.name, t('faces.face', { id: f.id }) + (f.hair ? '' : ` ${t('faces.noHair')}`), f.pack, f.credits && t('credits.by', { credits: f.credits })]
+                    .filter(Boolean)
+                    .join('\n')}
                 >
                   <img
-                    src={faceThumbUrl({ folder: pack.folder, face: f.id })}
+                    src={faceThumbUrl({ folder: f.folder, face: f.id })}
                     alt=""
                     loading="lazy"
                     className="aspect-square w-full object-contain"
@@ -203,14 +241,27 @@ export function FacePicker({
                       e.currentTarget.style.visibility = 'hidden' // a face the app cannot read: no broken image icon
                     }}
                   />
-                  <span className="w-full truncate text-center text-[11px] leading-tight">{f.player?.name ?? '—'}</span>
+                  <span className="w-full truncate text-center text-[11px] leading-tight">{f.name ?? '—'}</span>
                   <span className="font-mono text-[10px] text-muted-foreground">{f.id}</span>
-                  {current && <Check className="absolute top-1 left-1 size-3.5 text-primary" />}
-                </button>
+                  {(f.credits || f.credits_url) && (
+                    <CreditsLink credits={f.credits} url={f.credits_url} className="max-w-full text-[10px] text-muted-foreground" />
+                  )}
+                  {isCurrent(f) && <Check className="absolute top-1 left-1 size-3.5 text-primary" />}
+                </div>
               )
             })}
-            {!faces.length && <p className="col-span-full p-4 text-center text-xs text-muted-foreground">{t('faces.none')}</p>}
+            {!data.items.length && <p className="col-span-full p-4 text-center text-xs text-muted-foreground">{t('faces.none')}</p>}
           </div>
+          <Pager
+            page={Math.min(page, pages)}
+            pages={pages}
+            total={data.total}
+            pageSize={pageSize}
+            onPage={(n, size = pageSize) => {
+              setPage(n)
+              setPageSize(size)
+            }}
+          />
         </div>
       )}
 
@@ -221,9 +272,7 @@ export function FacePicker({
           ) : (
             <p className="min-w-0 flex-1">
               {t('faces.viewing')}{' '}
-              <span className="font-medium">
-                {browsing.face.player ? `${browsing.face.player.name} (${browsing.face.id})` : browsing.face.id}
-              </span>{' '}
+              <span className="font-medium">{browsing.face.name ? `${browsing.face.name} (${browsing.face.id})` : browsing.face.id}</span>{' '}
               {t('faces.viewingRest')}
             </p>
           )}
@@ -235,6 +284,29 @@ export function FacePicker({
           </Button>
         </div>
       )}
+    </div>
+  )
+}
+
+/** Folders of the settings without faces and problems of the packs' manifest.json (the gallery still works). */
+export function PackProblems({ packs }: { packs: FacePackSummary[] }) {
+  const { t } = useI18n()
+  const lines = packs.flatMap((p) =>
+    p.error
+      ? [t('faces.packMissing', { folder: p.folder })]
+      : p.warnings.map((w) => t('faces.manifestWarning', { pack: p.name, problem: t(`faces.warning.${w.code}`, { count: w.count ?? 0 }) })),
+  )
+  if (!lines.length) return null
+  return (
+    <div className="flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">
+      <AlertTriangle className="size-3.5 shrink-0" />
+      <ul className="min-w-0 space-y-0.5">
+        {lines.map((line, i) => (
+          <li key={i} className="break-words">
+            {line}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
