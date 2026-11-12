@@ -8,7 +8,9 @@ Thumbnail: data/ui/imgassets/kits/j<kind>_<teamid:05d>.dds (DXT5 256x256), made 
 kind: 0 = Team Home, 1 = Team Away, 2 = goalkeeper (real kits only).
 
 Real kits (build_real): a FIFA 14-16 kit (jersey 2048x2048 and shorts 2048x1024 PNGs, same UV as the game's) drawn
-into the template's jersey_cm / shorts_cm (fsmod.dxt), with the FIFA 16 position table of names/numbers
+into the template's jersey_cm / shorts_cm (fsmod.dxt), grown from 1024x1024 / 1024x512 to REAL_TEXTURES when the
+source is bigger (validated in game 11/11/2026: up close at 4K a texel of the 1024 jersey covered ~3.5-4 screen pixels,
+~1.8 at 2048; 120 FPS kept), with the FIFA 16 position table of names/numbers
 (REAL_POSITIONS), the template's crest_cm made transparent (the crest is painted on the kit) and the thumbnail of the
 pack (or the generic one). Validated in game with Corinthians and Palmeiras.
 """
@@ -20,7 +22,8 @@ from collections import Counter
 from PIL import Image, ImageChops
 
 from . import chunk, rx3tex
-from .crest import square
+from . import crest as crest_module
+from .scanface import resize_texture
 
 THUMBNAIL_TEMPLATE = 'data/ui/imgassets/kits/j0_111072.dds'
 TEMPLATE_TEAM = 1932  # Barnsley (FIFA 12, not in Street): its kits were the first validated in game
@@ -41,6 +44,12 @@ REAL_POSITIONS = (
 # teamkits.numbercolor / shortsnumbercolor: palette of the game (same as FIFA); 1 white, 2 black, ... 19 dark green
 NUMBER_COLORS = (*range(1, 18), 19)
 COLLARS = range(15)  # teamkits.jerseycollargeometrytype: the game has body/jersey_<collar>_* meshes 0-14
+REAL_TEXTURES = {'jersey_cm': (2048, 2048), 'shorts_cm': (2048, 1024)}  # real kit textures (the packs' size)
+THUMBNAIL_SIDES = (256, 512)  # kit-screen thumbnail: 512 when the source is bigger than 256 (validated in game)
+# largest stored source per real kit image (fsapi.project_store reduces bigger ones when the project is saved)
+REAL_SOURCE_MAX = {'jersey': REAL_TEXTURES['jersey_cm'], 'shorts': REAL_TEXTURES['shorts_cm'],
+                   'thumbnail': (THUMBNAIL_SIDES[-1],) * 2}
+THUMBNAIL_CREST_LEVEL = 128  # width of the crest_cm level the kit-screen thumbnail is drawn from
 JERSEY_RATIO, SHORTS_RATIO = 1, 2  # width / height of the kit PNGs (2048x2048, 2048x1024)
 
 
@@ -93,14 +102,18 @@ def build(game, teamid, kind, jersey, shorts=None, crest=None, background=(255, 
     if shorts:
         rx3tex.fill_solid(d, rx3tex.by_name(d, 'shorts_cm'), tuple(shorts))
     if crest is not None:
-        # transparent pixels get the background color (the originals use white); crest_cm is DXT3
-        rx3tex.set_image(d, rx3tex.by_name(d, 'crest_cm'), square(crest.convert('RGBA')), bg=tuple(background))
+        # transparent pixels get the background color (the originals use white); crest_cm is DXT3, made 256 px
+        d = crest_module.set_texture(d, crest, background)
     if erase_original_badge:
         erase_badge(d)
     packed = chunk.chunkzip(bytes(d))
     log(f'{name}: {len(packed)} bytes')
     out = {name: packed}
-    crest_img = rx3tex.to_image(d, rx3tex.by_name(d, 'crest_cm'))
+    t = rx3tex.by_name(d, 'crest_cm')
+    # the thumbnail's crest (26 px) comes from the 128 px level, the size of the template's own crest_cm: the
+    # thumbnails stay the ones validated in game before crest_cm grew to 256
+    level = next((i for i, (_, _, w, _) in enumerate(t['levels']) if w <= THUMBNAIL_CREST_LEVEL), 0)
+    crest_img = rx3tex.to_image(d, t, level)
     _, dds = thumbnail(game, tuple(jersey), crest_img)
     out[thumbnail_name(teamid, kind)] = chunk.chunkzip(dds, 0x40000)
     return out
@@ -150,9 +163,31 @@ def dominant_color(img, box=(.3, .55, .7, .95)):
     return Counter(pixels).most_common(1)[0][0]
 
 
+def limited_size(part, size):
+    """(width, height) of a stored real kit image (part: jersey / shorts / thumbnail) fitted into REAL_SOURCE_MAX, or
+    None when it already fits."""
+    scale = min(REAL_SOURCE_MAX[part][0] / size[0], REAL_SOURCE_MAX[part][1] / size[1])
+    if scale >= 1:
+        return None
+    return max(1, round(size[0] * scale)), max(1, round(size[1] * scale))
+
+
+def set_real_texture(d, name, img):
+    """rx3 data (bytearray) with texture `name` (jersey_cm / shorts_cm, DXT1) holding img; the texture grows to
+    REAL_TEXTURES[name] when img is wider than it. Returns the (possibly new) bytearray."""
+    t = rx3tex.by_name(d, name)
+    size = REAL_TEXTURES[name]
+    if img.width > t['w'] and (t['w'], t['h']) != size:
+        d = bytearray(resize_texture(d, t, *size))
+    rx3tex.set_image_dxt1(d, rx3tex.by_name(d, name), img)
+    return d
+
+
 def thumbnail_dds(img):
-    """Kit-screen thumbnail file from a ready image (the pack's j<kind>_<id>.png / -MK.png, 256x256)."""
-    im = img.convert('RGBA').resize((256, 256), Image.LANCZOS)
+    """Kit-screen thumbnail file from a ready image (the pack's j<kind>_<id>.png / -MK.png, 256x256): 512 px when
+    the image is bigger than 256 (THUMBNAIL_SIDES)."""
+    side = THUMBNAIL_SIDES[1] if max(img.size) > THUMBNAIL_SIDES[0] else THUMBNAIL_SIDES[0]
+    im = img.convert('RGBA').resize((side, side), Image.LANCZOS)
     buf = io.BytesIO()
     im.save(buf, format='DDS', pixel_format='DXT5')
     return chunk.chunkzip(buf.getvalue(), 0x40000)
@@ -162,8 +197,8 @@ def build_real(game, teamid, kind, jersey, shorts, thumb=None, crest=None, log=p
     """Returns {loose file name: bytes}: kit rx3 + thumbnail of teamid from a FIFA 14-16 kit.
     jersey/shorts/thumb/crest = PIL images (thumb None: the generic thumbnail tinted with the jersey's front color)."""
     d = bytearray(chunk.decode(game.read_entry(kit_name(TEMPLATE_TEAM, 0))[2]))
-    rx3tex.set_image_dxt1(d, rx3tex.by_name(d, 'jersey_cm'), jersey)
-    rx3tex.set_image_dxt1(d, rx3tex.by_name(d, 'shorts_cm'), shorts)
+    d = set_real_texture(d, 'jersey_cm', jersey)
+    d = set_real_texture(d, 'shorts_cm', shorts)
     set_positions(d)
     clear_crest(d)
     erase_badge(d)

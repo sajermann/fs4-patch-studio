@@ -5,9 +5,14 @@ Images, boot, glove and ball files: an upload gets a provisional name (UPLOAD_PR
 saved, so "Discard" can go back to the previous file; saving gives every file the fixed name of its entity
 (image_fields, boot_file_fields, glove_file_fields, ball_file_fields) and deletes the images, faces and pack files nothing
 uses any more. Files are kept
-as the user sent them (conversions only happen for the preview and the patch).
+as the user sent them (conversions only happen for the preview and the patch), except images bigger than what the
+patch can use (image_limit: team crests over fsmod.crest.MAX_SOURCE, league images over fsmod.leaguelogo.SOURCE_MIN,
+real kit images over fsmod.kit.REAL_SOURCE_MAX):
+saving reduces them (PNG), and opening a project of an older version does it once (upgrade). The game never draws
+them bigger, and huge sources made every build slow.
 """
 import hashlib
+import io
 import json
 import os
 import re
@@ -15,7 +20,9 @@ import shutil
 import uuid
 import zipfile
 
-from fsmod import model, scanface
+from PIL import Image
+
+from fsmod import crest, kit, leaguelogo, model, scanface
 
 PROJECT_FILE = 'database.json'
 LEGACY_PROJECT_FILE = 'projeto.json'  # name used before 24/10/2026, renamed on start (upgrade)
@@ -72,6 +79,39 @@ def image_fields(project):
         yield g, 'thumbnail', f'gloves/glove-{file_slug(g.uid)}'
     for b in project.balls:
         yield b, 'thumbnail', f'balls/ball-{file_slug(b.uid)}'
+
+
+def image_limit(entity, field):
+    """size -> reduced (width, height) or None, the biggest size the patch uses for this image slot (team crest:
+    fsmod.crest; league images: fsmod.leaguelogo; real kit images: fsmod.kit), or None for slots kept as they are."""
+    if field == 'crest' and isinstance(entity, model.Team):
+        return crest.limited_size
+    if field in ('image', 'wide_image') and isinstance(entity, model.League):
+        return leaguelogo.limited_size
+    if field in model.REAL_KIT_FILES and isinstance(entity, model.RealKit):
+        return lambda size: kit.limited_size(field, size)
+    return None
+
+
+def oversized(path, limit):
+    """True when the image at path is bigger than limit (image_limit) allows (unreadable files: False)."""
+    try:
+        with Image.open(path) as im:
+            return limit(im.size) is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def limited_image(data, limit):
+    """PNG bytes of the image `data` reduced by limit (image_limit), or None when it already fits."""
+    with Image.open(io.BytesIO(data)) as im:
+        size = limit(im.size)
+        if size is None:
+            return None
+        small = im.convert('RGBA').resize(size, Image.LANCZOS)
+    buf = io.BytesIO()
+    small.save(buf, format='PNG')
+    return buf.getvalue()
 
 
 def boot_file_fields(project):
@@ -157,10 +197,24 @@ class ProjectStore:
         project = self._model(data)
         settled = all(not path or path == f'{IMAGES_DIR}/{stem}{os.path.splitext(path)[1].lower()}'
                       for path, stem in ((getattr(e, f), stem) for e, f, stem in image_fields(project)))
-        if settled and not self._loose_images() and not converted:
+        if settled and not self._loose_images() and not converted and not self._oversized_images(project):
             return False
         self.save(project)
         return True
+
+    def _oversized_images(self, project):
+        """Images bigger than the patch uses (image_limit; stored by older versions of the app)."""
+        out = []
+        for entity, field, _ in image_fields(project):
+            relative, limit = getattr(entity, field), image_limit(entity, field)
+            if relative and limit:
+                try:
+                    path = self.image_path(relative)
+                except ValueError:
+                    continue
+                if os.path.isfile(path) and oversized(path, limit):
+                    out.append(path)
+        return out
 
     def _loose_images(self):
         """Files left directly in images/ (old layout, abandoned uploads)."""
@@ -228,7 +282,16 @@ class ProjectStore:
             if not os.path.isfile(source):
                 continue
             with open(source, 'rb') as f:
-                pending.append((entity, field, stem + os.path.splitext(source)[1].lower(), f.read()))
+                data, ext = f.read(), os.path.splitext(source)[1].lower()
+            limit = image_limit(entity, field)
+            if limit:
+                try:
+                    small = limited_image(data, limit)
+                except Exception:  # noqa: BLE001 (an unreadable image is kept as it is)
+                    small = None
+                if small is not None:
+                    data, ext = small, '.png'
+            pending.append((entity, field, stem + ext, data))
         for entity, field, name, data in pending:
             target = os.path.join(self.images_dir, *name.split('/'))
             os.makedirs(os.path.dirname(target), exist_ok=True)

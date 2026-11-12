@@ -451,7 +451,9 @@ export const ptBR = {
   'realKit.title': 'Uniforme real · {slot}',
   'realKit.goalkeeperDescription': 'Vale em casa e fora. Sem camisa e calção, o goleiro usa o uniforme padrão do jogo.',
   'realKit.description': 'Sem camisa e calção, vai o uniforme genérico (cor sólida + escudo).',
-  'realKit.previewHint': 'Mostrar este uniforme na prévia',
+  'realKit.imageSize':
+    'Imagens maiores que {jersey} (camisa), {shorts} (calção) e {thumbnail} (miniatura) são reduzidas para esses tamanhos ao salvar. É o tamanho dos packs do FIFA 14–16 e o que o jogo usa.',
+  'realKit.previewHint':'Mostrar este uniforme na prévia',
   'realKit.preview': 'Prévia',
   'realKit.clear': 'Limpar',
   'realKit.nameColor': 'Cor do nome',
@@ -649,6 +651,8 @@ export const ptBR = {
   'leagueEdit.wideImage': 'Imagem larga (opcional)',
   'leagueEdit.wideImageHint': 'Aparece depois de escolher a liga. Sem ela, usa o logo.',
   'leagueEdit.wideImageFit': 'Imagem larga no espaço',
+  'leagueEdit.imageSize':
+    'Imagens maiores que o necessário são reduzidas ao salvar, mantendo a proporção, até o menor tamanho que ainda cobre {width}×{height} px (um logo quadrado fica com {width}×{width}). É o suficiente para jogar em 4K.',
   'leagueEdit.fitContain': 'Inteira (sobra espaço nas laterais)',
   'leagueEdit.fitCover': 'Preencher (corta o que passar)',
   'common.inherited': '{value} (padrão)',
@@ -674,6 +678,8 @@ export const ptBR = {
   'teamEdit.abbreviation': 'Sigla (3)',
   'teamEdit.crest': 'Escudo',
   'teamEdit.crestDescription': 'PNG com fundo transparente. Ele vai para os menus, a camisa e o calção.',
+  'teamEdit.crestSize':
+    'Imagens maiores que {size} px são reduzidas para {size} px (no lado maior) ao salvar. É o suficiente para jogar em 4K: o jogo não mostra o escudo maior que isso em nenhuma tela.',
   'teamEdit.colors': 'Cores',
   'teamEdit.primaryColor': 'Cor principal',
   'teamEdit.secondaryColor': 'Cor secundária',

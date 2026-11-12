@@ -29,6 +29,9 @@ const EMPTY_KIT: RealKit = {
   front_number: false,
 }
 
+// largest stored image per part (fsmod.kit.REAL_SOURCE_MAX): saving the project reduces bigger images
+const REAL_KIT_MAX = { jersey: '2048×2048', shorts: '2048×1024', thumbnail: '512×512' }
+
 const FILES: { part: RealKitFile; label: MessageKey; hint: MessageKey | string; aspect: string }[] = [
   { part: 'thumbnail', label: 'realKit.thumbnail', hint: 'realKit.optional', aspect: 'aspect-square' },
   { part: 'jersey', label: 'kit.jersey', hint: '2048×2048', aspect: 'aspect-square' },
@@ -200,6 +203,7 @@ function RealKitCard({ team, slot, previewing, onPreview }: { team: Team; slot: 
             />
           ))}
         </div>
+        <p className="text-xs text-muted-foreground">{t('realKit.imageSize', REAL_KIT_MAX)}</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label={t('realKit.nameColor')} entity={team.uid} field={field('name_color')}>
             <ColorInput value={kit.name_color} onChange={(v) => set({ name_color: v })} />

@@ -38,6 +38,9 @@ import { fullKit } from '@/lib/teams'
 import { cn } from '@/lib/utils'
 import { useIssues, useProject, useSameAsGame, useWasEdited } from '@/state/project'
 
+// largest side of a stored crest (fsmod.crest.MAX_SOURCE): saving the project reduces bigger images
+const CREST_MAX_SOURCE = 1024
+
 function DataTab({ team }: { team: Team }) {
   const { t } = useI18n()
   const { updateTeam } = useProject()
@@ -121,6 +124,7 @@ function CrestTab({ team }: { team: Team }) {
               e.target.value = ''
             }}
           />
+          <p className="text-xs text-muted-foreground">{t('teamEdit.crestSize', { size: CREST_MAX_SOURCE })}</p>
           {team.crest && (
             // an original team keeps a crest (the game's one comes back with "Restore original")
             <div className="flex justify-end gap-2">

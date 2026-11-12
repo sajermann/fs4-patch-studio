@@ -113,7 +113,7 @@ class KitColors(BaseModel):
 class RealKit(BaseModel):
     """Real kit of a FIFA 14-16 pack (fsmod.kit.build_real) for one slot: PNGs in the project folder + the teamkits
     fields the pack's author tells (or the user picks). A slot without jersey or shorts is not used."""
-    thumbnail: Optional[str] = None  # kit-screen thumbnail (256x256); None = generic one tinted with the jersey
+    thumbnail: Optional[str] = None  # kit-screen thumbnail (256x256, or up to 512); None = generic one tinted with the jersey
     jersey: Optional[str] = None  # 2048x2048 (any square size)
     shorts: Optional[str] = None  # 2048x1024 (any 2:1 size)
     name_color: RGB = (255, 255, 255)  # jerseynamecolorr/g/b

@@ -453,6 +453,8 @@ export const en: Record<MessageKey, string> = {
   'realKit.title': 'Real kit · {slot}',
   'realKit.goalkeeperDescription': 'Used home and away. Without jersey and shorts, the goalkeeper wears the game\'s default kit.',
   'realKit.description': 'Without jersey and shorts, the generic kit is used (solid color + crest).',
+  'realKit.imageSize':
+    'Images bigger than {jersey} (jersey), {shorts} (shorts) and {thumbnail} (thumbnail) are reduced to those sizes when saved. That is the size of the FIFA 14–16 packs and what the game uses.',
   'realKit.previewHint': 'Show this kit in the preview',
   'realKit.preview': 'Preview',
   'realKit.clear': 'Clear',
@@ -650,6 +652,8 @@ export const en: Record<MessageKey, string> = {
   'leagueEdit.logoHint': 'Shown in the league selector (grid square). A PNG with a transparent background looks best.',
   'leagueEdit.wideImage': 'Wide image (optional)',
   'leagueEdit.wideImageHint': 'Shown after picking the league. Without it, the logo is used.',
+  'leagueEdit.imageSize':
+    'Images bigger than needed are reduced when saved, keeping their proportion, to the smallest size that still covers {width}×{height} px (a square logo becomes {width}×{width}). That is enough for 4K.',
   'leagueEdit.wideImageFit': 'Wide image in its space',
   'leagueEdit.fitContain': 'Whole (space left on the sides)',
   'leagueEdit.fitCover': 'Fill (crops what overflows)',
@@ -676,6 +680,8 @@ export const en: Record<MessageKey, string> = {
   'teamEdit.abbreviation': 'Abbreviation (3)',
   'teamEdit.crest': 'Crest',
   'teamEdit.crestDescription': 'PNG with a transparent background. It goes to the menus, the jersey and the shorts.',
+  'teamEdit.crestSize':
+    'Images bigger than {size} px are reduced to {size} px (longest side) when saved. That is enough for 4K: the game never draws the crest bigger than that.',
   'teamEdit.colors': 'Colors',
   'teamEdit.primaryColor': 'Primary color',
   'teamEdit.secondaryColor': 'Secondary color',

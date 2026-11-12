@@ -34,6 +34,20 @@ FMT_DXT5, FMT_RGBA = 0x14, 0x06
 SCALE = 4  # new images are written at 4x the original size (the menus scale them down; validated in game)
 
 
+# smallest source that still fills every image the app makes from a league image at full quality: the logo also feeds
+# the wide image when there is none, and 'cover' needs both sides (1000x464 at SCALE 4); in game at 4K the wide image
+# is drawn ~750 px wide and the grid square 234 px (measured 11/11/2026), so this is more than enough
+SOURCE_MIN = (max(a[4][0] for a in ASSETS.values()) * SCALE, max(a[4][1] for a in ASSETS.values()) * SCALE)
+
+
+def limited_size(size):
+    """Smallest (width, height) with size's aspect that still covers SOURCE_MIN, or None when size is not bigger."""
+    ratio = max(SOURCE_MIN[0] / size[0], SOURCE_MIN[1] / size[1])
+    if ratio >= 1:
+        return None
+    return max(SOURCE_MIN[0], round(size[0] * ratio)), max(SOURCE_MIN[1], round(size[1] * ratio))
+
+
 def asset_name(asset, key):
     folder, prefix = ASSETS[asset][:2]
     return f'data/ui/artassets/{folder}/{prefix}{key}.big'

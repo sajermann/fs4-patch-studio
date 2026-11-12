@@ -35,6 +35,9 @@ import { editedOriginals, useLeagueName, useLeagueTeams } from '@/lib/teams'
 import { useProject, useSameAsGame, useWasEdited } from '@/state/project'
 import { useOriginalLeagues, useOriginalTeams } from '@/state/queries'
 
+// smallest size a league image keeps (fsmod.leaguelogo.SOURCE_MIN): saving the project reduces bigger images to it
+const LEAGUE_IMAGE_MIN = [1000, 464] as const
+
 /** A team of the league list: a project entry (new team or edited original) or one of the game's as it is. */
 interface LeagueTeam {
   key: TeamKey
@@ -402,6 +405,9 @@ export function LeagueEditPage() {
                 </div>
               </Field>
             </div>
+            <p className="text-xs text-muted-foreground sm:col-span-full">
+              {t('leagueEdit.imageSize', { width: LEAGUE_IMAGE_MIN[0], height: LEAGUE_IMAGE_MIN[1] })}
+            </p>
           </div>
         </CardContent>
       </Card>

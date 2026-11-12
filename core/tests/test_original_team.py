@@ -115,8 +115,10 @@ def test_edited_original_team_keeps_its_id_and_changes_only_what_changed(game, c
     edited = chunk.decode(result.entries['data3.big', kit.kit_name(BARCELONA, 0)])
     game_kit = chunk.decode(game.read_entry(kit.kit_name(BARCELONA, 0))[2])
     from fsmod import rx3tex
-    jersey = rx3tex.by_name(game_kit, 'jersey_cm')
-    assert edited[jersey['off']:jersey['off'] + jersey['size']] == game_kit[jersey['off']:jersey['off'] + jersey['size']]
+    jersey, edited_jersey = rx3tex.by_name(game_kit, 'jersey_cm'), rx3tex.by_name(edited, 'jersey_cm')
+    assert (edited[edited_jersey['off']:edited_jersey['off'] + edited_jersey['size']]
+            == game_kit[jersey['off']:jersey['off'] + jersey['size']])
+    assert rx3tex.by_name(edited, 'crest_cm')['w'] == crest.TEXTURE_SIZE
     assert not result.loose
 
 

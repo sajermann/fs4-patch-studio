@@ -720,9 +720,9 @@ def _edited_kit_files(game, tid, kind_n, shorts_path, crest_img):
     name = kit.kit_name(tid, kind_n)
     d = bytearray(chunk.decode(game.read_entry(name)[2]))
     if shorts_path:
-        rx3tex.set_image_dxt1(d, rx3tex.by_name(d, 'shorts_cm'), Image.open(shorts_path).convert('RGB'))
+        d = kit.set_real_texture(d, 'shorts_cm', Image.open(shorts_path).convert('RGB'))
     if crest_img is not None:
-        rx3tex.set_image(d, rx3tex.by_name(d, 'crest_cm'), crest.square(crest_img), bg=(255, 255, 255))
+        d = crest.set_texture(d, crest_img)
     return {name: chunk.chunkzip(bytes(d))}, [f'{name}: edited']
 
 

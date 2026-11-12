@@ -417,6 +417,89 @@ def test_old_project_layout_is_upgraded(tmp_path):
     assert not migrate_folder(str(old), str(new))  # nothing left to move
 
 
+def big_image(fmt, size):
+    buf = io.BytesIO()
+    Image.new('RGB' if fmt == 'JPEG' else 'RGBA', size, (0, 128, 0)).save(buf, format=fmt)
+    return buf.getvalue()
+
+
+def test_crests_bigger_than_the_limit_are_reduced_on_save(env):
+    from fsmod import crest
+    c, folder = env['client'], env['state'].store.folder
+    project, _ = palmeiras_v2(c)
+    team = project['teams'][0]
+    team['crest'] = c.post('/api/images', files={'file': ('big.webp', big_image('WEBP', (2048, 1536)), 'image/webp')}
+                           ).json()['path']
+    player = project['players'][0]
+    player['photo'] = c.post('/api/images', files={'file': ('p.png', big_image('PNG', (1500, 1500)), 'image/png')}
+                             ).json()['path']
+    saved = c.put('/api/project', json=project).json()['project']
+    assert saved['teams'][0]['crest'] == f"images/teams/team-{team['uid']}.png"  # reduced crests become PNG
+    with Image.open(os.path.join(folder, *saved['teams'][0]['crest'].split('/'))) as im:
+        assert im.size == (crest.MAX_SOURCE, 768)
+    with Image.open(os.path.join(folder, *saved['players'][0]['photo'].split('/'))) as im:
+        assert im.size == (1500, 1500)  # only crests are limited
+    assert os.listdir(os.path.join(folder, 'images', 'teams')) == [f"team-{team['uid']}.png"]
+
+
+def test_league_images_bigger_than_the_patch_uses_are_reduced_on_save(env):
+    from fsmod import leaguelogo
+    c, folder = env['client'], env['state'].store.folder
+    project, _ = palmeiras_v2(c)
+    league = project['leagues'][0]
+    up = lambda name, fmt, size: c.post('/api/images', files={'file': (name, big_image(fmt, size), 'image/png')}
+                                       ).json()['path']
+    league['image'] = up('logo.png', 'PNG', (3000, 3000))
+    league['wide_image'] = up('wide.png', 'PNG', (900, 400))  # smaller than the patch uses: kept as it is
+    saved = c.put('/api/project', json=project).json()['project']['leagues'][0]
+    with Image.open(os.path.join(folder, *saved['image'].split('/'))) as im:
+        assert im.size == (1000, 1000) and max(leaguelogo.SOURCE_MIN) == 1000  # still covers the 1000x464 wide flag
+    with Image.open(os.path.join(folder, *saved['wide_image'].split('/'))) as im:
+        assert im.size == (900, 400)
+
+
+def test_real_kit_images_bigger_than_the_patch_uses_are_reduced_on_save(env):
+    c, folder = env['client'], env['state'].store.folder
+    project, _ = palmeiras_v2(c)
+    team = project['teams'][0]
+    up = lambda size: c.post('/api/images', files={'file': ('k.png', big_image('PNG', size), 'image/png')}
+                             ).json()['path']
+    team['use_real_kits'] = True
+    team['real_kits'] = {'home': {'jersey': up((4096, 4096)), 'shorts': up((2048, 1024)), 'thumbnail': up((1024, 1024))}}
+    saved = c.put('/api/project', json=project).json()['project']['teams'][0]['real_kits']['home']
+    sizes = {}
+    for part in ('jersey', 'shorts', 'thumbnail'):
+        with Image.open(os.path.join(folder, *saved[part].split('/'))) as im:
+            sizes[part] = im.size
+    assert sizes == {'jersey': (2048, 2048), 'shorts': (2048, 1024), 'thumbnail': (512, 512)}
+
+
+def test_big_images_of_an_older_version_are_reduced_when_the_project_opens(tmp_path):
+    from fsapi.project_store import ProjectStore
+    from fsmod import crest
+    folder = tmp_path / 'project'
+    (folder / 'images' / 'teams').mkdir(parents=True)
+    (folder / 'images' / 'teams' / 'team-tm_01.jpg').write_bytes(big_image('JPEG', (3840, 3840)))
+    (folder / 'images' / 'teams' / 'team-tm_02.png').write_bytes(big_image('PNG', (512, 512)))
+    teams = [{'uid': uid, 'name': uid, 'leagues': [], 'primary_color': [0, 0, 0], 'secondary_color': [9, 9, 9],
+              'crest': f'images/teams/team-{uid}.{ext}'} for uid, ext in (('tm_01', 'jpg'), ('tm_02', 'png'))]
+    (folder / 'images' / 'leagues').mkdir()
+    (folder / 'images' / 'leagues' / 'league-lg_01-wide.webp').write_bytes(big_image('WEBP', (4000, 1856)))
+    leagues = [{'uid': 'lg_01', 'name': 'L', 'wide_image': 'images/leagues/league-lg_01-wide.webp'}]
+    (folder / 'database.json').write_text(json.dumps({'version': 3, 'teams': teams, 'leagues': leagues}),
+                                          encoding='utf-8')
+    store = ProjectStore(str(folder))
+    assert store.upgrade() and not store.upgrade()
+    crests = [t.crest for t in store.load().teams]
+    assert crests == ['images/teams/team-tm_01.png', 'images/teams/team-tm_02.png']
+    assert sorted(os.listdir(folder / 'images' / 'teams')) == ['team-tm_01.png', 'team-tm_02.png']
+    with Image.open(folder / 'images' / 'teams' / 'team-tm_01.png') as im:
+        assert im.size == (crest.MAX_SOURCE, crest.MAX_SOURCE)
+    assert store.load().leagues[0].wide_image == 'images/leagues/league-lg_01-wide.png'
+    with Image.open(folder / 'images' / 'leagues' / 'league-lg_01-wide.png') as im:
+        assert im.size == (1000, 464)
+
+
 def test_head_preview_assets(env):
     c = env['client']
     assert c.get('/api/preview/head/10.glb').content[:4] == b'glTF'

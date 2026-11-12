@@ -69,8 +69,9 @@ def palmeiras_team_id(result):
 
 def test_palmeiras_build_matches_the_files_validated_in_game(game, palmeiras_result):
     """Validated in game on ReStreet 1.2 (19/10/2026) in slot 1932 (Mods overlay: byte patches at original offsets).
-    The kits and kit thumbnails are now loose files of the new teamid made from slot 1932's kits: same bytes."""
-    from fsmod import big
+    The kits and kit thumbnails are now loose files of the new teamid made from slot 1932's kits: same bytes, except
+    the kits' crest_cm, 256 px since 11/11/2026 (validated in game on ReStreet 2.1.4)."""
+    from fsmod import big, chunk
     if not os.path.isdir(REFERENCE):
         pytest.skip('validated reference build not available')
     tid = palmeiras_team_id(palmeiras_result)
@@ -86,9 +87,28 @@ def test_palmeiras_build_matches_the_files_validated_in_game(game, palmeiras_res
             continue
         new_name = entry.replace('kit_1932_', f'kit_{tid}_').replace('_01932.dds', f'_{tid:05d}.dds')
         built = palmeiras_result.loose[new_name]
-        assert built == data[:len(built)] and not data[len(built):].strip(b'\0'), new_name
+        if new_name.endswith('.rx3'):
+            assert_same_kit_but_bigger_crest(chunk.decode(built), chunk.decode(data), new_name)
+        else:
+            assert built == data[:len(built)] and not data[len(built):].strip(b'\0'), new_name
         checked += 1
     assert checked == 4  # 2 kits, 2 kit thumbnails
+
+
+def assert_same_kit_but_bigger_crest(built, ref, name):
+    """The validated kit had a 128 px crest_cm; it is 256 px now (crest.TEXTURE_SIZE): its 128 px level must be the
+    validated texture and every other texture is the same, byte for byte."""
+    from fsmod import crest, rx3tex
+    assert [t['name'] for t in rx3tex.textures(built)] == [t['name'] for t in rx3tex.textures(ref)], name
+    for t in rx3tex.textures(ref):
+        b = rx3tex.by_name(built, t['name'])
+        if t['name'] == 'crest_cm':
+            assert (b['w'], b['h']) == (crest.TEXTURE_SIZE, crest.TEXTURE_SIZE), name
+            (q, n, _, _), = [level for level in b['levels'] if level[2] == t['w']]
+            q0, n0 = t['levels'][0][:2]
+            assert built[q:q + n] == ref[q0:q0 + n0], name
+        else:
+            assert built[b['off']:b['off'] + b['size']] == ref[t['off']:t['off'] + t['size']], (name, t['name'])
 
 
 # old layout (PATCH_LAYOUT 'archives'): every file the app can change always goes, whole (original when unchanged)
@@ -194,13 +214,18 @@ def test_write_patch_archives_writes_whole_archives_in_the_v2_layout(game, palme
     assert f'data/sceneassets/kit/kit_{tid}_0_0.rx3' in palmeiras_result.loose
 
 
-def test_menu_crests_are_loose_files_twice_the_original_size(game, palmeiras_result, palmeiras_patch):
-    from fsmod import crest
+def test_crests_are_loose_files_at_the_4k_sizes(game, palmeiras_result, palmeiras_patch):
+    from fsmod import chunk, crest, rx3tex
     tid = palmeiras_team_id(palmeiras_result)
     assert not game.locate(crest.ui_crest_name('large', tid))
-    for label, px in crest.UI_SIZES:
+    sizes = {}
+    for label, _ in crest.UI_SIZES:
         stored = read(os.path.join(palmeiras_patch, 'Game', *crest.ui_crest_name(label, tid).split('/')))
-        assert dds_size(stored) == (px * crest.SCALE, px * crest.SCALE)
+        sizes[label] = dds_size(stored)
+    assert sizes == {'large': (512, 512), 'medium': (512, 512), 'small': (256, 256)}
+    scene = chunk.decode(palmeiras_result.loose[crest.scene_crest_name(tid)])
+    t = rx3tex.by_name(scene, 'crest_cm')
+    assert (t['w'], t['h'], len(t['levels'])) == (256, 256, 9)
 
 
 def test_write_patch_archives_reuses_archives_and_restores_old_entries(game, palmeiras_result, tmp_path, monkeypatch):
@@ -770,3 +795,28 @@ def test_generated_players_build(game):
     assert len(project.players) == builder.MAX_ROSTER
     result = builder.build(project, game, PALMEIRAS)
     assert result.entries
+
+
+def test_real_kits_use_the_packs_resolution(game):
+    """Real kit textures grow to 2048x2048 / 2048x1024 when the pack is bigger than the template's 1024 (validated in
+    game with the KT2 test, 11/11/2026); a 1024 pack keeps the template's size. Thumbnails: 512 above 256."""
+    import io
+    from PIL import Image
+    from fsmod import chunk, kit, rx3tex
+    for jersey_side, thumb_side, expected in ((2048, 400, ((2048, 2048), (2048, 1024), 512)),
+                                               (1024, 256, ((1024, 1024), (1024, 512), 256))):
+        jersey = Image.new('RGB', (jersey_side, jersey_side), (200, 0, 0))
+        shorts = Image.new('RGB', (jersey_side, jersey_side // 2), (0, 0, 200))
+        thumb = Image.new('RGBA', (thumb_side, thumb_side), (0, 200, 0, 255))
+        files = kit.build_real(game, 150000, 0, jersey, shorts, thumb, log=lambda s: None)
+        d = chunk.decode(files[kit.kit_name(150000, 0)])
+        sizes = tuple((rx3tex.by_name(d, n)['w'], rx3tex.by_name(d, n)['h']) for n in ('jersey_cm', 'shorts_cm'))
+        assert sizes == expected[:2]
+        r, g, b = rx3tex.to_image(d, rx3tex.by_name(d, 'jersey_cm')).getpixel((5, 5))[:3]
+        assert abs(r - 200) <= 8 and g < 8 and b < 8  # DXT1 rounds colors to 5/6 bits
+        dds = Image.open(io.BytesIO(chunk.decode(files[kit.thumbnail_name(150000, 0)])))
+        assert dds.size == (expected[2],) * 2
+    assert kit.limited_size('jersey', (4096, 4096)) == (2048, 2048)
+    assert kit.limited_size('shorts', (4000, 2000)) == (2048, 1024)
+    assert kit.limited_size('thumbnail', (1024, 1024)) == (512, 512)
+    assert kit.limited_size('jersey', (2048, 2048)) is None
