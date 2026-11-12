@@ -7,6 +7,7 @@ import { toast } from '@/lib/notify'
 import { ApiError, api, saveBlob } from '@/api/client'
 import type { Boot, ShoeSurface } from '@/api/types'
 import { BootThumb } from '@/components/common/BootThumb'
+import { CreditsUrlInput } from '@/components/common/CreditsUrlInput'
 import { EntityIssues, Field, FieldIssues, OriginalBadge } from '@/components/common/form'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import {
@@ -266,6 +267,9 @@ export function BootEditPage() {
               </Field>
               <Field label={t('boots.credits')} hint={t('boots.creditsHint')} entity={boot.uid} field="credits">
                 <Input value={boot.credits ?? ''} onChange={(e) => set({ credits: e.target.value || undefined })} />
+              </Field>
+              <Field label={t('credits.link')} hint={t('credits.linkHint')} entity={boot.uid} field="credits_url">
+                <CreditsUrlInput key={boot.uid} value={boot.credits_url} onChange={(url) => set({ credits_url: url })} />
               </Field>
               {original ? (
                 <div className="space-y-1">

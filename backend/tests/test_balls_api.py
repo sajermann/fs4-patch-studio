@@ -29,7 +29,7 @@ def upload(client, kind, data, name):
 
 
 def new_ball(client, uid='a1', name='Brazuca'):
-    return {'uid': uid, 'name': name, 'credits': 'modder',
+    return {'uid': uid, 'name': name, 'credits': 'modder', 'credits_url': 'modder.com/packs',
             'mesh': upload(client, 'mesh', b'RX3l mesh ' + uid.encode(), 'ball_168.rx3'),
             'texture': upload(client, 'texture', b'RX3l texture ' + uid.encode(), 'ball_168_textures.rx3'),
             'thumbnail': upload(client, 'thumbnail', png(), 'ball 168.png')}
@@ -88,7 +88,7 @@ def test_shared_zip_round_trip(lenient):
     z = zipfile.ZipFile(io.BytesIO(r.content))
     assert sorted(z.namelist()) == ['ball-a1.png', 'ball-a1.rx3', 'ball-a1_textures.rx3', 'manifest.json']
     assert json.loads(z.read('manifest.json')) == {'type': 'fs4-ball', 'version': 1, 'ball': {
-        'uid': 'a1', 'original_id': None, 'name': 'Brazuca', 'credits': 'modder', 'hidden': False, 'mesh': 'ball-a1.rx3',
+        'uid': 'a1', 'original_id': None, 'name': 'Brazuca', 'credits': 'modder', 'credits_url': 'https://modder.com/packs', 'hidden': False, 'mesh': 'ball-a1.rx3',
         'texture': 'ball-a1_textures.rx3', 'thumbnail': 'ball-a1.png',
         'created_at': saved['balls'][0]['created_at'], 'updated_at': saved['balls'][0]['updated_at']}}
     assert z.read('ball-a1.rx3') == (folder / saved['balls'][0]['mesh']).read_bytes()
@@ -96,6 +96,7 @@ def test_shared_zip_round_trip(lenient):
     assert body['kind'] == 'one' and body['problems'] == []
     back = body['balls'][0]
     assert back['uid'] == 'a1' and back['name'] == 'Brazuca' and back['mesh'] and back['texture']
+    assert back['credits_url'] == 'https://modder.com/packs'
     many = client.post('/api/balls/export', json={'uids': ['a1', 'a2']})
     manifest = json.loads(zipfile.ZipFile(io.BytesIO(many.content)).read('manifest.json'))
     assert manifest['type'] == 'fs4-balls' and [b['name'] for b in manifest['balls']] == ['Brazuca', 'Jabulani']
@@ -104,12 +105,13 @@ def test_shared_zip_round_trip(lenient):
 def test_bulk_import_keeps_incomplete_balls(lenient):
     client = lenient['client']
     manifest = {'type': 'fs4-balls', 'version': 1, 'balls': [
-        {'name': 'Complete', 'mesh': 'a.rx3', 'texture': 'a_t.rx3', 'thumbnail': 'a.png'},
-        {'name': 'No texture', 'mesh': 'a.rx3', 'texture': 'gone.rx3'}]}
+        {'name': 'Complete', 'mesh': 'a.rx3', 'texture': 'a_t.rx3', 'thumbnail': 'a.png', 'credits_url': 'www.x.com'},
+        {'name': 'No texture', 'mesh': 'a.rx3', 'texture': 'gone.rx3', 'credits_url': 'javascript:alert(1)'}]}
     body = client.post('/api/balls/import', files={'file': ('b.zip', make_zip(
         {'manifest.json': manifest, 'a.rx3': b'm', 'a_t.rx3': b't', 'a.png': png()}), 'x')}).json()
     assert [b['name'] for b in body['balls']] == ['Complete', 'No texture']
     assert 'texture' not in body['balls'][1]
+    assert body['balls'][0]['credits_url'] == 'https://www.x.com' and 'credits_url' not in body['balls'][1]
     assert {(p['index'], p['field'], p['code']) for p in body['problems']} == {(1, 'texture', 'ball_zip_file_missing')}
 
 

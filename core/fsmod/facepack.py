@@ -2,7 +2,9 @@
 
 A pack folder holds screenassets/ (heads/, faces/, hair/, hairlod/: see scanface.FILES) and often
 ui/imgAssets/heads/p<id>.dds (player photos), or the same folders straight in the pack root, without screenassets/
-(both layouts work). The user may point at the pack root, at screenassets itself or at a folder with one pack inside. Packs are read in place and never written; the app never ships packs.
+(both layouts work). The user may point at the pack root, at screenassets itself or at a folder with one pack inside.
+find_parts looks deeper: data/sceneassets/ (FIFA's own layout) and packs that bring several versions of the same
+face side by side (03/, 08/, 12-13/... or 'FIFA 14 PC'/, 'FIFA 16 PC'/), each one a part with its own name. Packs are read in place and never written; the app never ships packs.
 The pack's database is the PC version (compressed names that fsmod.t3db does not read), so the ids say nothing
 about who the player is: the gallery shows each face rendered from the front, and an optional manifest.json at the
 pack's root (read_manifest) tells the player's name and who made each face.
@@ -39,9 +41,50 @@ def assets_dir(folder):
     return None
 
 
+ASSET_FOLDERS = ('screenassets', 'sceneassets')  # names packs give the folder that holds heads/, faces/...
+WRAPPER_FOLDERS = ASSET_FOLDERS + ('data',)  # left out of a part's name (data/sceneassets = the pack itself)
+FIND_DEPTH = 4  # how deep find_parts looks under the folder the user set
+FIND_MAX_FOLDERS = 5000  # folders looked at, at most (a folder pointed at by mistake, like a whole disk)
+
+
+def _is_assets(folder):
+    return os.path.isdir(os.path.join(folder, 'heads')) and os.path.isdir(os.path.join(folder, 'faces'))
+
+
+def find_parts(folder):
+    """Every folder with faces (heads/ + faces/) under the folder the user set, itself included, looking FIND_DEPTH
+    levels down and never inside a folder with faces: [(assets folder, label)], by label. label = the path from the
+    folder set, without wrapper folders ('' = the folder itself; 'data/sceneassets' -> ''; '08' or 'FIFA 14 PC' for
+    packs that bring several versions of a face side by side, '2010_11/screenassets' -> '2010_11')."""
+    if not folder or not os.path.isdir(folder):
+        return []
+    found, seen = [], 0
+    pending = [(folder, 0)]
+    while pending:
+        current, depth = pending.pop()
+        if _is_assets(current):
+            found.append(current)
+            continue
+        if depth >= FIND_DEPTH or seen >= FIND_MAX_FOLDERS:
+            continue
+        try:
+            subs = sorted((e.path for e in os.scandir(current) if e.is_dir() and not e.name.startswith('.')),
+                          reverse=True)
+        except OSError:  # no permission
+            continue
+        seen += len(subs)
+        pending.extend((s, depth + 1) for s in subs)
+    out = []
+    for assets in found:
+        parts = os.path.relpath(assets, folder).replace('\\', '/').split('/')
+        parts = [p for p in parts if p not in ('.', '') and p.lower() not in WRAPPER_FOLDERS]
+        out.append((assets, '/'.join(parts)))
+    return sorted(out, key=lambda p: [s.lower() for s in p[1].split('/')])
+
+
 def pack_root(assets):
     """The pack's own folder: the parent of screenassets/, or assets itself when the pack has no screenassets/."""
-    return os.path.dirname(assets) if os.path.basename(os.path.normpath(assets)).lower() == SCREENASSETS else assets
+    return os.path.dirname(assets) if os.path.basename(os.path.normpath(assets)).lower() in ASSET_FOLDERS else assets
 
 
 def pack_name(assets):
@@ -84,6 +127,15 @@ def manifest_path(assets):
     return os.path.join(pack_root(assets), MANIFEST)
 
 
+def manifest_for(folder, assets):
+    """The manifest.json that applies to a part of the folder the user set: the part's own (next to its faces/ or
+    screenassets/) when it has one, else the one at the folder set (for all its parts). None = no manifest."""
+    for path in dict.fromkeys((manifest_path(assets), os.path.join(folder, MANIFEST))):
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def _text(value):
     return value.strip() or None if isinstance(value, str) else None
 
@@ -98,9 +150,9 @@ def _face_id(value):
     return None
 
 
-def read_manifest(assets):
-    """(faces, warnings) of the pack's manifest.json, written by whoever made or gathered the pack (the app only
-    reads it). faces = {face id: {'name', 'credits', 'credits_url'}} (keys only when known) of the faces it lists;
+def read_manifest(assets, folder=None):
+    """(faces, warnings) of the pack's manifest.json (manifest_for: the part's own, else the one at `folder`, the
+    folder the user set), written by whoever made or gathered the pack (the app only reads it). faces = {face id: {'name', 'credits', 'credits_url'}} (keys only when known) of the faces it lists;
     a face without credits of its own (neither `credits` nor `credits_url`) gets the pack's (top-level) ones, a face
     with any of them keeps only its own. warnings = [{'code', 'count'?, 'detail'?}]:
       manifest_unreadable / manifest_invalid_json / manifest_wrong_type / manifest_newer_version: the whole file is
@@ -108,8 +160,8 @@ def read_manifest(assets):
       manifest_bad_entries: entries skipped (not an object, missing/invalid id, repeated id), the rest is used;
       manifest_bad_links: credits_url that are not http(s) addresses, dropped.
     No manifest.json = ({}, [])."""
-    path = manifest_path(assets)
-    if not os.path.isfile(path):
+    path = manifest_for(folder or pack_root(assets), assets)
+    if path is None:
         return {}, []
     try:
         if os.path.getsize(path) > MANIFEST_MAX_BYTES:

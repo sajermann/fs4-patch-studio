@@ -4,14 +4,14 @@ Zip format (one ball or many), only the manifest and the files it names, side by
 
     manifest.json   {"type": "fs4-ball", "version": 1, "ball": {...}}
                     {"type": "fs4-balls", "version": 1, "balls": [{...}, ...]}
-    each ball:      {"name", "credits", "hidden", "mesh", "texture", "thumbnail", "created_at", "updated_at"}
+    each ball:      {"name", "credits", "credits_url", "hidden", "mesh", "texture", "thumbnail", "created_at", "updated_at"}
                     mesh / texture / thumbnail = names of files in the zip (any name on upload; ball-<uid>.rx3,
                     ball-<uid>_textures.rx3, ball-<uid>.<ext> on download)
                     created_at / updated_at: when the entry was created and last changed in the project it came
                     from (ISO 8601; kept on import, null when unknown)
                     uid / original_id: the entry's uid (kept on import: the same entry imported again replaces it)
                     and the game's entry it edits (null = a new one); zips without them come in as new entries
-                    on download every key is there, null when empty (credits, a missing file); on upload a key
+                    on download every key is there, null when empty (credits, credits_url, a missing file); on upload a key
                     may be null, "" or left out
 
 The game id is not in the zip (each project gives its own), nor the stadiums using the ball. Files are shared as the
@@ -27,7 +27,7 @@ import zipfile
 
 from PIL import Image
 
-from fsmod import balls, gltf, model
+from fsmod import balls, gltf, model, weblink
 
 from .project_store import IMAGE_EXTENSIONS, file_slug
 from .share_service import kept_original, kept_uid
@@ -203,9 +203,10 @@ class BallService:
             for k, item in enumerate(items):
                 name = item.get('name') if isinstance(item.get('name'), str) else ''
                 credits = item.get('credits') if isinstance(item.get('credits'), str) else None
+                link = weblink.normalize(item.get('credits_url'))  # not a web address = left out
                 ball = {'uid': kept_uid(item.get('uid'), 'a', seen),
                         'original_id': kept_original(item.get('original_id'), valid),
-                        'name': name.strip(), 'credits': credits or None,
+                        'name': name.strip(), 'credits': credits or None, 'credits_url': link,
                         'hidden': item.get('hidden') is True,
                         'created_at': model.iso_date(item.get('created_at')),
                         'updated_at': model.iso_date(item.get('updated_at'))}
@@ -227,7 +228,7 @@ class BallService:
                 stem = f'ball-{file_slug(b.uid)}'
                 # every key is written, null when empty, so whoever edits the manifest by hand sees all of them
                 item = {'uid': b.uid, 'original_id': b.original_id,
-                        'name': b.name, 'credits': b.credits or None, 'hidden': b.hidden,
+                        'name': b.name, 'credits': b.credits or None, 'credits_url': b.credits_url, 'hidden': b.hidden,
                         'created_at': b.created_at, 'updated_at': b.updated_at,
                         'mesh': None, 'texture': None, 'thumbnail': None}
                 for field, name in (('mesh', f'{stem}.rx3'), ('texture', f'{stem}_textures.rx3'),

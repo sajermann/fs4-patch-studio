@@ -95,52 +95,62 @@ class FaceService:
             raise FaceError('facepack_not_found', 'Pasta sem faces do FIFA 14 (procure a pasta que contém “screenassets”).')
         return assets
 
-    def pack(self, folder):
-        """{'folder', 'name', 'faces', 'warnings'} of a pack folder (FaceError when it has no faces): every complete
-        face (facepack.list_faces) with what the pack's manifest.json says about it (name, credits, credits_url).
-        Kept in memory and read again only when one of the pack's folders or its manifest changes."""
-        assets = self.assets(folder)
-        key = os.path.normcase(os.path.normpath(folder))
-        stamp = _pack_stamp(assets)
+    def parts(self, folder):
+        """The packs inside a folder the user set (facepack.find_parts: itself, data/sceneassets/, or several
+        versions side by side), FaceError when none has faces: [{'folder' (the part's own folder: with the id, it
+        identifies a face), 'root' (the folder set), 'name', 'faces', 'warnings'}]. Each face (facepack.list_faces)
+        comes with what the manifest.json says about it (name, credits, credits_url). Each part is kept in memory
+        and read again only when its folders or its manifest change."""
+        found = facepack.find_parts(folder)
+        if not found:
+            raise FaceError('facepack_not_found', 'Pasta sem faces do FIFA 14 (procure a pasta que contém “screenassets”).')
+        root = os.path.normpath(folder)
+        return [self._part(root, assets, label) for assets, label in found]
+
+    def _part(self, root, assets, label):
+        key = os.path.normcase(os.path.normpath(assets))
+        stamp = (root, label, _pack_stamp(assets, root))
         with self._lock:
             known = self._packs.get(key)
         if known and known[0] == stamp:
             return known[1]
-        manifest, warnings = facepack.read_manifest(assets)
+        manifest, warnings = facepack.read_manifest(assets, root)
+        name = os.path.basename(root) + (f' / {label}' if label else '')
         if warnings:
-            log.warning('face pack %s: manifest.json %s', folder, warnings)
+            log.warning('face pack %s: manifest.json %s', name, warnings)
         faces = [{**f, **manifest.get(f['id'], {})} for f in facepack.list_faces(assets)]
-        pack = {'folder': os.path.normpath(folder), 'name': facepack.pack_name(assets), 'faces': faces,
+        part = {'folder': os.path.normpath(assets), 'root': root, 'label': label, 'name': name, 'faces': faces,
                 'warnings': warnings}
         with self._lock:
-            self._packs[key] = (stamp, pack)
-        return pack
+            self._packs[key] = (stamp, part)
+        return part
 
     def packs(self, folders):
-        """[{'folder', 'name', 'count', 'warnings', 'error'}] of the folders, in their order; a folder without faces
-        has error = its FaceError code (and name = the folder name) instead of refusing the others."""
+        """[{'folder', 'root', 'index', 'name', 'count', 'warnings', 'error'}] of the parts of the folders, in their
+        order (index = position of its folder in `folders`); a folder without faces is one entry with error = its
+        FaceError code (and name = the folder name) instead of refusing the others."""
         out = []
-        for folder in folders:
+        for index, folder in enumerate(folders):
             try:
-                p = self.pack(folder)
-                out.append({'folder': p['folder'], 'name': p['name'], 'count': len(p['faces']),
-                            'warnings': p['warnings'], 'error': None})
+                out += [{'folder': p['folder'], 'root': p['root'], 'index': index, 'name': p['name'],
+                         'count': len(p['faces']), 'warnings': p['warnings'], 'error': None} for p in self.parts(folder)]
             except FaceError as e:
-                out.append({'folder': os.path.normpath(folder), 'name': os.path.basename(os.path.normpath(folder)),
-                            'count': 0, 'warnings': [], 'error': e.code})
+                root = os.path.normpath(folder)
+                out.append({'folder': root, 'root': root, 'index': index, 'name': os.path.basename(root), 'count': 0,
+                            'warnings': [], 'error': e.code})
         return out
 
     def page(self, folders, offset=0, limit=60, q='', pack=None):
-        """One page of the faces of all the packs (in the order of the folders, then by id): {'total' (matching the
-        filters), 'items', 'packs' (self.packs)}. q looks in the id, the name, the credits and the pack name (no
-        accents, no case); pack = folder of one pack only."""
+        """One page of the faces of all the packs (in the order of the folders, then by part and id): {'total'
+        (matching the filters), 'items', 'packs' (self.packs)}. q looks in the id, the name, the credits and the pack
+        name (no accents, no case); pack = folder of one part only."""
         packs = self.packs(folders)
         query = fold(q.strip())
         matching = []
         for summary in packs:
             if summary['error'] or (pack and not same_folder(pack, summary['folder'])):
                 continue
-            p = self.pack(summary['folder'])
+            p = self._part_of(summary['folder'])
             for face in p['faces']:
                 if query and not any(query in fold(str(v)) for v in (face['id'], face.get('name'), face.get('credits'),
                                                                      p['name']) if v is not None):
@@ -148,12 +158,26 @@ class FaceService:
                 matching.append({**face, 'folder': p['folder'], 'pack': p['name']})
         return {'total': len(matching), 'items': matching[offset:offset + limit], 'packs': packs}
 
+    def _part_of(self, folder):
+        """The part whose own folder is `folder` (as the gallery items give it): the one already read (it knows the
+        folder the user set, for the manifest), else `folder` read as a pack of its own."""
+        with self._lock:
+            known = self._packs.get(os.path.normcase(os.path.normpath(folder)))
+        if known:
+            part = known[1]
+            return self._part(part['root'], part['folder'], part['label'])
+        assets = self.assets(folder)
+        root = facepack.pack_root(assets)
+        return self._part(os.path.normpath(root), assets, '')
+
     def face_info(self, folder, face_id):
-        """What the pack's manifest says about one face: {'name', 'credits', 'credits_url'} (keys only when known)."""
-        for face in self.pack(folder)['faces']:
+        """(name of the part, what the manifest says about one face: {'name', 'credits', 'credits_url'}, keys only
+        when known) of a face of the gallery (folder = the item's folder)."""
+        part = self._part_of(folder)
+        for face in part['faces']:
             if face['id'] == face_id:
-                return {k: face[k] for k in ('name', 'credits', 'credits_url') if face.get(k)}
-        return {}
+                return part['name'], {k: face[k] for k in ('name', 'credits', 'credits_url') if face.get(k)}
+        return part['name'], {}
 
     def thumbnail(self, key, files):
         try:
@@ -194,11 +218,10 @@ class FaceService:
         return files
 
     def copy_to_project(self, folder, face_id, project_folder, player_uid):
-        """Copies one face's pack files into the project; returns the pack name."""
+        """Copies one face's pack files into the project (folder = the gallery item's folder)."""
         assets = self.assets(folder)
         scanface.write_files(scanface.project_face_dir(project_folder, player_uid), face_id,
                              self._pack_files(assets, face_id))
-        return facepack.pack_name(assets)
 
     # ------------------------------------------------------------ converted preview
     def source_files(self, folder=None, face_id=None, project_folder=None, player_uid=None):
@@ -239,10 +262,12 @@ class FaceService:
         return result
 
 
-def _pack_stamp(assets):
-    """Changes when a face is added to / removed from the pack (the dates of its folders) or its manifest changes."""
+def _pack_stamp(assets, root):
+    """Changes when a face is added to / removed from the pack (the dates of its folders) or its manifest changes
+    (its own or the one of the folder set, root)."""
     paths = [os.path.join(assets, os.path.dirname(f)) for f in scanface.FILES.values()]
-    paths += [os.path.join(facepack.pack_root(assets), facepack.PHOTOS), facepack.manifest_path(assets)]
+    paths += [os.path.join(facepack.pack_root(assets), facepack.PHOTOS), facepack.manifest_path(assets),
+              os.path.join(root, facepack.MANIFEST)]
     out = []
     for path in dict.fromkeys(paths):
         try:

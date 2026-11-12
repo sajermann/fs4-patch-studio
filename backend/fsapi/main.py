@@ -252,7 +252,7 @@ def create_app(state=None):
                                      'a pasta 4541097B dentro de Documentos\\fifastreet\\<perfil>.')
         face_pack_dirs = [f for f in req.face_pack_dirs if f.strip()]
         for folder in face_pack_dirs:
-            faces_call(state.faces.pack, folder)
+            faces_call(state.faces.parts, folder)
         checked = game_setup.check_game(req.game_dir)
         if not checked['accepted']:  # another mod (or a patch copied by hand): the app could not undo it
             fail('game_files_not_official', 'Os arquivos do jogo não são os originais do ReStreet (o jogo já tem algum '
@@ -1136,7 +1136,7 @@ def create_app(state=None):
         name; pack = folder of one pack only. folder = a folder picked on the player screen for that visit only (only
         its faces, the settings are not used nor changed)."""
         if folder:
-            faces_call(state.faces.pack, folder)  # facepack_not_found for a folder without faces
+            faces_call(state.faces.parts, folder)  # facepack_not_found for a folder without faces
             return state.faces.page([folder], offset, limit, q)
         if not state.config.face_pack_dirs:
             raise HTTPException(404, {'code': 'facepack_not_set',
@@ -1200,8 +1200,8 @@ def create_app(state=None):
     def facepack_use(pick: FacePick):
         """Copies the face's files into the project (faces/<player uid>/); the client then sets player.face, which
         keeps what the pack's manifest.json says about the face (name, credits, credits_url)."""
-        pack = faces_call(state.faces.copy_to_project, pick.folder, pick.face_id, state.store.folder, pick.player)
-        info = faces_call(state.faces.face_info, pick.folder, pick.face_id)
+        faces_call(state.faces.copy_to_project, pick.folder, pick.face_id, state.store.folder, pick.player)
+        pack, info = faces_call(state.faces.face_info, pick.folder, pick.face_id)
         # scalp paint off by default for new faces (it helps few faces and stains others); a face saved without
         # the field still means on (ScannedFace.paint_scalp), as older versions wrote it
         return {'face': {'source_id': pick.face_id, 'pack': pack, 'paint_scalp': False, **info}}

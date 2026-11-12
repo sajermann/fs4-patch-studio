@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Check, FolderOpen, LoaderCircle, Settings, Undo2, X } from 'lucide-react'
+import { AlertTriangle, Check, FolderOpen, LoaderCircle, Pencil, Settings, Undo2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from '@/lib/notify'
@@ -8,8 +8,11 @@ import type { FacePackFace, FacePackSummary, Player, ScannedFace } from '@/api/t
 import { CreditsLink } from '@/components/common/CreditsLink'
 import { ALL, FilterSelect, Pager, SearchInput } from '@/components/common/list'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { normalizeWebLink } from '@/lib/weblink'
 import { useProject } from '@/state/project'
 import { useStatus } from '@/state/queries'
 
@@ -58,6 +61,7 @@ export function FacePicker({
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const [picking, setPicking] = useState(false)
+  const [editingInfo, setEditingInfo] = useState(false)
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -135,21 +139,37 @@ export function FacePicker({
   return (
     <div className="flex flex-col gap-3">
       {current && (
-        <div className="flex items-center gap-3 rounded-md border p-2">
+        <div className="flex items-start gap-3 rounded-md border p-2">
           <img src={faceThumbUrl({ player: player.uid, face: current.source_id })} alt="" className="size-14 rounded bg-muted object-contain" />
-          <div className="min-w-0 text-sm">
-            <p className="font-medium">
-              {current.name ? `${current.name} · ` : ''}
-              {t('faces.face', { id: current.source_id })}
-            </p>
-            <p className="truncate text-xs text-muted-foreground">{t('faces.copiedInProject', { pack: current.pack ?? t('faces.unknownPack') })}</p>
-            {(current.credits || current.credits_url) && (
-              <p className="truncate text-xs text-muted-foreground">
-                {t('credits.by', { credits: '' })}
-                <CreditsLink credits={current.credits} url={current.credits_url} />
-              </p>
-            )}
-          </div>
+          {editingInfo ? (
+            <FaceInfoForm
+              face={current}
+              onCancel={() => setEditingInfo(false)}
+              onSave={(info) => {
+                updatePlayer(player.uid, { face: { ...current, ...info } })
+                setEditingInfo(false)
+              }}
+            />
+          ) : (
+            <>
+              <div className="min-w-0 flex-1 self-center text-sm">
+                <p className="font-medium">
+                  {current.name ? `${current.name} · ` : ''}
+                  {t('faces.face', { id: current.source_id })}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">{t('faces.copiedInProject', { pack: current.pack ?? t('faces.unknownPack') })}</p>
+                {(current.credits || current.credits_url) && (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {t('credits.by', { credits: '' })}
+                    <CreditsLink credits={current.credits} url={current.credits_url} />
+                  </p>
+                )}
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setEditingInfo(true)} title={t('faces.editInfoHint')}>
+                <Pencil /> {t('faces.editInfo')}
+              </Button>
+            </>
+          )}
         </div>
       )}
 
@@ -243,6 +263,10 @@ export function FacePicker({
                   />
                   <span className="w-full truncate text-center text-[11px] leading-tight">{f.name ?? '—'}</span>
                   <span className="font-mono text-[10px] text-muted-foreground">{f.id}</span>
+                  {f.pack.includes(' / ') && (
+                    // one of the versions a pack brings side by side (e.g. "08", "FIFA 16 PC"): same id, other look
+                    <span className="w-full truncate text-center text-[10px] text-muted-foreground">{f.pack.split(' / ').slice(1).join(' / ')}</span>
+                  )}
                   {(f.credits || f.credits_url) && (
                     <CreditsLink credits={f.credits} url={f.credits_url} className="max-w-full text-[10px] text-muted-foreground" />
                   )}
@@ -289,6 +313,63 @@ export function FacePicker({
 }
 
 /** Folders of the settings without faces and problems of the packs' manifest.json (the gallery still works). */
+type FaceInfo = Pick<ScannedFace, 'name' | 'credits' | 'credits_url'>
+
+/** Who the chosen face is and who made it, edited in the project only (the pack and its manifest.json stay as they
+ * are): e.g. to fix a name when the pack folder is gone. Empty fields are cleared. */
+function FaceInfoForm({ face, onSave, onCancel }: { face: ScannedFace; onSave: (info: FaceInfo) => void; onCancel: () => void }) {
+  const { t } = useI18n()
+  const [name, setName] = useState(face.name ?? '')
+  const [credits, setCredits] = useState(face.credits ?? '')
+  const [link, setLink] = useState(face.credits_url ?? '')
+  const url = link.trim() ? normalizeWebLink(link) : null
+  const badLink = !!link.trim() && !url
+  const save = () => {
+    if (badLink) return
+    onSave({ name: name.trim() || undefined, credits: credits.trim() || undefined, credits_url: url ?? undefined })
+  }
+  return (
+    <form
+      className="grid min-w-0 flex-1 gap-2 text-sm"
+      onSubmit={(e) => {
+        e.preventDefault()
+        save()
+      }}
+    >
+      <p className="font-medium">{t('faces.face', { id: face.source_id })}</p>
+      <div className="grid gap-1">
+        <Label htmlFor="face-info-name">{t('faces.infoName')}</Label>
+        <Input id="face-info-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor="face-info-credits">{t('faces.infoCredits')}</Label>
+        <Input id="face-info-credits" value={credits} onChange={(e) => setCredits(e.target.value)} />
+      </div>
+      <div className="grid gap-1">
+        <Label htmlFor="face-info-link">{t('faces.infoCreditsUrl')}</Label>
+        <Input
+          id="face-info-link"
+          value={link}
+          onChange={(e) => setLink(e.target.value)}
+          placeholder="https://"
+          aria-invalid={badLink}
+          className="font-mono"
+        />
+        {badLink && <p className="text-xs text-destructive">{t('faces.infoBadLink')}</p>}
+      </div>
+      <p className="text-xs text-muted-foreground">{t('faces.infoHint')}</p>
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+          {t('common.cancel')}
+        </Button>
+        <Button type="submit" size="sm" disabled={badLink}>
+          <Check /> {t('common.apply')}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 export function PackProblems({ packs }: { packs: FacePackSummary[] }) {
   const { t } = useI18n()
   const lines = packs.flatMap((p) =>

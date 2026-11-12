@@ -58,7 +58,17 @@ export function FacePackFolders({ value, onChange }: { value: string[]; onChange
     enabled: checked.length > 0,
     retry: false,
   })
-  const statusOf = (folder: string) => check.data?.packs[checked.indexOf(folder.trim())]
+  /** What was found in one folder: its packs (several when it brings versions side by side), summed up. */
+  const statusOf = (folder: string) => {
+    const index = checked.indexOf(folder.trim())
+    const parts = check.data?.packs.filter((p) => p.index === index) ?? []
+    if (!parts.length) return undefined
+    return {
+      error: parts.find((p) => p.error)?.error ?? null,
+      name: parts.length > 1 ? t('settings.facePackParts', { name: parts[0].name.split(' / ')[0], count: parts.length }) : parts[0].name,
+      count: parts.reduce((n, p) => n + p.count, 0),
+    }
+  }
 
   const browse = async (i: number) => {
     try {
@@ -110,6 +120,7 @@ export function FacePackFolders({ value, onChange }: { value: string[]; onChange
           <li>{rich(t('settings.folderLayoutHair'))}</li>
           <li>{rich(t('settings.folderLayoutHairlod'))}</li>
           <li>{rich(t('settings.folderLayoutScreenassets'))}</li>
+          <li>{rich(t('settings.folderLayoutVersions'))}</li>
         </ul>
         <p className="mt-3 font-medium">{t('settings.manifestTitle')}</p>
         <p className="mt-1 text-muted-foreground">{t('settings.manifestHelpText')}</p>

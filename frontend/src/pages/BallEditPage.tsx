@@ -7,6 +7,7 @@ import { toast } from '@/lib/notify'
 import { ApiError, api, saveBlob } from '@/api/client'
 import type { Ball } from '@/api/types'
 import { BallThumb } from '@/components/common/BallThumb'
+import { CreditsUrlInput } from '@/components/common/CreditsUrlInput'
 import { EntityIssues, Field, FieldIssues, OriginalBadge } from '@/components/common/form'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import {
@@ -266,6 +267,9 @@ export function BallEditPage() {
               </Field>
               <Field label={t('balls.credits')} hint={t('balls.creditsHint')} entity={ball.uid} field="credits">
                 <Input value={ball.credits ?? ''} onChange={(e) => set({ credits: e.target.value || undefined })} />
+              </Field>
+              <Field label={t('credits.link')} hint={t('credits.linkHint')} entity={ball.uid} field="credits_url">
+                <CreditsUrlInput key={ball.uid} value={ball.credits_url} onChange={(url) => set({ credits_url: url })} />
               </Field>
             </CardContent>
           </Card>

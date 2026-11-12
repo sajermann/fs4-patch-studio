@@ -10,6 +10,7 @@ import { BootThumb } from '@/components/common/BootThumb'
 import { EntityIssues, OriginalBadge } from '@/components/common/form'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { ALL, FilterBar, FilterSelect, LIST_PAGE, matches, Pager, ScrollTable, SearchInput, useListParams, usePage } from '@/components/common/list'
+import { CreditsLink } from '@/components/common/CreditsLink'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -261,7 +262,9 @@ export function BootsPage() {
                     {b.hidden && <OutOfPatchBadge />}
                   </span>
                 </TableCell>
-                <TableCell className="text-muted-foreground">{b.credits || '—'}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  <CreditsLink credits={b.credits} url={b.credits_url} empty="—" />
+                </TableCell>
                 <TableCell>
                   {(original ? b.original_id! >= 500 && b.original_id! <= 619 : b.street) ? t('boots.yes') : t('boots.no')}
                 </TableCell>

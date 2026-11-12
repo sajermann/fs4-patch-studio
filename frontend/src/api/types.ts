@@ -65,6 +65,8 @@ export interface Team extends Dated {
   street_kits?: Partial<Record<KitKind, StreetKit>>
   use_real_kits?: boolean // team kits from real_kits instead of solid color + crest
   real_kits?: Partial<Record<RealKitSlot, RealKit>>
+  kit_credits?: string // who made the real kits: one credit for the three
+  kit_credits_url?: string // their page (http/https only)
   template: number
   captain?: PlayerRef // project player uid or the game's playerid; none = new team: first player, original: the game's
   takers?: Partial<Record<TakerRole, PlayerRef>> // set pieces; a role left out = the captain (original: the game's)
@@ -162,6 +164,7 @@ export interface Boot extends Dated {
   uid: string
   name: string
   credits?: string
+  credits_url?: string // their page (http/https only)
   street?: boolean // may go on the street (takes one of the few free street codes; new boots only)
   code?: number | null // new boot: its code in the game, given by the build
   mesh?: string // the pack's shoe_<id>.rx3
@@ -186,6 +189,7 @@ export interface Glove extends Dated {
   uid: string
   name: string
   credits?: string
+  credits_url?: string // their page (http/https only)
   code?: number | null // new glove: its code in the game, given by the build
   texture?: string // the pack's gkglove_<id>_textures.rx3
   thumbnail?: string // picture in the app (image path); none = drawn from the file
@@ -213,6 +217,7 @@ export interface Ball extends Dated {
   uid: string
   name: string
   credits?: string
+  credits_url?: string // their page (http/https only)
   code?: number | null // new ball: its id in the game, given by the build
   mesh?: string // the pack's ball_<id>.rx3
   texture?: string // the pack's ball_<id>_textures.rx3
@@ -302,9 +307,12 @@ export interface FacePackWarning {
   detail?: string
 }
 
-/** A face pack folder of the settings. */
+/** A pack inside a face folder of the settings: the folder itself, or one of the versions it brings side by side
+ * (name "folder / version"). */
 export interface FacePackSummary {
-  folder: string
+  folder: string // the pack's own folder (identifies its faces)
+  root: string // the folder of the settings it was found in
+  index: number // position of that folder in the list asked for
   name: string
   count: number
   warnings: FacePackWarning[]

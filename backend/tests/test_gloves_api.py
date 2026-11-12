@@ -29,7 +29,7 @@ def upload(client, kind, data, name):
 
 
 def new_glove(client, uid='g1', name='Predator'):
-    return {'uid': uid, 'name': name, 'credits': 'modder',
+    return {'uid': uid, 'name': name, 'credits': 'modder', 'credits_url': 'modder.com/packs',
             'texture': upload(client, 'texture', b'RX3l texture ' + uid.encode(), 'gkglove_149_textures.rx3'),
             'thumbnail': upload(client, 'thumbnail', png(), 'glove 149.png')}
 
@@ -97,7 +97,7 @@ def test_shared_zip_round_trip(lenient):
     z = zipfile.ZipFile(io.BytesIO(r.content))
     assert sorted(z.namelist()) == ['glove-g1.png', 'glove-g1_textures.rx3', 'manifest.json']
     assert json.loads(z.read('manifest.json')) == {'type': 'fs4-glove', 'version': 1, 'glove': {
-        'uid': 'g1', 'original_id': None, 'name': 'Predator', 'credits': 'modder', 'hidden': False, 'texture': 'glove-g1_textures.rx3',
+        'uid': 'g1', 'original_id': None, 'name': 'Predator', 'credits': 'modder', 'credits_url': 'https://modder.com/packs', 'hidden': False, 'texture': 'glove-g1_textures.rx3',
         'thumbnail': 'glove-g1.png', 'created_at': saved['gloves'][0]['created_at'],
         'updated_at': saved['gloves'][0]['updated_at']}}
     assert z.read('glove-g1_textures.rx3') == (folder / saved['gloves'][0]['texture']).read_bytes()

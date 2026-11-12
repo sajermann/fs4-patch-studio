@@ -204,7 +204,7 @@ export function SettingsPage() {
           toast.error(t('settings.facePackInvalid', { folder: missing.folder }))
           return
         }
-        toast.info(t('settings.facePackFound', { count: packs.reduce((n, p) => n + p.count, 0), packs: packs.length }))
+        toast.info(t('settings.facePackFound', { count: packs.reduce((n, p) => n + p.count, 0), packs: facePackDirs.length }))
       }
       // the game and save folders change only through the setup screen (it checks them)
       await api.saveConfig({

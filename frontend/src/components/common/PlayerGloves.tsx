@@ -7,6 +7,7 @@ import { GloveThumb } from '@/components/common/GloveThumb'
 import { FieldIssues } from '@/components/common/form'
 import { matches } from '@/components/common/list'
 import { PickerDialog, type PickerGroup } from '@/components/common/PickerDialog'
+import { CreditsLink } from '@/components/common/CreditsLink'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -73,7 +74,7 @@ export function PlayerGloves({ player }: { player: Player }) {
             key: `p:${g.uid}`,
             icon: <GloveThumb glove={g} />,
             title: gloveName(g, t('common.unnamed')),
-            subtitle: g.credits,
+            subtitle: <CreditsLink credits={g.credits} url={g.credits_url} />,
           })),
       },
       {
@@ -109,6 +110,7 @@ export function PlayerGloves({ player }: { player: Player }) {
         ? (worn.edited && gloveName(worn.edited, `Original ${worn.code}`)) || `Original ${worn.code}`
         : t('playerBoots.none')
   const credits = worn.kind === 'project' ? worn.glove.credits : worn.kind === 'game' ? (worn.edited?.credits ?? 'EA') : undefined
+  const creditsUrl = worn.kind === 'project' ? worn.glove.credits_url : worn.kind === 'game' ? worn.edited?.credits_url : undefined
   const link = worn.kind === 'project' ? glovePath(gloveKey(worn.glove)) : worn.kind === 'game' ? glovePath(worn.code) : undefined
   const picked = player.glove != null
 
@@ -138,7 +140,12 @@ export function PlayerGloves({ player }: { player: Player }) {
                     </Badge>
                   )}
                 </p>
-                {credits && <p className="truncate text-xs text-muted-foreground">{t('playerBoots.credits', { credits })}</p>}
+                {(credits || creditsUrl) && (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {t('playerBoots.credits', { credits: '' })}
+                    <CreditsLink credits={credits} url={creditsUrl} />
+                  </p>
+                )}
               </div>
               {/* as wide as the boots' Change button, whose column also holds "Show in preview" */}
               <div className="flex shrink-0 flex-col">

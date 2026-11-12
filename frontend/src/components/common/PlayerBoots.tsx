@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useI18n } from '@/i18n'
 import { matches } from '@/components/common/list'
+import { CreditsLink } from '@/components/common/CreditsLink'
 import { useFrom } from '@/lib/back'
 import { bootKey, bootName, bootPath, streetCode, SURFACE_LABELS } from '@/lib/boots'
 import { playerName } from '@/lib/players'
@@ -83,7 +84,13 @@ export function PlayerBoots({ player }: { player: Player }) {
             key: `p:${b.uid}`,
             icon: <BootThumb boot={b} />,
             title: bootName(b, t('common.unnamed')),
-            subtitle: [b.credits, streetNote(!!b.street)].filter(Boolean).join(' · '),
+            subtitle: (
+              <>
+                <CreditsLink credits={b.credits} url={b.credits_url} />
+                {(b.credits || b.credits_url) && streetNote(!!b.street) ? ' · ' : ''}
+                {streetNote(!!b.street)}
+              </>
+            ),
             disabled: streetPicker && !b.street,
         })),
       },
@@ -231,6 +238,7 @@ function Slot({
         ? (worn.edited && bootName(worn.edited, `Original ${worn.code}`)) || `Original ${worn.code}`
         : t('playerBoots.none')
   const credits = worn.kind === 'project' ? worn.boot.credits : worn.kind === 'game' ? (worn.edited?.credits ?? 'EA') : undefined
+  const creditsUrl = worn.kind === 'project' ? worn.boot.credits_url : worn.kind === 'game' ? worn.edited?.credits_url : undefined
   const link = worn.kind === 'project' ? bootPath(bootKey(worn.boot)) : worn.kind === 'game' ? bootPath(worn.code) : undefined
   const offStreet = surface === 'street' && worn.kind === 'game' && !streetCode(worn.code)
   return (
@@ -253,7 +261,12 @@ function Slot({
               </Badge>
             )}
           </p>
-          {credits && <p className="truncate text-xs text-muted-foreground">{t('playerBoots.credits', { credits })}</p>}
+          {(credits || creditsUrl) && (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {t('playerBoots.credits', { credits: '' })}
+                    <CreditsLink credits={credits} url={creditsUrl} />
+                  </p>
+                )}
         </div>
         <div className="flex shrink-0 flex-col gap-1">
           <Button variant="outline" size="sm" onClick={onChange}>

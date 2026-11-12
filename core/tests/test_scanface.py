@@ -83,12 +83,12 @@ def test_face_in_an_unknown_format_is_reported(game):
 
 
 @pytest.mark.parametrize('pack, face_id, case', [
-    ('redo-facepack-132-by-redo1000', 200779, 'no teeth where they are expected'),
-    ('redo-facepack-133-by-redo1000', 241861, 'lower teeth on the head bone'),
-    ('redo-facepack-126-by-redo1000', 72421, 'garbage after a wrong small mip'),
-    ('redo-facepack-140-by-redo1000', 999131, 'hair with strands only')])
+    ('redo1000/redo-facepack-132', 200779, 'no teeth where they are expected'),
+    ('redo1000/redo-facepack-133', 241861, 'lower teeth on the head bone'),
+    ('redo1000/redo-facepack-126', 72421, 'garbage after a wrong small mip'),
+    ('redo1000/redo-facepack-140', 999131, 'hair with strands only')])
 def test_converter_handles_odd_faces(game, pack, face_id, case):
-    assets = facepack.assets_dir(os.path.join(REPO, 'Faces', pack))
+    assets = facepack.assets_dir(os.path.join(REPO, 'Faces', *pack.split('/')))
     if not assets:
         pytest.skip('face pack not available')
     src = facepack.read_face(assets, face_id)
@@ -99,7 +99,7 @@ def test_converter_handles_odd_faces(game, pack, face_id, case):
 
 
 def test_head_with_swapped_meshes_is_not_converted(game):
-    assets = facepack.assets_dir(os.path.join(REPO, 'Faces', 'redo-facepack-130-by-redo1000'))
+    assets = facepack.assets_dir(os.path.join(REPO, 'Faces', 'redo1000', 'redo-facepack-130'))
     if not assets:
         pytest.skip('face pack not available')
     with pytest.raises(scanface.FaceFormatError, match='swapped'):
@@ -125,7 +125,7 @@ def _hair_weight(hair, bone):
 
 def test_head_stored_eyes_first_has_the_usual_order_after_the_fix(game):
     """Names right, eyes stored first: the same two meshes, each with its own bytes."""
-    head = _pack_face('pele-by-classic-patch', 'base', face_id=190043)['head']
+    head = _pack_face('others', 'pele-by-classic-patch', 'base', face_id=190043)['head']
     fixed = scanface.head_mesh_first(head)
     before, after = rx3mesh.meshes(head), rx3mesh.meshes(fixed)
     assert [m['name'].split('.')[0] for m in before] == ['eyes_', 'head_']
@@ -146,14 +146,14 @@ def test_converter_handles_other_tools(game, face_id, case):
 
 
 def test_head_stored_eyes_first_is_converted(game):
-    files = _pack_face('pele-by-classic-patch', 'base', face_id=190043)
+    files = _pack_face('others', 'pele-by-classic-patch', 'base', face_id=190043)
     out = scanface.convert(scanface.template_files(game), files, scanface.TEMPLATE, '#000000', paint=False)
     assert scanface.FILES['head'].format(scanface.TEMPLATE) in out
 
 
 def test_hair_stays_on_the_head_when_the_nearest_bone_is_the_jaw(game):
     """The hair of this face moved with the mouth: its head bone landed on the template's jaw."""
-    files = _pack_face('neymar_pack_by_ViP3eR', '2014_wc', face_id=190871)
+    files = _pack_face('others', 'neymar_pack_by_ViP3eR', '2014_wc', face_id=190871)
     template = scanface.template_files(game)
     hair = scanface.convert(template, files, scanface.TEMPLATE, '#000000', paint=False)[
         scanface.FILES['hair'].format(scanface.TEMPLATE)]
@@ -176,7 +176,7 @@ def test_only_the_beard_follows_the_jaw(game):
         guarded = scanface.beard_only_on_jaw(follow, files['hair'], template['head'], head)
         return {b for b, t in follow.items() if t != top}, {b for b, t in guarded.items() if t != top}
 
-    voted, kept = jaw_bones('redo-facepack-125-by-redo1000', face_id=237685)
+    voted, kept = jaw_bones('redo1000', 'redo-facepack-125', face_id=237685)
     assert voted - kept, 'hair above the eyes must leave the jaw'
     voted, kept = jaw_bones('various-by-Colgado', face_id=243614)
     assert 23 in voted and 23 in kept, 'the beard must stay on the jaw'

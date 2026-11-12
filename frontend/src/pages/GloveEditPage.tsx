@@ -7,6 +7,7 @@ import { toast } from '@/lib/notify'
 import { ApiError, api, saveBlob } from '@/api/client'
 import type { Glove } from '@/api/types'
 import { GloveThumb } from '@/components/common/GloveThumb'
+import { CreditsUrlInput } from '@/components/common/CreditsUrlInput'
 import { EntityIssues, Field, FieldIssues, OriginalBadge } from '@/components/common/form'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import {
@@ -255,6 +256,9 @@ export function GloveEditPage() {
               </Field>
               <Field label={t('gloves.credits')} hint={t('gloves.creditsHint')} entity={glove.uid} field="credits">
                 <Input value={glove.credits ?? ''} onChange={(e) => set({ credits: e.target.value || undefined })} />
+              </Field>
+              <Field label={t('credits.link')} hint={t('credits.linkHint')} entity={glove.uid} field="credits_url">
+                <CreditsUrlInput key={glove.uid} value={glove.credits_url} onChange={(url) => set({ credits_url: url })} />
               </Field>
             </CardContent>
           </Card>

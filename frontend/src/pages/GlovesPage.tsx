@@ -10,6 +10,7 @@ import { GloveThumb } from '@/components/common/GloveThumb'
 import { EntityIssues, OriginalBadge } from '@/components/common/form'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { ALL, FilterBar, FilterSelect, LIST_PAGE, matches, Pager, ScrollTable, SearchInput, useListParams, usePage } from '@/components/common/list'
+import { CreditsLink } from '@/components/common/CreditsLink'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -251,7 +252,9 @@ export function GlovesPage() {
                     {g.hidden && <OutOfPatchBadge />}
                   </span>
                 </TableCell>
-                <TableCell className="text-muted-foreground">{g.credits || '—'}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  <CreditsLink credits={g.credits} url={g.credits_url} empty="—" />
+                </TableCell>
                 <TableCell className="tabular-nums">{users || '—'}</TableCell>
                 <TableCell className="tabular-nums text-muted-foreground">{g.original_id ?? g.code ?? t('common.auto')}</TableCell>
                 <DateCells entry={g} />

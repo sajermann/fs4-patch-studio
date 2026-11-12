@@ -6,6 +6,7 @@ import { BallThumb } from '@/components/common/BallThumb'
 import type { BallSource } from '@/components/common/BallPreview'
 import { matches } from '@/components/common/list'
 import { PickerDialog, type PickerGroup } from '@/components/common/PickerDialog'
+import { CreditsLink } from '@/components/common/CreditsLink'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -106,7 +107,7 @@ export function StadiumPage() {
         label: t('stadium.groupProject'),
         items: mine
           .filter((b) => matches(query, b.name, b.credits))
-          .map((b) => ({ key: `p:${b.uid}`, icon: <BallThumb ball={b} />, title: ballName(b, t('common.unnamed')), subtitle: b.credits })),
+          .map((b) => ({ key: `p:${b.uid}`, icon: <BallThumb ball={b} />, title: ballName(b, t('common.unnamed')), subtitle: <CreditsLink credits={b.credits} url={b.credits_url} /> })),
       },
       {
         label: t('stadium.groupGame'),

@@ -139,7 +139,8 @@ def test_team_goes_with_its_links_and_kit_pictures(env):
     real = {'home': {'jersey': image(client, (1, 2, 3)), 'shorts': image(client, (4, 5, 6))}}
     save(client, {'leagues': [{'uid': 'l1', 'name': 'Liga'}],
                   'teams': [team(crest=image(client), real_kits=real, use_real_kits=True, captain='p1',
-                                 takers={'penalty': 'p1'}, leagues=['l1', 13])],
+                                 takers={'penalty': 'p1'}, leagues=['l1', 13], kit_credits='Kit maker',
+                                 kit_credits_url='kits.example.com')],
                   'players': [player()]})
     data = export(client, 'teams', ['t1'])
     with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -153,6 +154,7 @@ def test_team_goes_with_its_links_and_kit_pictures(env):
     tm = items[0]
     assert tm['leagues'] == ['l1', 13] and tm['captain'] == 'p1'
     assert tm['real_kits']['home']['shorts'].startswith('images/upload-')
+    assert (tm['kit_credits'], tm['kit_credits_url']) == ('Kit maker', 'https://kits.example.com')
 
 
 def test_player_goes_with_his_face(env):

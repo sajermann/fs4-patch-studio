@@ -7,7 +7,7 @@ from_v1() converts the older v1 contract (Portuguese keys, players nested inside
 """
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
 from . import weblink
 
@@ -18,7 +18,8 @@ from . import weblink
 # 7 = goalkeeper gloves (the user's and edited game gloves) and Player.glove; 8 = balls (the user's and edited game
 # balls) and the ball of each stadium (originals.stadium_balls); 9 = created_at / updated_at of every entry;
 # 10 = a new player's empty birthdate means "no birth date" (before: the template's date, filled in on upgrade);
-# 11 = name, credits and credits_url of a real face (copied from the face pack's manifest.json)
+# 11 = name, credits and credits_url of a real face (copied from the face pack's manifest.json); credits_url of
+# boots, gloves and balls; kit_credits / kit_credits_url of a team (one credit for its real kits)
 CONTRACT_VERSION = 11
 NO_NATIONALITY = 0  # Player.fields['nationality'] of a player with no nationality
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
@@ -132,6 +133,11 @@ class RealKit(BaseModel):
         return bool(self.jersey and self.shorts)
 
 
+# a credits link: kept only when it is an http(s) address (fsmod.weblink.normalize; 'site.com' gets https://),
+# anything else becomes None
+WebLink = Annotated[Optional[str], BeforeValidator(lambda v: weblink.normalize(v) if isinstance(v, str) else None)]
+
+
 class ScannedFace(BaseModel):
     """Real face from a FIFA 14 pack (fsmod.scanface): the pack's files of that face are copied into the project
     folder (scanface.PROJECT_DIR/<player uid>/, pack names) when the user picks it; the build converts them."""
@@ -141,12 +147,7 @@ class ScannedFace(BaseModel):
     # so the app shows it without the pack folder, and the player's share zip carries it. Missing = nothing known
     name: Optional[str] = None
     credits: Optional[str] = None
-    credits_url: Optional[str] = None  # http(s) only (fsmod.weblink.normalize)
-
-    @field_validator('credits_url', mode='before')
-    @classmethod
-    def _web_link(cls, v):
-        return weblink.normalize(v) if isinstance(v, str) else None
+    credits_url: WebLink = None
     paint_scalp: bool = True  # paint the hair color on the scalp (scanface.paint_scalp). Missing = on, as older
     # versions saved it; new faces come with False (/api/facepack/use, 06/11/2026: it helps few faces and stains
     # others, e.g. the forehead of faces whose cap hangs over it, or the ears)
@@ -253,6 +254,7 @@ class Boot(Dated):
     uid: str
     name: str = ''
     credits: Optional[str] = None  # who made it (shown in the app only)
+    credits_url: WebLink = None  # their page
     street: bool = False  # may go on the street: takes one of the few free street codes (new boots only; a game
     # boot goes on the street when its code is in boots.STREET_CODES)
     code: Optional[int] = None  # new boot: its code in the game (boots.NEW_CODES, or a free STREET_CODES one when
@@ -279,6 +281,7 @@ class Glove(Dated):
     uid: str
     name: str = ''
     credits: Optional[str] = None  # who made it (shown in the app only)
+    credits_url: WebLink = None  # their page
     code: Optional[int] = None  # new glove: its code in the game (gloves.free_codes); None or no longer valid =
     # given by the build
     texture: Optional[str] = None  # the pack's gkglove_<id>_textures.rx3 (project folder path, as sent)
@@ -302,6 +305,7 @@ class Ball(Dated):
     uid: str
     name: str = ''
     credits: Optional[str] = None  # who made it (shown in the app only)
+    credits_url: WebLink = None  # their page
     code: Optional[int] = None  # new ball: its id in the game (balls.free_ids); None or no longer valid = given by
     # the build
     mesh: Optional[str] = None  # the pack's ball_<id>.rx3 (project folder path, as sent)
@@ -358,6 +362,8 @@ class Team(Dated):
     street_kits: dict[KitKind, StreetKit] = {}  # street (FS4) clothes chosen piece by piece
     use_real_kits: bool = False  # team kits from real_kits (FIFA 14-16 packs) instead of solid color + crest
     real_kits: dict[RealKitSlot, RealKit] = {}  # kept when use_real_kits is off (switching back keeps them)
+    kit_credits: Optional[str] = None  # who made the real kits: one credit for the three (shown in the app only)
+    kit_credits_url: WebLink = None
     template: int = DEFAULT_TEMPLATE_TEAM  # generic FS4 team whose rows are cloned (default values: players, street
     # kits)
     captain: Optional[PlayerRef] = None  # Player.ref (new player uid or the game's playerid); None = new team: first

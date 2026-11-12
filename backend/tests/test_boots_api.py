@@ -37,7 +37,7 @@ def upload(client, kind, data, name):
 
 
 def new_boot(client, uid='b1', name='Mercurial', street=True):
-    return {'uid': uid, 'name': name, 'credits': 'modder', 'street': street,
+    return {'uid': uid, 'name': name, 'credits': 'modder', 'credits_url': 'modder.com/packs', 'street': street,
             'mesh': upload(client, 'mesh', b'RX3l mesh ' + uid.encode(), 'shoe_1466.rx3'),
             'texture': upload(client, 'texture', b'RX3l texture ' + uid.encode(), 'shoe_1466_0_textures.rx3'),
             'thumbnail': upload(client, 'thumbnail', png(), 'shoe 1466.png')}
@@ -103,7 +103,7 @@ def test_shared_zip_round_trip(lenient):
     assert sorted(z.namelist()) == ['boot-b1.png', 'boot-b1.rx3', 'boot-b1_textures.rx3', 'manifest.json']
     manifest = json.loads(z.read('manifest.json'))
     assert manifest == {'type': 'fs4-boot', 'version': 1, 'boot': {
-        'uid': 'b1', 'original_id': None, 'name': 'Mercurial', 'credits': 'modder', 'street': True, 'hidden': False, 'mesh': 'boot-b1.rx3',
+        'uid': 'b1', 'original_id': None, 'name': 'Mercurial', 'credits': 'modder', 'credits_url': 'https://modder.com/packs', 'street': True, 'hidden': False, 'mesh': 'boot-b1.rx3',
         'texture': 'boot-b1_textures.rx3', 'thumbnail': 'boot-b1.png',
         'created_at': saved['boots'][0]['created_at'], 'updated_at': saved['boots'][0]['updated_at']}}
     assert z.read('boot-b1.rx3') == (folder / saved['boots'][0]['mesh']).read_bytes()
@@ -124,12 +124,12 @@ def test_shared_zip_round_trip(lenient):
 
 def test_downloaded_manifest_lists_empty_fields(lenient):
     client = lenient['client']
-    boot = {**new_boot(client), 'credits': None, 'thumbnail': None}
+    boot = {**new_boot(client), 'credits': None, 'credits_url': None, 'thumbnail': None}
     saved = save(client, {'boots': [boot]})['project']['boots'][0]
     r = client.post('/api/boots/export', json={'uids': ['b1']})
     z = zipfile.ZipFile(io.BytesIO(r.content))
     assert json.loads(z.read('manifest.json'))['boot'] == {
-        'uid': 'b1', 'original_id': None, 'name': 'Mercurial', 'credits': None, 'street': True, 'hidden': False, 'mesh': 'boot-b1.rx3',
+        'uid': 'b1', 'original_id': None, 'name': 'Mercurial', 'credits': None, 'credits_url': None, 'street': True, 'hidden': False, 'mesh': 'boot-b1.rx3',
         'texture': 'boot-b1_textures.rx3', 'thumbnail': None, 'created_at': saved['created_at'],
         'updated_at': saved['updated_at']}
     # filled in by hand: the picture added to the zip and named in the manifest

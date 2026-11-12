@@ -613,6 +613,40 @@ def test_face_packs_gallery_pages_several_folders_with_their_manifests(env):
     assert state.config.face_pack_dirs == []
 
 
+def test_face_packs_in_deeper_layouts_and_versions_side_by_side(env):
+    """data/sceneassets/ (FIFA's own layout) and packs with several versions of the same face in subfolders."""
+    c, state = env['client'], env['state']
+    deep = env['tmp'] / 'gerrard'
+    fake_face_pack(deep / 'data' / 'sceneassets', [13743])
+    (deep / 'previews').mkdir()
+    versions = env['tmp'] / 'cr7'
+    for sub in ('08', '03', '12-13/screenassets'):
+        fake_face_pack(versions.joinpath(*sub.split('/')), [20801])
+    (versions / 'manifest.json').write_text(json.dumps(
+        {'type': 'fs4-faces', 'credits': 'ViP3eR', 'faces': [{'id': 20801, 'name': 'Cristiano Ronaldo'}]}), 'utf-8')
+    (versions / '08' / 'manifest.json').write_text(json.dumps(  # a version's own manifest wins over the folder's
+        {'type': 'fs4-faces', 'faces': [{'id': 20801, 'name': 'CR7 2008'}]}), 'utf-8')
+    state.config.face_pack_dirs = [str(deep), str(versions)]
+
+    packs = c.get('/api/facepack/packs').json()['packs']
+    assert [(p['name'], p['index'], p['count']) for p in packs] == \
+        [('gerrard', 0, 1), ('cr7 / 03', 1, 1), ('cr7 / 08', 1, 1), ('cr7 / 12-13', 1, 1)]
+    items = c.get('/api/facepack').json()['items']
+    assert [(f['pack'], f['id'], f.get('name')) for f in items] == [
+        ('gerrard', 13743, None), ('cr7 / 03', 20801, 'Cristiano Ronaldo'), ('cr7 / 08', 20801, 'CR7 2008'),
+        ('cr7 / 12-13', 20801, 'Cristiano Ronaldo')]
+    assert items[3]['credits'] == 'ViP3eR' and 'credits' not in items[2]
+    assert [f['pack'] for f in c.get('/api/facepack', params={'pack': items[2]['folder']}).json()['items']] == \
+        ['cr7 / 08']
+
+    project, _ = palmeiras_v2(c)
+    uid = project['players'][0]['uid']
+    r = c.post('/api/facepack/use', json={'folder': items[3]['folder'], 'face_id': 20801, 'player': uid})
+    assert r.status_code == 200, r.text
+    face = r.json()['face']
+    assert (face['pack'], face['name'], face['credits']) == ('cr7 / 12-13', 'Cristiano Ronaldo', 'ViP3eR')
+
+
 def test_face_pack_manifest_is_ignored_when_it_is_not_ours(env):
     from fsmod import facepack
     for i, data in enumerate(({'type': 'other', 'faces': []}, [1, 2], {'type': 'fs4-faces', 'version': 2, 'faces': []},

@@ -4,6 +4,7 @@
 
 # Local user configuration (paths on this PC) and caches
 /backend/config.json
+/backend/notifications.json
 /backend/originals_fingerprints.json
 /backend/cache/
 /backend/backups/

@@ -3,10 +3,12 @@ import { lazy, Suspense, useRef, useState } from 'react'
 import { toast } from '@/lib/notify'
 import { ApiError, api, imageUrl } from '@/api/client'
 import type { RealKit, RealKitFile, RealKitSlot, Team } from '@/api/types'
+import { CreditsUrlInput } from '@/components/common/CreditsUrlInput'
 import { ColorInput, Field, FieldIssues, NumberInput } from '@/components/common/form'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useI18n, type MessageKey } from '@/i18n'
@@ -295,10 +297,33 @@ function RealKitPreview({ team, slot }: { team: Team; slot: RealKitSlot }) {
 
 /** Real kits (FIFA 14–16 packs): Home, Away and Goalkeeper, each from its PNGs, plus the 3D preview of one of them
  * (Home when the screen opens). */
+/** Who made the team's real kits: one credit (text + link) for the three, shown in the app only. */
+function RealKitCredits({ team }: { team: Team }) {
+  const { t } = useI18n()
+  const { updateTeam } = useProject()
+  return (
+    <Card className="xl:col-span-2">
+      <CardHeader>
+        <CardTitle>{t('realKit.creditsTitle')}</CardTitle>
+        <CardDescription>{t('realKit.creditsDescription')}</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 sm:grid-cols-2">
+        <Field label={t('realKit.credits')} entity={team.uid} field="kit_credits">
+          <Input value={team.kit_credits ?? ''} onChange={(e) => updateTeam(team.uid, { kit_credits: e.target.value || undefined })} />
+        </Field>
+        <Field label={t('credits.link')} hint={t('credits.linkHint')} entity={team.uid} field="kit_credits_url">
+          <CreditsUrlInput key={team.uid} value={team.kit_credits_url} onChange={(url) => updateTeam(team.uid, { kit_credits_url: url })} />
+        </Field>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function RealKitEditor({ team }: { team: Team }) {
   const [previewSlot, setPreviewSlot] = useState<RealKitSlot>('home')
   return (
     <div className="grid gap-4 xl:grid-cols-2">
+      <RealKitCredits team={team} />
       {SLOTS.map((slot) => (
         <RealKitCard key={slot} team={team} slot={slot} previewing={previewSlot === slot} onPreview={() => setPreviewSlot(slot)} />
       ))}
