@@ -19,8 +19,11 @@ from . import weblink
 # balls) and the ball of each stadium (originals.stadium_balls); 9 = created_at / updated_at of every entry;
 # 10 = a new player's empty birthdate means "no birth date" (before: the template's date, filled in on upgrade);
 # 11 = name, credits and credits_url of a real face (copied from the face pack's manifest.json); credits_url of
-# boots, gloves and balls; kit_credits / kit_credits_url of a team (one credit for its real kits)
-CONTRACT_VERSION = 11
+# boots, gloves and balls; kit_credits / kit_credits_url of a team (one credit for its real kits); 12 = name and
+# number fonts (a game font or the kit's own file), name layout, name shown or not and position table of a real kit
+# (RealKit); 13 = TeamLink.hidden (a player left out of the patch in one team only: a team may have any number of
+# players, at most 13 of them in the patch)
+CONTRACT_VERSION = 13
 NO_NATIONALITY = 0  # Player.fields['nationality'] of a player with no nationality
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
@@ -30,6 +33,7 @@ KitKind = Literal['home', 'away']
 KitPart = Literal['jersey', 'shorts', 'socks']
 RealKitSlot = Literal['home', 'away', 'goalkeeper']
 REAL_KIT_FILES = ('thumbnail', 'jersey', 'shorts')  # image fields of a RealKit
+REAL_KIT_FONT_FILES = ('name_font_file', 'number_font_file', 'shorts_number_font_file')  # its own font files
 StreetPartName = Literal['top', 'bottom', 'socks']
 TakerRole = Literal['penalty', 'free_kick', 'long_free_kick', 'left_corner', 'right_corner']
 PlayerRef = Union[str, int]  # project player uid, or playerid of one of the game's own players
@@ -108,6 +112,24 @@ class StreetKit(BaseModel):
     socks: Optional[StreetPart] = None
 
 
+def random_street_kits(team, pool, rng):
+    """{'home', 'away': StreetKit} with one random piece per part drawn from pool ({part: [{'style', 'pattern'}]},
+    catalog.street_pieces_in_use) and the colors the build derives from the team's kit colors (primary = the part's
+    kit color, secondary = trim: shorts use the jersey color, the others the shorts color). For a team that comes
+    without street kits (a zip made by another tool: the FIFA 14-16 teams have none), so not every one wears the
+    template's."""
+    out = {}
+    for kind in ('home', 'away'):
+        kit = team.kit(kind)
+        parts = {}
+        for part, main, trim in (('top', kit.jersey, kit.shorts), ('bottom', kit.shorts, kit.jersey),
+                                 ('socks', kit.socks, kit.shorts)):
+            if pool.get(part):
+                parts[part] = StreetPart(pieces=[StreetPiece(**rng.choice(pool[part]))], colors=(main, trim, main))
+        out[kind] = StreetKit(**parts)
+    return out
+
+
 class KitColors(BaseModel):
     jersey: RGB
     shorts: RGB
@@ -127,6 +149,24 @@ class RealKit(BaseModel):
     front_number: bool = False  # jerseyfrontnumberplacementcode (the packs bring the front without room for it)
     shorts_number: Optional[bool] = None  # shortsnumberplacementcode (number on the shorts); None = keep the row's
     # (new team: the template's, off; original team: the game's)
+    # fonts (validated in game): a game font number, 'kit' = the kit's own file below (fsmod.kitfonts: the build
+    # gives it a free number) or None = keep the row's (new team: the template's; original team: the game's)
+    name_font: Optional[Union[int, Literal['kit']]] = None  # jerseynamefonttype: jerseyfonts/font_<n>.ttf
+    number_font: Optional[Union[int, Literal['kit']]] = None  # numberfonttype: kitnumbers_<font>_<number_color>.rx3
+    shorts_number_font: Optional[Union[int, Literal['kit']]] = None  # shortsnumberfonttype (shorts_number_color)
+    # the kit's own fonts (project paths under fonts/): a .ttf for the name, a numbers file (10 digits, their colors
+    # painted in: number_color does not change them) for the jersey and one for the shorts
+    name_font_file: Optional[str] = None
+    name_font_name: Optional[str] = None  # the .ttf's own name, shown in the app
+    number_font_file: Optional[str] = None
+    shorts_number_font_file: Optional[str] = None
+    name_layout: Optional[int] = None  # jerseynamelayouttype: 0 straight, 1 arc (kit.NAME_LAYOUTS); None = the row's
+    # where the name and numbers go, used when the kit is built from the PNGs (new team): False = no name on the back
+    # (its rectangles zeroed; the game prints the name whatever jerseybacknameplacementcode says) ...
+    show_name: bool = True
+    # ... and the kit's own position table (kit.REAL_POSITIONS order: 8 rectangles u0, v0, u1, v1), e.g. the one a
+    # FIFA 14 kit carries; None = kit.REAL_POSITIONS
+    positions: Optional[list[tuple[float, float, float, float]]] = Field(default=None, min_length=8, max_length=8)
 
     @property
     def complete(self):
@@ -166,6 +206,10 @@ class TeamLink(BaseModel):
     number: Optional[int] = None  # None: new team = the template's (original player: his own); game team = a free one
     position: Optional[int] = None  # None: new team = the template's (original player: his own); game team = the
     # player's position in his first team
+    # True: left out of the patch in this team only (he stays in its roster in the app; Player.hidden leaves him out
+    # of every team); a game player hidden in his own game team leaves it in the patch. None (not False) = in it, so
+    # the saved file only has it where it is set
+    hidden: Optional[bool] = None
 
 
 class OriginalPlayerSnapshot(BaseModel):
@@ -370,7 +414,9 @@ class Team(Dated):
     # kits)
     captain: Optional[PlayerRef] = None  # Player.ref (new player uid or the game's playerid); None = new team: first
     # player, original team: the game's
-    takers: dict[TakerRole, PlayerRef] = {}  # set pieces; a role left out = the captain (original team: the game's)
+    # set pieces; a role left out = the captain, or the first outfield player when the captain is the goalkeeper
+    # (original team: the game's)
+    takers: dict[TakerRole, PlayerRef] = {}
     lineups: list[Lineup] = []  # starting lineup per game mode (fs4lineup); a mode without one = the game's pick
     hidden: bool = False  # left out of the patch (with its players), e.g. not ready yet
 
@@ -446,7 +492,7 @@ class WorldTour(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10, 11] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []
@@ -472,8 +518,13 @@ class Project(Entity):
         return [p for p in self.players if p.is_original]
 
     def roster(self, team):
-        """The project's players of a team (TeamKey: new team uid or the game's teamid), in project order."""
+        """The project's players of a team (TeamKey: new team uid or the game's teamid), in project order; hidden in
+        the team or not (visible() takes those out)."""
         return [p for p in self.players if p.link(team)]
+
+    def hidden_in(self, team):
+        """Player.ref of the project's players left out of the patch in a team: hidden there, or hidden players."""
+        return {p.ref for p in self.players if (lk := p.link(team)) and (lk.hidden or p.hidden)}
 
     @property
     def new_teams(self):
@@ -512,7 +563,10 @@ class Project(Entity):
             links = [lk for lk in p.teams if lk.team not in left_out]
             if p.hidden or (p.teams and not links):  # every team of the player is hidden
                 continue
-            players.append(p if len(links) == len(p.teams) else p.model_copy(update={'teams': links}))
+            shown = [lk for lk in links if not lk.hidden]  # hidden in a team: not in that team in the patch
+            if links and not shown and not p.is_original:  # hidden in every team (a game player leaves them)
+                continue
+            players.append(p if len(shown) == len(p.teams) else p.model_copy(update={'teams': shown}))
         left_out_players = {p.uid for p in self.players if not p.is_original} - {p.uid for p in players}
         world_tour = WorldTour(**{side: [s for s in getattr(self.world_tour, side) if s.player not in left_out_players]
                                   for side in FRIENDLY_TEAM_SIZES})

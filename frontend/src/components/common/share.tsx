@@ -3,7 +3,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from '@/lib/notify'
 import { ApiError, api, saveBlob } from '@/api/client'
-import type { Dated, ShareKind, ShareProblem } from '@/api/types'
+import type { Dated, Player, ShareKind, ShareProblem } from '@/api/types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { hasMessage, useI18n, type MessageKey, type TFunction } from '@/i18n'
 import { analyzeShare, entryName, mergeShared, planSingle, replaceEntry, type ImportKind, type ShareAnalysis, type SharedEntry } from '@/lib/share'
 import { useKeepBack } from '@/lib/back'
+import { useFitImported } from '@/lib/members'
 import { useProject } from '@/state/project'
 
 // ---------------------------------------------------------------- selection in the lists
@@ -215,6 +216,7 @@ export function ZipImportButton({
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<Pending | null>(null)
   const input = useRef<HTMLInputElement>(null)
+  const fitImported = useFitImported()
 
   const apply = async (p: Pending) => {
     setPending(null)
@@ -224,7 +226,12 @@ export function ZipImportButton({
       const items = admit ? admit(got, [...p.analysis.replaces.values()]) : got
       const hidden = (e: SharedEntry) => !!(e as { hidden?: boolean }).hidden
       const out = items.filter((e, k) => hidden(e) && !hidden(got[k])).length
-      setDraft((project) => mergeShared(kind, project, items, p.analysis))
+      // players: in a team that already has max_roster in the patch they join hidden there (no dialog)
+      const fit = kind === 'players' ? await fitImported(items as unknown as Player[]) : undefined
+      setDraft((project) => {
+        const merged = mergeShared(kind, project, items, p.analysis)
+        return fit ? fit(project, merged) : merged
+      })
       requestSave()
       const ignored = [...p.analysis.missing.values()].reduce((n, l) => n + l.length, 0)
       toast.success(t('share.imported', { count: items.length }), {

@@ -939,6 +939,26 @@ def test_real_kit_preview_prints_name_and_numbers(env):
     with_number = c.get('/api/preview/real-kit/shorts.png', params={**shorts, 'shorts_number': True}).content
     assert with_number != without
 
+    # a built kit (not the game's jersey): its own fonts, position table and no name
+    built = {'image': home['jersey'], 'number': 5, 'name': 'Puyol', 'team': 241, 'kind': 0, 'number_color': 5}
+    named = c.get('/api/preview/real-kit/jersey.png', params=built).content
+    no_name = c.get('/api/preview/real-kit/jersey.png', params={**built, 'show_name': False}).content
+    other_font = c.get('/api/preview/real-kit/jersey.png', params={**built, 'name_font': 3}).content
+    assert len({named, no_name, other_font}) == 3
+    table = ','.join(['0.6,0.2,0.4,0.1'] * 8)
+    moved = c.get('/api/preview/real-kit/jersey.png', params={**built, 'positions': table})
+    assert moved.status_code == 200 and moved.content != named
+    assert c.get('/api/preview/real-kit/jersey.png', params={**built, 'positions': '1,2'}).status_code == 422
+
+    # the kit's own fonts (project files under fonts/)
+    from fsmod import chunk, kitfonts
+    game = env['state'].game
+    ttf = env['state'].store.save_font_file('a.ttf', chunk.decode(game.read_entry(kitfonts.NAME_FILE.format(9))[2]))
+    numbers = env['state'].store.save_font_file('n.rx3', chunk.decode(
+        game.read_entry(kitfonts.NUMBERS_FILE.format(3, 4))[2]))
+    own = c.get('/api/preview/real-kit/jersey.png', params={**built, 'name_font_file': ttf, 'number_font_file': numbers})
+    assert own.status_code == 200 and own.content not in (named, other_font)
+
 
 def test_editing_an_original_player_and_converting_old_game_links(env):
     """Editing one of the game's players starts from the game; a project saved with Team.game_players and

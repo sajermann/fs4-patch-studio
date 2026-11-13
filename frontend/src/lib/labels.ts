@@ -42,7 +42,8 @@ export const REAL_KIT_LABELS = { home: 'kit.home', away: 'kit.away', goalkeeper:
   MessageKey
 >
 
-/** teamkits number color palette (same as FIFA); swatches are approximate (the game keeps only the index). */
+/** teamkits number color palette (same as FIFA); swatches are approximate (the game keeps only the index; 18 seen in
+ * game as a coral red). */
 export const NUMBER_COLORS: { value: number; label: MessageKey; hex: string }[] = [
   { value: 1, label: 'color.white', hex: '#f2f2f2' },
   { value: 2, label: 'color.black', hex: '#0c0c0c' },
@@ -61,6 +62,7 @@ export const NUMBER_COLORS: { value: number; label: MessageKey; hex: string }[] 
   { value: 15, label: 'color.lightYellow', hex: '#cccc67' },
   { value: 16, label: 'color.gold', hex: '#9d884e' },
   { value: 17, label: 'color.goldenYellow', hex: '#ffcc33' },
+  { value: 18, label: 'color.coral', hex: '#ef5a4a' },
   { value: 19, label: 'color.darkGreen', hex: '#003c00' },
 ]
 

@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useI18n } from '@/i18n'
-import { firstFreeNumber, keyOfPath, leaveTeam, linkedLeague, linkedTeam, linkOf, playerName, playerOf, playerRef, rosterOf, takePlace, teamKey } from '@/lib/players'
+import { GOALKEEPER } from '@/lib/teams'
+import { firstFreeNumber, keyOfPath, linkedLeague, linkedTeam, linkOf, playerName, playerOf, playerRef, rosterOf, takePlace, teamKey, teamsWith } from '@/lib/players'
 import { newUid, useProject } from '@/state/project'
 import { useCatalog, useLookups, useOriginalPlayers } from '@/state/queries'
 
@@ -44,7 +45,8 @@ export interface Member {
   position?: number | null
   avatar: ReactNode
   player?: Player // project entry (new or edited)
-  hidden?: boolean // project player out of the patch: listed, but takes no place
+  hidden?: boolean // out of the patch in this team (hidden here or out of the patch altogether): listed, takes no place
+  outOfPatch?: boolean // the player is out of the patch altogether (Player.hidden), over being hidden in the team
 }
 
 /** Players of a team (pure): for one of the game's teams its own players (`squad`, as the game has them; an edited one
@@ -69,7 +71,8 @@ export function membersOf(
       position: link?.position ?? inherited?.position ?? own?.position,
       avatar: <PlayerAvatar player={p} />,
       player: p,
-      hidden: p.hidden,
+      hidden: !!(p.hidden || link?.hidden),
+      outOfPatch: !!p.hidden,
     }
   }
   const out: Member[] = []
@@ -217,49 +220,86 @@ const withLink = (project: Project, ref: PlayerRef, team: TeamKey, link: Omit<Te
   }
 }
 
-/** Putting a player into a team. When the team is full a dialog asks who leaves it: he leaves that team only (a free
- * agent when it was his only one) and the joining player takes his number, position, captaincy, set pieces and
- * lineup place. join(ref, team): ref = Player.ref (a game player not in the project yet gets an entry first). */
+/** The project with a player shown or hidden in one team (TeamLink.hidden): hidden, he stays in its roster but out
+ * of the patch there (the game's players need an entry first, see useGamePlayerEntry). */
+export const hideInTeam = (project: Project, ref: PlayerRef, team: TeamKey, hidden: boolean): Project => {
+  const player = playerOf(project, ref)
+  return { ...project, players: project.players.map((p) => (p === player ? { ...p, teams: teamsWith(p, team, { hidden }) } : p)) }
+}
+
+/** Fetches the game's squad of a team (new team: none), cached like useSquad. */
+function useFetchSquad() {
+  const queryClient = useQueryClient()
+  return async (team: TeamKey) =>
+    typeof team === 'number'
+      ? (
+          await queryClient.fetchQuery({
+            queryKey: ['originals', 'players', squadParams(team)],
+            queryFn: () => api.originalPlayers(squadParams(team)),
+            staleTime: Infinity,
+          })
+        ).items
+      : []
+}
+
+interface PendingJoin {
+  ref: PlayerRef
+  name: string
+  team: TeamKey
+  candidates: Member[]
+  numbers: (number | null | undefined)[]
+}
+
+/** Putting a player into a team: a team may have any number of players, at most max_roster of them in the patch.
+ * When the team already has that many in the patch a dialog asks who is left out of the patch in it for him (that
+ * one stays in the team, hidden there; the joining player takes his number, position, captaincy, set pieces and
+ * lineup place), or he joins hidden himself. join(ref, team): ref = Player.ref (a game player not in the project yet
+ * gets an entry first). */
 export function useJoinTeam() {
   const { t } = useI18n()
   const { draft, setDraft, defaults } = useProject()
   const catalog = useCatalog().data
-  const queryClient = useQueryClient()
   const ensure = useGamePlayerEntry()
+  const fetchSquad = useFetchSquad()
   const teamName = useTeamName()
   const max = catalog?.max_roster ?? 13
-  const [pending, setPending] = useState<{ ref: PlayerRef; name: string; team: TeamKey; candidates: Member[] } | null>(null)
-  const [leaving, setLeaving] = useState<string>()
+  const [pending, setPending] = useState<PendingJoin | null>(null)
+  const [hiding, setHiding] = useState<string>()
 
   const join = async (ref: PlayerRef, team: TeamKey) => {
     if (typeof ref === 'number' && !(await ensure(ref))) return
-    const squad =
-      typeof team === 'number'
-        ? (await queryClient.fetchQuery({
-            queryKey: ['originals', 'players', squadParams(team)],
-            queryFn: () => api.originalPlayers(squadParams(team)),
-            staleTime: Infinity,
-          })).items
-        : []
-    const members = membersOf(draft, team, squad, defaults, t('common.unnamed')).filter((m) => !m.hidden)
+    const all = membersOf(draft, team, await fetchSquad(team), defaults, t('common.unnamed'))
+    const members = all.filter((m) => !m.hidden)
+    // a new team gets a free number; one of the game's: the build gives a free one
+    const number = typeof team === 'string' ? firstFreeNumber(all.map((m) => m.number)) : undefined
     if (members.length < max) {
-      // a new team gets a free number; one of the game's: the build gives a free one
-      const number = typeof team === 'string' ? firstFreeNumber(members.map((m) => m.number)) : undefined
       setDraft((p) => withLink(p, ref, team, { number }))
       return
     }
     const joiner = playerOf(draft, ref)
-    setLeaving(undefined)
-    setPending({ ref, team, candidates: members, name: joiner ? playerName(joiner, t('common.unnamed')) : String(ref) })
+    setHiding(undefined)
+    setPending({
+      ref,
+      team,
+      candidates: members,
+      numbers: all.map((m) => m.number),
+      name: joiner ? playerName(joiner, t('common.unnamed')) : String(ref),
+    })
   }
 
   const confirm = async () => {
-    const left = pending?.candidates.find((m) => String(m.ref) === leaving)
-    if (!pending || !left) return
-    if (left.kind === 'squad' && !(await ensure(left.ref as number))) return
+    if (!pending) return
     const { ref, team } = pending
+    const out = pending.candidates.find((m) => String(m.ref) === hiding)
+    if (!out) {
+      const number = typeof team === 'string' ? firstFreeNumber(pending.numbers) : undefined
+      setDraft((p) => withLink(p, ref, team, { number, hidden: true }))
+      setPending(null)
+      return
+    }
+    if (out.kind === 'squad' && !(await ensure(out.ref as number))) return
     setDraft((p) =>
-      withLink(leaveTeam(takePlace(p, team, left.ref, ref), left.ref, team), ref, team, { number: left.number, position: left.position }),
+      withLink(hideInTeam(takePlace(p, team, out.ref, ref), out.ref, team, true), ref, team, { number: out.number, position: out.position }),
     )
     setPending(null)
   }
@@ -268,10 +308,10 @@ export function useJoinTeam() {
     <Dialog open={!!pending} onOpenChange={(o) => !o && setPending(null)}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('join.title', { team: pending ? teamName(pending.team) : '' })}</DialogTitle>
+          <DialogTitle>{t('join.title', { team: pending ? teamName(pending.team) : '', max })}</DialogTitle>
           <DialogDescription>{t('join.description', { max, name: pending?.name ?? '' })}</DialogDescription>
         </DialogHeader>
-        <Select value={leaving ?? ''} onValueChange={setLeaving}>
+        <Select value={hiding ?? ''} onValueChange={setHiding}>
           <SelectTrigger className="w-full">
             <SelectValue placeholder={t('join.pick')} />
           </SelectTrigger>
@@ -288,12 +328,72 @@ export function useJoinTeam() {
           <Button variant="outline" onClick={() => setPending(null)}>
             {t('common.cancel')}
           </Button>
-          <Button disabled={!leaving} onClick={() => void confirm()}>
-            {t('join.confirm')}
-          </Button>
+          <Button onClick={() => void confirm()}>{hiding ? t('join.confirm') : t('join.confirmHidden')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
   return { join, dialog }
+}
+
+/** Players that came in a shared zip fitted to the patch limit of their teams (no dialog): in each team they joined,
+ * the ones already in the project keep how they were; the newcomers fill the places left up to max (a goalkeeper
+ * first when the team has none in the patch, then by overall) and the others join hidden in that team. squads: the
+ * game's squad of each game team they joined. */
+export function fitImportedRosters(
+  before: Project,
+  after: Project,
+  imported: string[],
+  squads: Map<number, OriginalPlayer[]>,
+  max: number,
+): Project {
+  const oldLink = (p: Player, team: TeamKey) => {
+    const old = before.players.find((b) => b.uid === p.uid || (p.original_id != null && b.original_id === p.original_id))
+    return old && linkOf(old, team)
+  }
+  const players = new Map(after.players.map((p) => [p.uid, p]))
+  const newcomers = new Map<TeamKey, Player[]>()
+  for (const uid of imported) {
+    const p = players.get(uid)
+    if (!p) continue
+    for (const lk of p.teams) {
+      const old = oldLink(p, lk.team)
+      if (old) {
+        const cur = players.get(uid)!
+        players.set(uid, { ...cur, teams: teamsWith(cur, lk.team, { hidden: old.hidden }) }) // as it was
+      } else if (!p.hidden && !lk.hidden) newcomers.set(lk.team, [...(newcomers.get(lk.team) ?? []), p])
+    }
+  }
+  let project: Project = { ...after, players: [...players.values()] }
+  for (const [team, incoming] of newcomers) {
+    const coming = new Set(incoming.map((p) => p.uid))
+    const shown = membersOf(project, team, typeof team === 'number' ? (squads.get(team) ?? []) : [], {}, '').filter(
+      (m) => !m.hidden && !(m.player && coming.has(m.player.uid)),
+    )
+    let places = max - shown.length
+    const byOverall = [...incoming].sort((a, b) => (b.skills?.overall ?? 0) - (a.skills?.overall ?? 0))
+    const keeper = shown.some((m) => m.position === GOALKEEPER)
+      ? undefined
+      : byOverall.find((p) => linkOf(p, team)?.position === GOALKEEPER)
+    const order = keeper ? [keeper, ...byOverall.filter((p) => p !== keeper)] : byOverall
+    const left = new Set<string>()
+    for (const p of order) if (places-- <= 0) left.add(p.uid)
+    project = {
+      ...project,
+      players: project.players.map((p) => (left.has(p.uid) ? { ...p, teams: teamsWith(p, team, { hidden: true }) } : p)),
+    }
+  }
+  return project
+}
+
+/** fitImportedRosters with the game's squads of the teams the imported players joined fetched first. */
+export function useFitImported() {
+  const catalog = useCatalog().data
+  const fetchSquad = useFetchSquad()
+  return async (players: Player[]) => {
+    const games = [...new Set(players.flatMap((p) => p.teams.map((l) => l.team)))].filter((k): k is number => typeof k === 'number')
+    const squads = new Map(await Promise.all(games.map(async (g) => [g, await fetchSquad(g)] as const)))
+    const max = catalog?.max_roster ?? 13
+    return (before: Project, after: Project) => fitImportedRosters(before, after, players.map((p) => p.uid), squads, max)
+  }
 }

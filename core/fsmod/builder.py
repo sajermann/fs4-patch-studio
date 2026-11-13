@@ -35,8 +35,8 @@ from dataclasses import dataclass, field
 from PIL import Image
 
 from . import (balls, big, body, boots, buildcache, chunk, crest, dbcrc, facework, gamepatches, gloves, kit,
-               leaguelogo, locale, model, original_league, original_player, original_team, photo, preview, rx3tex,
-               scanface, t3db, workers, world_tour)
+               kitfonts, leaguelogo, locale, model, original_league, original_player, original_team, photo, preview,
+               rx3tex, scanface, t3db, workers, world_tour)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
 HIDDEN_LEAGUES = {382, 76, 2092, 2095, 2097}  # ids the league selector never shows
@@ -82,6 +82,7 @@ BENCH_POSITION = 28  # teamplayerlinks.position SUB (catalog.POSITIONS)
 TAKER_FIELDS = ('captainid', 'penaltytakerid', 'freekicktakerid', 'leftcornerkicktakerid',
                 'rightcornerkicktakerid', 'longkicktakerid')
 TAKER_ROLES = original_team.TAKER_ROLES  # model.TakerRole -> teams column
+GOALKEEPER = gloves.GOALKEEPER  # teamplayerlinks.position of the goalkeeper
 
 
 def lineup_order(lineup, roster_uids):
@@ -408,7 +409,8 @@ def _real_kit_files(game, tid, kind_n, real, assets_dir, crest_img, uid, cache=N
     if cache is not None:
         crest_part = [] if 'thumbnail' in sources or crest_img is None else [crest_img.size, crest_img.tobytes()]
         k = buildcache.key('real_kit', cache.game_key, tid, kind_n, *(
-            x for part in sorted(sources) for x in (part, sources[part])), *crest_part)
+            x for part in sorted(sources) for x in (part, sources[part])), *crest_part,
+            repr((real.positions, real.show_name)))
         files = cache.get(k)
         if files is not None:
             return files, [f'{kit.kit_name(tid, kind_n)}: reused (cache)']
@@ -420,7 +422,7 @@ def _real_kit_files(game, tid, kind_n, real, assets_dir, crest_img, uid, cache=N
         except OSError as e:
             raise BuildError(f'cannot read kit image {getattr(real, part)}: {e}', uid) from e
     files = kit.build_real(game, tid, kind_n, images['jersey'], images['shorts'], images.get('thumbnail'), crest_img,
-                           log=lines.append)
+                           log=lines.append, positions=real.positions, show_name=real.show_name)
     if k is not None:
         cache.put(k, files)
     return files, lines
@@ -454,8 +456,70 @@ def _street_kit_fields(db, table, row, street):
                 db.put(table, row, f'{col}_color_{which}_{ch}', v)
 
 
-def _real_kit_fields(db, table, row, real):
-    """teamkits fields of a real kit: name/number colors, collar, front number."""
+class _KitFonts:
+    """The real kits' own fonts (fsmod.kitfonts): a free font number for each different file in use, its files as
+    loose files (result.loose), and the number each kit's font field gets (value)."""
+
+    def __init__(self, project, game, assets_dir, result, say):
+        self.assets_dir = assets_dir
+        self.game = game
+        self._digests = {}
+        kits = [real for tm in project.teams if tm.use_real_kits
+                for real in (tm.real_kit(slot) for slot in ('home', 'away', 'goalkeeper')) if real]
+        self.ids = kitfonts.assign_font_ids(kits, self.read)
+        left = sum(v is None for v in self.ids.values())
+        if left:
+            say(f'real kit fonts: {left} without a free font number, a game font is used instead')
+        written = set()
+        for real in kits:
+            for field, file_field in kitfonts.FONT_PARTS:
+                font = self.value(real, field) if getattr(real, field) == kitfonts.KIT else None
+                if font is None:
+                    continue
+                data = self.read(getattr(real, file_field))
+                if field == 'name_font':
+                    name = kitfonts.NAME_FILE.format(font)
+                    if name not in written:
+                        result.loose[name] = chunk.chunkzip(kitfonts.name_file(data))
+                        say(f'name font {font}: {real.name_font_name or getattr(real, file_field)}')
+                    written.add(name)
+                    continue
+                color = real.number_color if field == 'number_font' else real.shorts_number_color
+                name = kitfonts.NUMBERS_FILE.format(font, color)
+                if name not in written:
+                    try:
+                        result.loose[name] = chunk.chunkzip(kitfonts.number_file(game, data, font, color))
+                    except (kitfonts.FontError, ValueError) as e:
+                        raise BuildError(f'{getattr(real, file_field)}: not a kit numbers file ({e})') from e
+                    say(f'number font {font} (color {color})')
+                written.add(name)
+
+    def read(self, path):
+        try:
+            with open(os.path.join(self.assets_dir, path), 'rb') as f:
+                return f.read()
+        except OSError as e:
+            raise BuildError(f'cannot read the kit font {path}: {e}') from e
+
+    def has_own(self, font, color):
+        """A kit's own numbers file got font number `font` in `color` (written as a loose file)."""
+        return any(key[0] == 'number' and key[2] == color and n == font for key, n in self.ids.items())
+
+    def value(self, real, field):
+        """Font number the teamkits field gets for a RealKit font field, None = keep the row's."""
+        v = getattr(real, field)
+        if v != kitfonts.KIT:
+            return v
+        path = getattr(real, dict(kitfonts.FONT_PARTS)[field])
+        if not path:
+            return None
+        if path not in self._digests:
+            self._digests[path] = kitfonts.digest(self.read(path))
+        return self.ids.get(kitfonts.font_key(real, field, self._digests[path]))
+
+
+def _real_kit_fields(db, table, row, real, fonts=None):
+    """teamkits fields of a real kit: name/number colors, collar, front number, fonts and name layout."""
     for ch, v in zip('rgb', real.name_color):
         db.put(table, row, f'jerseynamecolor{ch}', v)
     db.put(table, row, 'numbercolor', real.number_color)
@@ -464,6 +528,25 @@ def _real_kit_fields(db, table, row, real):
     db.put(table, row, 'jerseyfrontnumberplacementcode', 1 if real.front_number else 0)
     if real.shorts_number is not None:
         db.put(table, row, 'shortsnumberplacementcode', 1 if real.shorts_number else 0)
+    for name, field in (('name_font', 'jerseynamefonttype'), ('number_font', 'numberfonttype'),
+                        ('shorts_number_font', 'shortsnumberfonttype'), ('name_layout', 'jerseynamelayouttype')):
+        value = fonts.value(real, name) if fonts and name != 'name_layout' else getattr(real, name)
+        if value is not None and value != kitfonts.KIT:
+            db.put(table, row, field, value)
+    if fonts:  # the numbers must always show: a font without the kit's color (no file) would be a broken texture
+        for field, color in (('numberfonttype', real.number_color), ('shortsnumberfonttype', real.shorts_number_color)):
+            font = db.get(table, row, field)
+            if not (kit.number_font_ok(fonts.game, font, color) or fonts.has_own(font, color)):
+                db.put(table, row, field, kitfonts.FALLBACK_NUMBER_FONT)
+
+
+def set_piece_fallback(captain, squad, positions):
+    """Who takes a set piece nobody was given: the captain, unless he is the goalkeeper (a goalkeeper takes one only
+    when chosen); then the first outfield player of squad (playerids in order; positions: playerid -> position), else
+    the captain."""
+    if positions.get(captain) != GOALKEEPER:
+        return captain
+    return next((pid for pid in squad if positions.get(pid) not in (None, GOALKEEPER)), captain)
 
 
 def free_number(used):
@@ -504,11 +587,16 @@ def _game_team_squad(db, tid, leave, update, join, entity):
         if position is not None:
             db.put(links, row, 'position', position)
         db.append('teamplayerlinks', row, model_raw)
-    squad = [db.get(links, links.records[k], 'playerid') for k in db.rows('teamplayerlinks', 'teamid', tid)]
+    squad_rows = [links.records[k] for k in db.rows('teamplayerlinks', 'teamid', tid)]
+    squad = [db.get(links, r, 'playerid') for r in squad_rows]
+    positions = {db.get(links, r, 'playerid'): db.get(links, r, 'position') for r in squad_rows}
     heir = join[0][0] if join else (squad[0] if squad else None)
+    # set pieces: the heir unless he is the goalkeeper (then the first outfield player who joined, else of the squad)
+    outfield = [pid for pid, _, _ in join] + squad
+    taker_heir = set_piece_fallback(heir, outfield, positions)
     for f in TAKER_FIELDS:
         if db.get(teams, team_row, f) in leave and heir is not None:
-            db.put(teams, team_row, f, heir)
+            db.put(teams, team_row, f, heir if f == 'captainid' else taker_heir)
 
 
 def _team_league_ids(tm, league_ids, existing):
@@ -572,7 +660,7 @@ def _build_original_league(db, game, lg, assets_dir, texts, entries, result, say
                 result.loose[name] = data
 
 
-def _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids, cache=None):
+def _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids, cache=None, fonts=None):
     """Applies an original team entry (Team.original_id) to the game's own rows, texts and files, only where it
     differs from what was loaded (original_team.changes). player_ids: {new player uid: playerid}. Returns the jobs
     that make its image files (() -> ({internal name: bytes}, log lines)), run in the image pool."""
@@ -632,7 +720,7 @@ def _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids,
             if real is None:
                 continue
             if 'settings' in parts and n in kit_rows:
-                _real_kit_fields(db, team_kits, kit_rows[n], real)
+                _real_kit_fields(db, team_kits, kit_rows[n], real, fonts)
             if 'jersey' in parts or ch.kits_mode:
                 # a new jersey is a real kit of its own (crest painted in, FIFA 16 positions): built like a new team's
                 thumb = real.thumbnail if 'thumbnail' in parts else None
@@ -1016,6 +1104,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
     game.ensure_complete()
     db = Db(game.original_db(), game.meta)
     step('database', 1, 1)
+    fonts = _KitFonts(project, game, assets_dir, result, say)  # the real kits' own fonts
     locale_data = game.locale()[1]
     locale_keys = locale.keys(locale_data)
     texts, entries = {}, {}
@@ -1235,8 +1324,12 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
         db.put(teams, row, 'teamname', tm.name[:30])
         captain = pids.get(tm.captain, pids[members[0][0]])
         db.put(teams, row, 'captainid', captain)
+        # a role left unset: the captain, or the first outfield player when the captain is the goalkeeper (a
+        # goalkeeper takes a set piece only when the project says so)
+        positions = {pids[ref]: first_position.get(ref) for ref, _ in members}
+        unset = set_piece_fallback(captain, [pids[ref] for ref, _ in members], positions)
         for role, f in TAKER_ROLES.items():
-            db.put(teams, row, f, pids.get(tm.takers.get(role), captain))
+            db.put(teams, row, f, pids.get(tm.takers.get(role), unset))
         for n, rgb in (('1', primary), ('2', secondary), ('3', primary)):
             for ch, v in zip('rgb', rgb):
                 db.put(teams, row, f'teamcolor{n}{ch}', v)
@@ -1265,7 +1358,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
             _street_kit_fields(db, team_kits, r, tm.street_kits.get(kind))
             real = tm.real_kit(kind)
             if real:
-                _real_kit_fields(db, team_kits, r, real)
+                _real_kit_fields(db, team_kits, r, real, fonts)
             db.append('teamkits', r, team_kits.raw_records[k])
             if kind == 'home':
                 home_row = (r, team_kits.raw_records[k])
@@ -1277,7 +1370,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
             db.put(team_kits, r, 'teamkittypetechid', 2)
             db.put(team_kits, r, 'teamkitid', kit_id)
             kit_id += 1
-            _real_kit_fields(db, team_kits, r, goalkeeper)
+            _real_kit_fields(db, team_kits, r, goalkeeper, fonts)
             db.append('teamkits', r, home_row[1])
 
         # texts
@@ -1349,7 +1442,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
     for k, tm in enumerate(project.original_teams):
         step('teams', len(project.new_teams) + k, len(project.teams))
         lids = _team_league_ids(tm, league_ids, existing)
-        for job in _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids, cache):
+        for job in _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids, cache, fonts):
             future = pool.submit(job)
             jobs.append(future)
             original_jobs.add(future)

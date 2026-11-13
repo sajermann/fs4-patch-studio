@@ -8,7 +8,7 @@ import datetime
 from collections import Counter
 from functools import cached_property
 
-from . import balls, boots, builder, gloves, locale, preview
+from . import balls, boots, builder, chunk, gloves, kit, locale, preview
 from .game import LOCALE_ENTRIES, LOCALE_FILES
 from .original_team import STREET_PARTS
 
@@ -432,9 +432,60 @@ class Catalog:
                 for (n, gk), tactics in sorted(modes.items(), key=lambda m: (-m[0][0], not m[0][1]))]
 
     @cached_property
+    def kit_fonts(self):
+        """Fonts a real kit can use: {'name': [{'id', 'name'}] (jerseyfonts/font_<id>.ttf, the font's own name),
+        'number': {font: [palette colors it has digits in]} (kitnumbers_<font>_<color>.rx3)}."""
+        import io
+        from PIL import ImageFont
+        names = []
+        for n in kit.name_fonts(self.game):
+            try:
+                data = chunk.decode(self.game.read_entry(kit.NAME_FONT_FILE.format(n))[2])
+                family, style = ImageFont.truetype(io.BytesIO(data), 12).getname()
+                name = ' '.join(p for p in (family.strip(), (style or '').strip()) if p and p != 'Regular')
+            except Exception:  # an unreadable font still has its number
+                name = None
+            names.append({'id': n, 'name': name})
+        numbers = {}
+        for font in range(64):
+            colors = [c for c in kit.NUMBER_COLORS if kit.number_font_ok(self.game, font, c)]
+            if colors:
+                numbers[font] = colors
+        return {'name': names, 'number': numbers}
+
+    @cached_property
+    def kit_print(self):
+        """{teamid: {kit kind 0/1/2: {name_font, number_font, shorts_number_font, name_layout}}} of every team's
+        teamkits rows: what a real kit keeps when it does not set its own (RealKit fields left empty)."""
+        t = self.db.table('teamkits')
+        fields = {'name_font': 'jerseynamefonttype', 'number_font': 'numberfonttype',
+                  'shorts_number_font': 'shortsnumberfonttype', 'name_layout': 'jerseynamelayouttype'}
+        out = {}
+        for r in t.records:
+            kind = self.db.get(t, r, 'teamkittypetechid')
+            if kind in (0, 1, 2):
+                out.setdefault(self.db.get(t, r, 'teamtechid'), {})[kind] = {
+                    k: self.db.get(t, r, f) for k, f in fields.items()}
+        return out
+
+    @cached_property
     def street_options(self):
         """{part: {style: [patterns]}} of the street kit pieces (top/bottom/socks) available in the game."""
         return preview.street_options(self.game)
+
+    @cached_property
+    def street_pieces_in_use(self):
+        """{part: [{'style', 'pattern'}]}: the street pieces some game team wears (home or away) and the game has
+        files for, in order: the pool a team without street kits of its own draws from (model.random_street_kits)."""
+        t = self.db.table('teamkits')
+        options = self.street_options
+        out = {}
+        for part, col, slots in STREET_PARTS:
+            seen = {(self.db.get(t, r, f'{col}_geo_type_{n}'), self.db.get(t, r, f'{col}_texture_pattern_{n}'))
+                    for r in t.records if self.db.get(t, r, 'teamkittypetechid') in (0, 1)
+                    for n in range(1, slots + 1)}
+            out[part] = [{'style': s, 'pattern': p} for s, p in sorted(seen) if p in options[part].get(s, ())]
+        return out
 
     def template_street(self, teamid):
         """{'home'|'away': {part: [{'style', 'pattern'}]}}: the street pieces of each part in a template team's

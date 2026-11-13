@@ -37,9 +37,9 @@ def _appearance(catalog, height, rng):
 
 
 def generate(project, team, catalog, rng=random):
-    """The new Players that complete the roster of a new team (uid), up to builder.MAX_ROSTER. Hidden players stay
-    out of the patch, so they do not take a place."""
-    count = builder.MAX_ROSTER - sum(not p.hidden for p in project.roster(team))
+    """The new Players that complete the roster of a new team (uid), up to builder.MAX_ROSTER in the patch. Players
+    out of the patch (hidden, or hidden in this team) do not take a place."""
+    count = builder.MAX_ROSTER - len(project.roster(team)) + len(project.hidden_in(team))
     numbers = rng.sample([n for n in NUMBERS if n not in _taken_numbers(project, team, catalog)], max(count, 0))
     names = {p.shown_name for p in project.roster(team)}
     indexes = (i for i in itertools.count(1) if f'Player {i:02d}' not in names)

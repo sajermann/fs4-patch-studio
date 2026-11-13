@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
@@ -82,7 +83,8 @@ function LinkIssues({ player, index }: { player: string; index: number }) {
 }
 
 /** The player's clubs and national teams (TeamLink): each with its own number and position. Adding a team that is
- * full asks who leaves it (useJoinTeam); leaving all of them at once asks for confirmation. */
+ * that already has max_roster in the patch asks who stays out of it (useJoinTeam); each team can leave him out of the
+ * patch there only (Player.hidden leaves him out of all); leaving all of them at once asks for confirmation. */
 export function PlayerTeamsCard({ player }: { player: Player }) {
   const { t } = useI18n()
   const { setDraft, updatePlayer } = useProject()
@@ -128,6 +130,7 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
                 <TableHead>{t('players.colTeam')}</TableHead>
                 <TableHead className="w-24">{t('teamEdit.number')}</TableHead>
                 <TableHead className="w-32">{t('players.colPosition')}</TableHead>
+                <TableHead className="w-20">{t('roster.inPatch')}</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
@@ -165,6 +168,14 @@ export function PlayerTeamsCard({ player }: { player: Player }) {
                             ? t('common.inherited', { value: positionAbbr.get(inherited.position) ?? inherited.position })
                             : t('common.auto')
                         }
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={!l.hidden && !player.hidden}
+                        disabled={player.hidden}
+                        title={player.hidden ? t('roster.outOfPatchPlayer') : l.hidden ? t('roster.showInTeam') : t('roster.hideInTeam')}
+                        onCheckedChange={(v) => setLink(k, { hidden: !v })}
                       />
                     </TableCell>
                     <TableCell>

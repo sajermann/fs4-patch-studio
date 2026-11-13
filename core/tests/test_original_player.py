@@ -196,3 +196,40 @@ def test_a_team_needs_at_least_6_players(game, catalog):
     new_team.players = new_team.roster(team.uid)[:5]
     codes = {(i.code, i.entity) for i in validation.validate(new_team, catalog, PALMEIRAS)}
     assert ('roster_too_small', team.uid) in codes
+
+
+def test_a_game_player_hidden_in_his_team_leaves_it(game, catalog):
+    """Hidden in his own game team (TeamLink.hidden): he leaves it in the patch like a dropped team, stays in the
+    project's roster; the captaincy he had is a warning (the build gives it to someone else), not an error."""
+    from fsmod import original_team
+    captain = next(t for t in catalog.teams if t['id'] == BARCELONA)['captain']
+    hidden = entry(game, catalog, captain, 'jg_cap')
+    for lk in hidden.teams:
+        lk.hidden = lk.team == BARCELONA
+    tm = original_team.load(game, catalog, BARCELONA, 'tm_barca', lambda name, data: None)
+    tm.crest, tm.loaded.images = None, {}
+    tm.use_real_kits = tm.loaded.team['use_real_kits']
+    project = model.Project(players=[hidden], teams=[tm])
+    assert project.roster(BARCELONA) == [hidden] and project.visible().roster(BARCELONA) == []
+    issues = validation.validate(project, catalog, PALMEIRAS)
+    assert 'captain_not_in_roster' not in {i.code for i in issues}
+    assert any(i.code == 'captain_hidden' and i.severity == 'warning' for i in issues)
+    db = t3db.Database(builder.build(project, game, PALMEIRAS).database, game.meta)
+    assert BARCELONA not in links_of(db, captain)
+    assert value(db, 'teams', rows_of(db, 'teams', 'teamid', BARCELONA)[0], 'captainid') != captain
+
+
+def test_hidden_in_a_team_only_leaves_that_team():
+    """TeamLink.hidden takes the player out of one team; Player.hidden out of every team; a new player hidden in all
+    his teams is out of the patch, a game player stays (a free agent)."""
+    both = model.Player(uid='p1', first_name='A', last_name='B',
+                        teams=[model.TeamLink(team='t1', hidden=True), model.TeamLink(team='t2')])
+    everywhere = model.Player(uid='p2', first_name='C', last_name='D', teams=[model.TeamLink(team='t1', hidden=True)])
+    game_player = model.Player(uid='p3', first_name='E', last_name='F', original_id=1,
+                               teams=[model.TeamLink(team=5, hidden=True)])
+    out = model.Player(uid='p4', first_name='G', last_name='H', hidden=True, teams=[model.TeamLink(team='t1')])
+    project = model.Project(players=[both, everywhere, game_player, out])
+    assert project.hidden_in('t1') == {'p1', 'p2', 'p4'}
+    shown = {p.uid: [lk.team for lk in p.teams] for p in project.visible().players}
+    assert shown == {'p1': ['t2'], 'p3': []}
+    assert not model.TeamLink(team='t1').hidden  # older projects: every link in the patch

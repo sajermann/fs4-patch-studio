@@ -1,5 +1,5 @@
 import { bootPreviewUrls, glovePreviewUrl } from '@/api/client'
-import type { Boot, Catalog, Glove, KitKind, Player, PlayerDefaults, RealKitSlot, RGB, StreetPart, StreetPartName, StreetPiece, Team } from '@/api/types'
+import { KIT_FONT, type Boot, type Catalog, type Glove, type KitKind, type Player, type PlayerDefaults, type RealKit, type RealKitSlot, type RGB, type StreetPart, type StreetPartName, type StreetPiece, type Team } from '@/api/types'
 import type { PreviewAppearance, PreviewKit, PreviewOutfit } from '@/components/common/PlayerPreview'
 import { fullKit } from '@/lib/teams'
 
@@ -12,6 +12,20 @@ export const GOALKEEPER_POSITION = 0 // teamplayerlinks.position of a goalkeeper
  * the slot has jersey and shorts, else the generic kit (an empty goalkeeper slot shows the generic home kit; the game
  * uses its own default there). No team: neutral grey. */
 const KIT_KINDS: Record<RealKitSlot, number> = { home: 0, away: 1, goalkeeper: 2 }
+
+/** Fonts of a real kit for the preview: a game font number, or the kit's own file (KIT_FONT). */
+function kitFonts(real: RealKit) {
+  const game = (v: RealKit['name_font']) => (typeof v === 'number' ? v : undefined)
+  const own = (v: RealKit['name_font'], file?: string | null) => (v === KIT_FONT && file ? file : undefined)
+  return {
+    name_font: game(real.name_font),
+    number_font: game(real.number_font),
+    shorts_number_font: game(real.shorts_number_font),
+    name_font_file: own(real.name_font, real.name_font_file),
+    number_font_file: own(real.number_font, real.number_font_file),
+    shorts_number_font_file: own(real.shorts_number_font, real.shorts_number_font_file),
+  }
+}
 
 /** The team's kit for the 3D preview; `wearer` (number and name on the back) is printed on a real kit. */
 export function teamPreviewKit(team: Team | undefined, slot: RealKitSlot, wearer?: { number?: number | null; name?: string }): PreviewKit {
@@ -31,6 +45,11 @@ export function teamPreviewKit(team: Team | undefined, slot: RealKitSlot, wearer
           front: real.front_number,
           shorts_number: real.shorts_number ?? false,
           loaded: team.loaded?.images[`real_kits.${slot}.jersey`],
+          name_layout: real.name_layout,
+          ...kitFonts(real),
+          // position table and "no name" only apply to a kit built from the images (a new team's)
+          show_name: team.original_id != null || real.show_name !== false,
+          positions: team.original_id != null ? undefined : real.positions,
         }
       : undefined
   return {

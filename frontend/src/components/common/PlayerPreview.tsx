@@ -66,6 +66,15 @@ export interface KitPrint {
   front: boolean
   shorts_number: boolean
   loaded?: string // SHA-1 of the jersey loaded from the game (original team): still it = the game's positions
+  name_layout?: number // the kit's own name layout, 0 straight / 1 arc (unset: the teamkits row's)
+  name_font?: number // game font numbers the kit sets (unset: the teamkits row's)
+  number_font?: number
+  shorts_number_font?: number
+  name_font_file?: string // the kit's own font files (project paths under fonts/), used instead
+  number_font_file?: string
+  shorts_number_font_file?: string
+  show_name: boolean
+  positions?: [number, number, number, number][] | null // the kit's own position table (unset: the Studio's)
 }
 
 /** What the player wears: the team kit or a street kit (arms = arms mesh for the top's sleeves). */

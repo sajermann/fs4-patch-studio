@@ -35,7 +35,7 @@ export function useCopy() {
   const leagueTeams = useLeagueTeams()
   const maxLeagues = catalog?.max_leagues ?? 39
   const maxRoster = catalog?.max_roster ?? 13
-  const activeRoster = (project: Project, team: string) => rosterOf(project, team).filter((p) => !p.hidden)
+  const activeRoster = (project: Project, team: string) => rosterOf(project, team).filter((p) => !p.hidden && !linkOf(p, team)?.hidden)
 
   const canCopyLeague = newLeagues(draft).filter((l) => !l.hidden).length < maxLeagues
   const copyLeague = (uid: string) => {
@@ -78,15 +78,16 @@ export function useCopy() {
     return teamUid
   }
 
-  // same new teams whose roster has room (with a free shirt number); the game's teams are left out (a place there
-  // means replacing one of their players)
+  // same new teams (with a free shirt number): out of the patch in the ones that already have max_roster in it; the
+  // game's teams are left out (a place there means replacing one of their players)
   const copyPlayer = async (uid: string) => {
     const player = draft.players.find((p) => p.uid === uid)
     if (!player) return null
-    const teams = player.teams.filter(
-      (l) => typeof l.team === 'string' && activeRoster(draft, l.team).length < maxRoster,
-    )
-    if (teams.length < player.teams.length) toast.info(t('copy.rosterFull', { max: maxRoster }))
+    const teams = player.teams
+      .filter((l) => typeof l.team === 'string')
+      .map((l) => (activeRoster(draft, l.team as string).length < maxRoster ? l : { ...l, hidden: true }))
+    if (teams.some((l, k) => l.hidden && !player.teams.filter((x) => typeof x.team === 'string')[k].hidden))
+      toast.info(t('copy.rosterFull', { max: maxRoster }))
     const copy = await clonePlayer(player, {
       // numbers of hidden players too: they may come back
       teams: teams.map((l) => ({ ...l, number: firstFreeNumber(numbersIn(draft, l.team)) })),

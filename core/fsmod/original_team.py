@@ -26,7 +26,8 @@ STREET_PARTS = (('top', 'top', 5), ('bottom', 'bottom', 2), ('socks', 'sock', 2)
 TEXT_FIELDS = ('name', 'short_name', 'name_10', 'name_7', 'abbreviation')
 EDITABLE_FIELDS = (*TEXT_FIELDS, 'leagues', 'primary_color', 'secondary_color', 'use_real_kits', 'kits',
                    'street_kits', 'real_kits')
-REAL_KIT_SETTINGS = ('name_color', 'number_color', 'shorts_number_color', 'collar', 'front_number', 'shorts_number')
+REAL_KIT_SETTINGS = ('name_color', 'number_color', 'shorts_number_color', 'collar', 'front_number', 'shorts_number',
+                     'name_font', 'number_font', 'shorts_number_font', 'name_layout')
 TAKER_ROLES = {'penalty': 'penaltytakerid', 'free_kick': 'freekicktakerid', 'long_free_kick': 'longkicktakerid',
                'left_corner': 'leftcornerkicktakerid', 'right_corner': 'rightcornerkicktakerid'}  # model.TakerRole
 
@@ -101,7 +102,11 @@ def load(game, catalog, teamid, uid, save_image):
                 shorts_number_color=db.get(kits_t, row, 'shortsnumbercolor'),
                 collar=db.get(kits_t, row, 'jerseycollargeometrytype'),
                 front_number=bool(db.get(kits_t, row, 'jerseyfrontnumberplacementcode')),
-                shorts_number=bool(db.get(kits_t, row, 'shortsnumberplacementcode')))
+                shorts_number=bool(db.get(kits_t, row, 'shortsnumberplacementcode')),
+                name_font=db.get(kits_t, row, 'jerseynamefonttype'),
+                number_font=db.get(kits_t, row, 'numberfonttype'),
+                shorts_number_font=db.get(kits_t, row, 'shortsnumberfonttype'),
+                name_layout=db.get(kits_t, row, 'jerseynamelayouttype'))
         real_kits[slot] = RealKit(**fields)
 
     street_kits = {}

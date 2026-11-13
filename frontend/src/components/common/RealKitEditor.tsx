@@ -2,9 +2,9 @@ import { Eye, Loader2, LoaderCircle, Trash2, Upload, X } from 'lucide-react'
 import { lazy, Suspense, useRef, useState } from 'react'
 import { toast } from '@/lib/notify'
 import { ApiError, api, imageUrl } from '@/api/client'
-import type { RealKit, RealKitFile, RealKitSlot, Team } from '@/api/types'
+import { KIT_FONT, type RealKit, type RealKitFile, type RealKitSlot, type Team } from '@/api/types'
 import { CreditsUrlInput } from '@/components/common/CreditsUrlInput'
-import { ColorInput, Field, FieldIssues, NumberInput } from '@/components/common/form'
+import { ColorInput, Field, FieldIssues } from '@/components/common/form'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -22,6 +22,45 @@ import { useCatalog, useOriginalPlayers, useOriginalTeams } from '@/state/querie
 const PlayerPreview = lazy(() => import('@/components/common/PlayerPreview'))
 
 const SLOTS: RealKitSlot[] = ['home', 'away', 'goalkeeper']
+type FontValue = number | typeof KIT_FONT
+const SLOT_KINDS: Record<RealKitSlot, number> = { home: 0, away: 1, goalkeeper: 2 } // teamkits.teamkittypetechid
+const COLLARS = Array.from({ length: 15 }, (_, i) => i) // body/jersey_<collar>_* meshes 0-14
+
+/** Number font: the fonts the game has digits for in the chosen color (others would show a broken texture); the
+ * current one stays listed even without that color (the validation then says so). */
+function NumberFontSelect({
+  value,
+  color,
+  own,
+  onChange,
+}: {
+  value: FontValue
+  color: number
+  own: boolean // the kit has its own numbers file (KIT_FONT is offered)
+  onChange: (v: FontValue) => void
+}) {
+  const { t } = useI18n()
+  const catalog = useCatalog().data
+  const fonts = Object.entries(catalog?.kit_fonts.number ?? {})
+    .filter(([font, colors]) => colors.includes(color) || Number(font) === value)
+    .map(([font]) => Number(font))
+  if (typeof value === 'number' && !fonts.includes(value)) fonts.push(value)
+  return (
+    <Select value={String(value)} onValueChange={(v) => onChange(v === KIT_FONT ? KIT_FONT : Number(v))}>
+      <SelectTrigger className="w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {(own || value === KIT_FONT) && <SelectItem value={KIT_FONT}>{t('realKit.kitFont')}</SelectItem>}
+        {fonts.sort((a, b) => a - b).map((f) => (
+          <SelectItem key={f} value={String(f)}>
+            {f}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
 
 const EMPTY_KIT: RealKit = {
   name_color: [255, 255, 255],
@@ -167,6 +206,16 @@ function RealKitCard({ team, slot, previewing, onPreview }: { team: Team; slot: 
     updateTeam(team.uid, { real_kits })
   }
   const field = (name: string) => `real_kits.${slot}.${name}`
+  const catalog = useCatalog().data
+  // an empty field keeps the teamkits row's value (new team: its template's; original team: its own): shown as such
+  const row = catalog?.kit_print[String(team.original_id ?? team.template)]
+  const rowValues = row?.[String(SLOT_KINDS[slot])] ?? row?.['0']
+  const shown: { name_layout: number; name_font: FontValue; number_font: FontValue; shorts_number_font: FontValue } = {
+    name_layout: kit.name_layout ?? rowValues?.name_layout ?? 0,
+    name_font: kit.name_font ?? rowValues?.name_font ?? 0,
+    number_font: kit.number_font ?? rowValues?.number_font ?? 1,
+    shorts_number_font: kit.shorts_number_font ?? rowValues?.shorts_number_font ?? 1,
+  }
 
   return (
     <Card>
@@ -211,12 +260,33 @@ function RealKitCard({ team, slot, previewing, onPreview }: { team: Team; slot: 
             <ColorInput value={kit.name_color} onChange={(v) => set({ name_color: v })} />
           </Field>
           <Field label={t('realKit.collar')} entity={team.uid} field={field('collar')} hint={t('realKit.collarHint')}>
-            <NumberInput value={kit.collar} min={0} max={14} onChange={(v) => set({ collar: v ?? 0 })} />
+            <Select value={String(kit.collar)} onValueChange={(v) => set({ collar: Number(v) })}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {COLLARS.map((c) => (
+                  <SelectItem key={c} value={String(c)}>
+                    {t('realKit.collarOption', { n: c })}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
-          <Field label={t('realKit.jerseyNumber')} entity={team.uid} field={field('number_color')}>
+          <Field
+            label={t('realKit.jerseyNumber')}
+            entity={team.uid}
+            field={field('number_color')}
+            hint={shown.number_font === KIT_FONT ? t('realKit.kitFontColor') : undefined}
+          >
             <NumberColorSelect value={kit.number_color} onChange={(v) => set({ number_color: v })} />
           </Field>
-          <Field label={t('realKit.shortsNumber')} entity={team.uid} field={field('shorts_number_color')}>
+          <Field
+            label={t('realKit.shortsNumber')}
+            entity={team.uid}
+            field={field('shorts_number_color')}
+            hint={shown.shorts_number_font === KIT_FONT ? t('realKit.kitFontColor') : undefined}
+          >
             <NumberColorSelect value={kit.shorts_number_color} onChange={(v) => set({ shorts_number_color: v })} />
           </Field>
         </div>
@@ -238,6 +308,73 @@ function RealKitCard({ team, slot, previewing, onPreview }: { team: Team; slot: 
             <span className="block text-xs text-muted-foreground">{t('realKit.shortsNumberOnHint')}</span>
           </span>
         </label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label={t('realKit.nameLayout')} entity={team.uid} field={field('name_layout')}>
+            <Select value={String(shown.name_layout)} onValueChange={(v) => set({ name_layout: Number(v) })}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">{t('realKit.nameStraight')}</SelectItem>
+                <SelectItem value="1">{t('realKit.nameArc')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label={t('realKit.nameFont')} entity={team.uid} field={field('name_font')}>
+            <Select value={String(shown.name_font)} onValueChange={(v) => set({ name_font: v === KIT_FONT ? KIT_FONT : Number(v) })}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(kit.name_font_file || shown.name_font === KIT_FONT) && (
+                  <SelectItem value={KIT_FONT}>
+                    {kit.name_font_name ? `${t('realKit.kitFont')} · ${kit.name_font_name}` : t('realKit.kitFont')}
+                  </SelectItem>
+                )}
+                {(catalog?.kit_fonts.name ?? []).map((f) => (
+                  <SelectItem key={f.id} value={String(f.id)}>
+                    {f.name ? `${f.id} · ${f.name}` : String(f.id)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label={t('realKit.numberFont')} entity={team.uid} field={field('number_font')} hint={t('realKit.numberFontHint')}>
+            <NumberFontSelect
+              value={shown.number_font}
+              color={kit.number_color}
+              own={!!kit.number_font_file}
+              onChange={(v) => set({ number_font: v })}
+            />
+          </Field>
+          <Field label={t('realKit.shortsNumberFont')} entity={team.uid} field={field('shorts_number_font')}>
+            <NumberFontSelect
+              value={shown.shorts_number_font}
+              color={kit.shorts_number_color}
+              own={!!kit.shorts_number_font_file}
+              onChange={(v) => set({ shorts_number_font: v })}
+            />
+          </Field>
+        </div>
+        {team.original_id == null && (
+          <>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox checked={kit.show_name !== false} onCheckedChange={(c) => set({ show_name: c === true })} />
+              {t('realKit.showName')}
+            </label>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span>
+                {t('realKit.positions')}: {t(kit.positions ? 'realKit.positionsOwn' : 'realKit.positionsStudio')}
+                <span className="block text-xs text-muted-foreground">{t('realKit.positionsHint')}</span>
+              </span>
+              {kit.positions && (
+                <Button variant="outline" size="sm" onClick={() => set({ positions: undefined })}>
+                  {t('realKit.positionsReset')}
+                </Button>
+              )}
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   )

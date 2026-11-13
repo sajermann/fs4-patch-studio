@@ -12,12 +12,14 @@ from typing import Optional
 
 from PIL import Image
 
-from . import balls, boots, builder, gloves, kit, model, original_league, original_team, scanface
+from . import balls, boots, builder, gloves, kit, kitfonts, model, original_league, original_team, scanface
 from .catalog import POSITIONS, SKILLS
 from .model import FRIENDLY_TEAM_SIZES, REAL_KIT_FILES
 
 # lengths the game's text slots are meant for (longer texts overflow in some screens)
 GOALKEEPER_POSITION = 0  # teamplayerlinks.position GK (catalog.POSITIONS)
+REAL_KIT_KINDS = {'home': 0, 'away': 1, 'goalkeeper': 2}  # teamkits.teamkittypetechid of each real kit slot
+KIT_FONT_FIELDS = {'number_font': 'numberfonttype', 'shorts_number_font': 'shortsnumberfonttype'}
 TEAM_TEXT_LIMITS = {'short_name': 15, 'name_10': 10, 'name_7': 7, 'abbreviation': 3}
 LEAGUE_SHORT_LIMIT = 15
 DISPLAY_NAME_LIMIT = 24  # longest player name that still looks fine in game (checked with a 24-character name)
@@ -45,6 +47,8 @@ def validate(project, catalog, assets_dir):
     every_boot = {b.uid: b for b in project.boots}
     every_glove = {g.uid: g for g in project.gloves}
     every_ball = {b.uid: b for b in project.balls}
+    every_team = {lk.team for p in project.players for lk in p.teams}
+    hidden_in = {team: project.hidden_in(team) for team in every_team}  # left out in a team: a role falls back
     project = project.visible()  # hidden leagues/teams are left out of the patch: not validated
     issues = [Issue('team_without_league', 'warning', uid, 'leagues', {}) for uid in without_league]
     # a player whose boot is out of the patch keeps the game boot of his code on that surface
@@ -162,6 +166,68 @@ def validate(project, catalog, assets_dir):
                     error('out_of_range', tm.uid, f'real_kits.{slot}.{name}', min=kit.NUMBER_COLORS[0],
                           max=kit.NUMBER_COLORS[-1], value=getattr(real, name))
             check_range(tm.uid, f'real_kits.{slot}.collar', real.collar, kit.COLLARS[0], kit.COLLARS[-1])
+            if real.name_layout is not None:
+                check_range(tm.uid, f'real_kits.{slot}.name_layout', real.name_layout, kit.NAME_LAYOUTS[0],
+                            kit.NAME_LAYOUTS[-1])
+            fonts = kit.name_fonts(catalog.game)
+            if isinstance(real.name_font, int) and real.name_font not in fonts:
+                error('real_kit_name_font', tm.uid, f'real_kits.{slot}.name_font', value=real.name_font,
+                      min=fonts[0], max=fonts[-1])
+            # the kit's own font files (fsmod.kitfonts)
+            for font_name, file_field in kitfonts.FONT_PARTS:
+                if getattr(real, font_name) != kitfonts.KIT:
+                    continue
+                path = getattr(real, file_field)
+                try:
+                    with open(os.path.join(assets_dir, path or ''), 'rb') as f:
+                        data = f.read()
+                except OSError:
+                    error('real_kit_font_missing', tm.uid, f'real_kits.{slot}.{font_name}')
+                    continue
+                try:
+                    (kitfonts.check_name_font if font_name == 'name_font' else kitfonts.check_number_font)(data)
+                except kitfonts.FontError as e:
+                    error(f'real_kit_{e.code}', tm.uid, f'real_kits.{slot}.{font_name}')
+            # a number font must have the digits in the chosen color (no file = a broken texture in game); unset =
+            # the font of the team's own teamkits row (original team) or of its template's
+            row = kit_row(tm.original_id if tm.is_original else tm.template, REAL_KIT_KINDS[slot])
+            for font_name, color_name in (('number_font', 'number_color'), ('shorts_number_font', 'shorts_number_color')):
+                color = getattr(real, color_name)
+                font = getattr(real, font_name)
+                if font is None and row is not None:
+                    font = catalog.db.get(catalog.db.table('teamkits'), row, KIT_FONT_FIELDS[font_name])
+                if isinstance(font, int) and color in kit.NUMBER_COLORS and not kit.number_font_ok(catalog.game, font, color):
+                    error('real_kit_number_font', tm.uid, f'real_kits.{slot}.{font_name}', font=font, color=color)
+
+    def kit_row(teamid, kind):
+        """teamkits row of a team's kit kind (the home one when the team has none of that kind), or None."""
+        t = catalog.db.table('teamkits')
+        rows = {catalog.db.get(t, r, 'teamkittypetechid'): r for k in catalog.db.rows('teamkits', 'teamtechid', teamid)
+                for r in [t.records[k]]}
+        return rows.get(kind, rows.get(0))
+
+    # a kit's own fonts beyond the free font numbers: the kit keeps a game font (kitfonts.assign_font_ids)
+    owners = {}
+    for tm in project.teams:
+        for slot in ('home', 'away', 'goalkeeper'):
+            real = tm.real_kit(slot) if tm.use_real_kits else None
+            if real is not None:
+                owners[id(real)] = (tm.uid, slot)
+    font_bytes = {}
+
+    def read_font(path):
+        if path not in font_bytes:
+            try:
+                with open(os.path.join(assets_dir, path), 'rb') as f:
+                    font_bytes[path] = f.read()
+            except OSError:
+                font_bytes[path] = b''
+        return font_bytes[path]
+
+    kits = [tm.real_kit(slot) for tm in project.teams if tm.use_real_kits for slot in ('home', 'away', 'goalkeeper')]
+    for real, font_field in kitfonts.without_slot([r for r in kits if r is not None], read_font):
+        uid, slot = owners[id(real)]
+        warning('real_kit_font_no_slot', uid, f'real_kits.{slot}.{font_field}')
 
     seen = set()
     for entity in [*project.leagues, *project.teams, *project.players, *project.boots, *project.gloves,
@@ -279,8 +345,11 @@ def validate(project, catalog, assets_dir):
             check_lineups(tm, squad, lambda ref: squad[ref][0], lambda ref: squad[ref][1])
             for role, pid in (('captain', tm.captain), *((f'takers.{r}', p) for r, p in tm.takers.items())):
                 if pid is not None and pid not in squad:
-                    error('captain_not_in_roster' if role == 'captain' else 'taker_not_in_roster', tm.uid, role,
-                          player=pid)
+                    if pid in hidden_in.get(tm.original_id, ()):
+                        warning('captain_hidden' if role == 'captain' else 'taker_hidden', tm.uid, role, player=pid)
+                    else:
+                        error('captain_not_in_roster' if role == 'captain' else 'taker_not_in_roster', tm.uid, role,
+                              player=pid)
             if tm.crest and not os.path.isfile(os.path.join(assets_dir, tm.crest)):
                 error('crest_missing', tm.uid, 'crest', path=tm.crest)
             if tm.use_real_kits:
@@ -327,11 +396,18 @@ def validate(project, catalog, assets_dir):
             error('roster_too_small', tm.uid, 'players', count=len(members), min=builder.MIN_ROSTER)
         elif len(members) > builder.MAX_ROSTER:
             error('roster_too_large', tm.uid, 'players', max=builder.MAX_ROSTER, count=len(members))
+        hidden_here = hidden_in.get(tm.uid, ())  # left out of the patch in this team: the build's fallback takes over
         if tm.captain is not None and tm.captain not in members:
-            error('captain_not_in_roster', tm.uid, 'captain', player=tm.captain)
+            if tm.captain in hidden_here:
+                warning('captain_hidden', tm.uid, 'captain', player=tm.captain)
+            else:
+                error('captain_not_in_roster', tm.uid, 'captain', player=tm.captain)
         for role, ref in tm.takers.items():
             if ref not in members:
-                error('taker_not_in_roster', tm.uid, f'takers.{role}', player=ref)
+                if ref in hidden_here:
+                    warning('taker_hidden', tm.uid, f'takers.{role}', player=ref)
+                else:
+                    error('taker_not_in_roster', tm.uid, f'takers.{role}', player=ref)
         check_lineups(tm, members, lambda ref: members[ref][0], lambda ref: members[ref][1])
 
     # ---- teams per league (new + the original ones still in it)

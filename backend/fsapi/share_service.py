@@ -14,6 +14,10 @@ Zip format, only the manifest and the files it names, side by side at the root o
                     - a player with a real face: "face_files" = {path inside the face folder: file of the zip};
                       face options it leaves out (hair_mode, paint_scalp: the app's own converter choices, which
                       other tools making zips should not know) get the ones of a new face (scanface.NEW_FACE_OPTIONS);
+                    - a new team without "street_kits" (the FIFA 14-16 teams have none) gets one random piece per part
+                      for home and away, in the team's colors (model.random_street_kits);
+                    - real kit fonts and name layout this game has no file for (another game's ids) are dropped: the
+                      team's own apply (kit.unusable_print_fields);
                     - the ids the build gives (league_id, team_id, player_id) left null: each project gives its own.
 
 What each entry keeps (and the importing project resolves): a team its leagues, captain, set-piece takers and
@@ -28,6 +32,7 @@ returns the entries for the client to merge and save.
 import io
 import json
 import os
+import random
 import re
 import shutil
 import time
@@ -36,7 +41,7 @@ import zipfile
 
 from PIL import Image
 
-from fsmod import model, scanface
+from fsmod import kit, kitfonts, model, scanface
 
 from .project_store import IMAGE_EXTENSIONS, file_slug
 
@@ -44,6 +49,7 @@ MANIFEST = 'manifest.json'
 VERSION = 1  # zip format; bump when its layout changes (older ones are read, newer ones refused)
 MAX_ZIP = 2 * 1024 ** 3  # uncompressed bytes of an import
 MAX_IMAGE = 30 * 1024 * 1024
+MAX_FONT = 8 * 1024 * 1024  # a real kit font file (.ttf, numbers .rx3)
 MAX_FACE_FILE = 64 * 1024 * 1024
 STAGING_TTL = 24 * 3600  # seconds an inspected zip waits for apply()
 
@@ -92,6 +98,17 @@ def image_slots(kind, entry):
         yield ('photo',), f'player-{uid}'
 
 
+def font_slots(kind, entry):
+    """(path in the entry JSON, zip file stem) of every real kit font file of a team (fsmod.kitfonts)."""
+    if kind != 'teams':
+        return
+    uid = file_slug(entry.get('uid') or '')
+    for slot, real in (entry.get('real_kits') or {}).items():
+        if isinstance(real, dict):
+            for field in model.REAL_KIT_FONT_FILES:
+                yield ('real_kits', slot, field), f'team-{uid}-{slot}-{field.removesuffix("_file").replace("_", "-")}'
+
+
 def _get(data, path):
     for key in path:
         if not isinstance(data, dict):
@@ -112,7 +129,10 @@ def face_paths(source_id):
 
 
 class ShareService:
-    def __init__(self, cache_root):
+    def __init__(self, cache_root, street_pool=None, game=None):
+        # street_pool() -> catalog.street_pieces_in_use: a team that comes without street kits draws its own
+        self.street_pool = street_pool
+        self.game = game  # game files: real kit fonts the game does not have are dropped on import
         self.staging = os.path.join(cache_root, 'imports')
 
     # ---------------------------------------------------------------- export
@@ -124,8 +144,14 @@ class ShareService:
             for entry in entries:
                 item = entry.model_dump(mode='json')  # every key, null when empty
                 item[GAME_IDS[kind]] = None
-                for path, stem in list(image_slots(kind, item)):
+                for path, stem in [*image_slots(kind, item), *font_slots(kind, item)]:
                     relative = _get(item, path)
+                    font = dict((f, c) for c, f in kitfonts.FONT_PARTS).get(path[-1])
+                    if font and _get(item, (*path[:-1], font)) != kitfonts.KIT:
+                        relative = None  # a font file the kit does not use stays home: only another tool's zip
+                        _set(item, path, None)  # sends files with font numbers (kitfonts.settle on import)
+                        if font == 'name_font':
+                            _set(item, (*path[:-1], 'name_font_name'), None)
                     full = os.path.join(folder, *relative.split('/')) if isinstance(relative, str) and relative else None
                     if full and os.path.isfile(full):
                         name = stem + os.path.splitext(full)[1].lower()
@@ -194,9 +220,10 @@ class ShareService:
             raise
         return {'token': token, 'items': items, 'problems': problems}
 
-    def apply(self, kind, token, uids, folder, save_image, as_uids=None):
+    def apply(self, kind, token, uids, folder, save_image, as_uids=None, save_font=None):
         """The entries `uids` of an inspected zip, their files put into the project: images as provisional uploads
-        (save_image(file name, bytes) -> project path) and a real face's files in faces/<uid>/. as_uids = {uid in the
+        (save_image(file name, bytes) -> project path), real kit fonts (save_font, the same) and a real face's files
+        in faces/<uid>/. as_uids = {uid in the
         zip: uid it takes in the project} (the zip uploaded on an entry's page fills that entry, which keeps its uid).
         The staged zip is then dropped. Returns [entry JSON] ready for the project."""
         path = self._staged(token)
@@ -214,6 +241,8 @@ class ShareService:
                 with open(target, 'wb') as f:
                     f.write(data)
                 return filename
+            if field == 'font':
+                return save_font(filename, data)
             return save_image(filename, data)
 
         wanted = set(uids)
@@ -295,12 +324,49 @@ class ShareService:
                         _set(item, field_path, None)
                     elif store and keep:
                         _set(item, field_path, store(item, 'image', name, data))
+                font_data = {}  # the font files read, by the value their field ends with (kitfonts.settle)
+                for field_path, _ in list(font_slots(kind, item)):
+                    name = _get(item, field_path)
+                    if name in (None, ''):
+                        _set(item, field_path, None)
+                        continue
+                    data, code = self._file(z, entries, name, MAX_FONT)
+                    if code is None:
+                        try:
+                            (kitfonts.check_name_font if field_path[-1] == 'name_font_file'
+                             else kitfonts.check_number_font)(data)
+                        except kitfonts.FontError:
+                            code = 'font_invalid'
+                    if code:
+                        problems.append({'index': k, 'name': label, 'field': '.'.join(field_path), 'code': code})
+                        _set(item, field_path, None)
+                    else:
+                        if store and keep:
+                            _set(item, field_path, store(item, 'font', name, data))
+                        font_data[_get(item, field_path)] = data
                 try:
                     entry = cls.model_validate(item)
                 except ValueError as e:
                     problems.append({'index': k, 'name': label, 'field': None, 'code': 'invalid_item',
                                      'detail': str(e)[:500]})
                     continue
+                if kind == 'teams' and 'street_kits' not in item and self.street_pool and not entry.is_original:
+                    # the app's zips carry every key; one made by another tool has no street kits (and should not
+                    # know the app's): one random piece per part, seeded by the uid (the same in inspect and apply)
+                    entry.street_kits = model.random_street_kits(entry, self.street_pool(), random.Random(uid))
+                if kind == 'teams' and self.game is not None:
+                    # font files with another game's font numbers (the app's zips only send the files in use): the
+                    # game's own font when it is the same, else the file (kitfonts.settle)
+                    for real in entry.real_kits.values():
+                        kitfonts.settle(self.game, real, font_data.__getitem__)
+                    # fonts/layout of another game (FIFA 14 ids) that this game has no file for: dropped, the
+                    # team's own apply (kit.unusable_print_fields); a kit's own font without its file, too
+                    for real in entry.real_kits.values():
+                        for name in kit.unusable_print_fields(self.game, real):
+                            setattr(real, name, None)
+                        for name, file_field in kitfonts.FONT_PARTS:
+                            if getattr(real, name) == kitfonts.KIT and not getattr(real, file_field):
+                                setattr(real, name, None)
                 if kind == 'players' and entry.face is not None:
                     self._face(z, entries, entry, face_files, problems, k, label, store if keep else None)
                 if keep:

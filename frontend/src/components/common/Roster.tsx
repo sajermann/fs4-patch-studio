@@ -23,12 +23,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
-import { type Member, useGamePlayerEntry, useJoinTeam, useTeamMembers, useTeamName } from '@/lib/members'
+import { hideInTeam, type Member, useGamePlayerEntry, useJoinTeam, useTeamMembers, useTeamName } from '@/lib/members'
 import { firstFreeNumber, leaveTeam, linkOf, playerName, playerOf, playerPath, playerRef, teamKey, teamsWith } from '@/lib/players'
-import { effectiveRoles } from '@/lib/teams'
+import { effectiveRoles, setPieceFallback } from '@/lib/teams'
 import { cn } from '@/lib/utils'
 import { newUid, useIssues, useProject } from '@/state/project'
 import { useCatalog, useLookups, useOriginalPlayers, useOriginalTeams } from '@/state/queries'
@@ -134,7 +135,8 @@ export function AddPlayerDialog({
 
 /** Roster of a team (new or edited original): the project's players (number and position of this team), the game's
  * players (an original team's own, or added; edited ones are project entries) and captain/set-piece takers below.
- * Adding to a full team asks who leaves it (useJoinTeam). */
+ * A team may have any number of players, at most max_roster in the patch: each row can be left out of the patch in
+ * this team only; adding to a team with max_roster in the patch asks who stays out (useJoinTeam). */
 export function RosterCard({ team }: { team: Team }) {
   const { t } = useI18n()
   const { draft, setDraft, updatePlayer, updateTeam, addPlayer } = useProject()
@@ -157,7 +159,9 @@ export function RosterCard({ team }: { team: Team }) {
   const rosterIssues = useIssues(team.uid, 'players')
   const captain = team.captain ?? (original ? game?.captain : active[0]?.ref)
   const takers = { ...(original ? game?.takers : {}), ...team.takers }
-  const roles = effectiveRoles(captain, takers)
+  const positionIn = (m: Member) => (m.player ? linkOf(m.player, key)?.position : m.position)
+  const unset = original ? captain : setPieceFallback(captain, active.map((m) => ({ ref: m.ref, position: positionIn(m) })))
+  const roles = effectiveRoles(captain, takers, unset)
 
   // number/position in this team; one of the game's players as the game has him gets his entry first (the change is
   // applied by playerid: typing fast may ask for his entry twice)
@@ -165,6 +169,10 @@ export function RosterCard({ team }: { team: Team }) {
     if (m.player) return updatePlayer(m.player.uid, { teams: teamsWith(m.player, key, patch) })
     if (!(await ensure(m.ref as number))) return
     setDraft((p) => ({ ...p, players: p.players.map((pl) => (pl.original_id === m.ref ? { ...pl, teams: teamsWith(pl, key, patch) } : pl)) }))
+  }
+  const setShown = async (m: Member, shown: boolean) => {
+    if (m.kind === 'squad' && !(await ensure(m.ref as number))) return
+    setDraft((p) => hideInTeam(p, m.ref, key, !shown))
   }
   const remove = async (m: Member) => {
     if (m.kind === 'squad' && !(await ensure(m.ref as number))) return
@@ -200,7 +208,7 @@ export function RosterCard({ team }: { team: Team }) {
           <CardTitle>
             {t('teamEdit.roster')}{' '}
             <span className="font-normal text-muted-foreground">
-              ({active.length}/{max})
+              ({t('roster.count', { count: active.length, max, total: members.length })})
             </span>
           </CardTitle>
           <CardDescription>{original ? t('teamEdit.originalRosterDescription') : t('teamEdit.rosterDescription')}</CardDescription>
@@ -231,6 +239,7 @@ export function RosterCard({ team }: { team: Team }) {
                 <TableHead className="w-24">{t('teamEdit.number')}</TableHead>
                 <TableHead className="w-32">{t('players.colPosition')}</TableHead>
                 <RoleHeads />
+                <TableHead className="w-20">{t('roster.inPatch')}</TableHead>
                 <TableHead className="w-20" />
                 <TableHead className="w-28" />
               </TableRow>
@@ -250,12 +259,20 @@ export function RosterCard({ team }: { team: Team }) {
                   </TableCell>
                   <TableCell>
                     <PositionSelect
-                      value={m.player ? linkOf(m.player, key)?.position : m.position}
+                      value={positionIn(m)}
                       placeholder={inheritedPosition(m)}
                       onChange={(v) => void setLink(m, { position: v })}
                     />
                   </TableCell>
                   <RoleCells player={m.ref} roles={roles} />
+                  <TableCell>
+                    <Switch
+                      checked={!m.hidden}
+                      disabled={m.outOfPatch}
+                      title={m.outOfPatch ? t('roster.outOfPatchPlayer') : m.hidden ? t('roster.showInTeam') : t('roster.hideInTeam')}
+                      onCheckedChange={(v) => void setShown(m, v)}
+                    />
+                  </TableCell>
                   <TableCell>{m.player && <EntityIssues uid={m.player.uid} />}</TableCell>
                   <TableCell>
                     <Button variant="ghost" size="sm" title={t('roster.removeFromTeam')} onClick={() => void remove(m)}>
@@ -290,7 +307,11 @@ export function RosterCard({ team }: { team: Team }) {
           players={active.map((m) => ({ value: m.ref, label: m.name }))}
           captain={captain}
           takers={takers}
-          fallback={original ? undefined : { label: t('takers.captain', { name: active.find((m) => m.ref === captain)?.name ?? '—' }) }}
+          fallback={
+            original
+              ? undefined
+              : { label: t(unset === captain ? 'takers.captain' : 'takers.outfield', { name: active.find((m) => m.ref === unset)?.name ?? '—' }) }
+          }
           onCaptainChange={(c) => updateTeam(team.uid, { captain: c })}
           onChange={(takers) => updateTeam(team.uid, { takers })}
         />
@@ -300,6 +321,7 @@ export function RosterCard({ team }: { team: Team }) {
 }
 
 function MemberRow({ member: m, from, children }: { member: Member; from: unknown; children: ReactNode }) {
+  const { t } = useI18n()
   return (
     <TableRow>
       <TableCell>
@@ -313,7 +335,7 @@ function MemberRow({ member: m, from, children }: { member: Member; from: unknow
             {m.name}
           </Link>
           {m.kind !== 'project' && <OriginalBadge entry={m.player?.uid} />}
-          {m.hidden && <OutOfPatchBadge />}
+          {m.outOfPatch ? <OutOfPatchBadge /> : m.hidden && <OutOfPatchBadge label={t('roster.outOfPatchHere')} />}
         </span>
       </TableCell>
       {children}

@@ -71,10 +71,21 @@ export function defaultLeague(
 export type Role = 'captain' | TakerRole
 const TAKER_ROLES: TakerRole[] = ['penalty', 'free_kick', 'long_free_kick', 'left_corner', 'right_corner']
 
-/** Who has each role, with the fallbacks applied: a taker role left unset is the captain's. */
+export const GOALKEEPER = 0 // position of the goalkeeper
+
+/** Who takes a set piece nobody was given (as the build does): the captain, unless he is the goalkeeper (a goalkeeper
+ * takes one only when chosen); then the first outfield player of the roster, else the captain. */
+export function setPieceFallback(captain: PlayerRef | undefined, roster: { ref: PlayerRef; position?: number | null }[]) {
+  const position = (ref: PlayerRef | undefined) => roster.find((m) => m.ref === ref)?.position
+  if (position(captain) !== GOALKEEPER) return captain
+  return roster.find((m) => m.position != null && m.position !== GOALKEEPER)?.ref ?? captain
+}
+
+/** Who has each role, with the fallbacks applied: a taker role left unset is `unset`'s (default: the captain). */
 export function effectiveRoles(
   captain: PlayerRef | undefined,
   takers: Partial<Record<TakerRole, PlayerRef>>,
+  unset: PlayerRef | undefined = captain,
 ): Record<Role, PlayerRef | undefined> {
-  return { captain, ...Object.fromEntries(TAKER_ROLES.map((r) => [r, takers[r] ?? captain])) } as Record<Role, PlayerRef | undefined>
+  return { captain, ...Object.fromEntries(TAKER_ROLES.map((r) => [r, takers[r] ?? unset])) } as Record<Role, PlayerRef | undefined>
 }

@@ -729,6 +729,137 @@ def test_real_kits_go_as_loose_files_with_their_teamkits_fields(game, tmp_path):
     assert kit.kit_name(result.assigned_team_ids[team.uid], 2) not in result.loose
 
 
+def test_real_kit_fonts_layout_positions_and_no_name(game, tmp_path):
+    """A real kit's own fonts and name layout go to teamkits; its own position table goes in the kit rx3, the name
+    rectangles zeroed when it has no name; unset fields keep the template's."""
+    import struct
+    from PIL import Image
+    from fsmod import kit, t3db
+    paths = {}
+    for name, size in (('jersey', (256, 256)), ('shorts', (256, 128))):
+        paths[name] = str(tmp_path / f'{name}.png')
+        Image.new('RGB', size, (200, 10, 10)).save(paths[name])
+    table = [[0.1 * i, 0.2, 0.3, 0.4] for i in range(8)]
+    project = load_palmeiras()
+    team = project.teams[0]
+    team.use_real_kits = True
+    team.real_kits = {
+        'home': model.RealKit(jersey=paths['jersey'], shorts=paths['shorts'], name_font=7, number_font=12,
+                              shorts_number_font=21, name_layout=1, number_color=18, positions=table),
+        'away': model.RealKit(jersey=paths['jersey'], shorts=paths['shorts'], show_name=False),
+    }
+    result = builder.build(project, game, PALMEIRAS)
+    tid = result.assigned_team_ids[team.uid]
+
+    def rects(kind):
+        d = chunk.decode(result.loose[kit.kit_name(tid, kind)])
+        return [(n, struct.unpack('>4f', d[p:p + 16])) for n, p in kit._positions(d)]
+
+    assert [r for _, r in rects(0)] == [pytest.approx(r) for r in table]
+    away = rects(1)
+    assert [r for n, r in away if n in kit.NO_NAME] == [(0.0, 0.0, 0.0, 0.0)] * 3
+    assert [r for n, r in away if n not in kit.NO_NAME] == [
+        pytest.approx(r) for n, r in kit.REAL_POSITIONS if n not in kit.NO_NAME]
+
+    db = t3db.Database(result.database, game.meta)
+    kits = db.by_name('teamkits')
+    get = lambda r, f: kits.value(r, kits.field(f))
+    rows = {get(r, 'teamkittypetechid'): r for r in kits.records if get(r, 'teamtechid') == tid}
+    fields = ('jerseynamefonttype', 'numberfonttype', 'shortsnumberfonttype', 'jerseynamelayouttype', 'numbercolor')
+    assert [get(rows[0], f) for f in fields] == [7, 12, 21, 1, 18]
+    template = {get(r, 'teamkittypetechid'): r for r in kits.records if get(r, 'teamtechid') == team.template}
+    assert [get(rows[1], f) for f in fields[:4]] == [get(template[1], f) for f in fields[:4]]
+
+
+def test_real_kit_own_fonts_get_free_numbers(game, tmp_path):
+    """A kit's own fonts (fsmod.kitfonts): each different file gets a free font number, written as loose files (the
+    numbers in the kit's colors, texture names renamed); the same file in two kits shares its number."""
+    from PIL import Image
+    from fsmod import kitfonts, rx3tex, t3db
+    paths = {}
+    for name, size in (('jersey', (256, 256)), ('shorts', (256, 128))):
+        paths[name] = str(tmp_path / f'{name}.png')
+        Image.new('RGB', size, (200, 10, 10)).save(paths[name])
+    ttf = tmp_path / 'name.ttf'
+    ttf.write_bytes(chunk.decode(game.read_entry(kitfonts.NAME_FILE.format(7))[2]))
+    numbers = tmp_path / 'numbers.rx3'
+    numbers.write_bytes(chunk.decode(game.read_entry(kitfonts.NUMBERS_FILE.format(9, 4))[2]))
+    own = dict(jersey=paths['jersey'], shorts=paths['shorts'], name_font='kit', name_font_file=str(ttf),
+               number_font='kit', number_font_file=str(numbers), shorts_number_font='kit',
+               shorts_number_font_file=str(numbers))
+    project = load_palmeiras()
+    team = project.teams[0]
+    team.use_real_kits = True
+    other = tmp_path / 'other.rx3'  # another numbers file
+    other.write_bytes(chunk.decode(game.read_entry(kitfonts.NUMBERS_FILE.format(3, 4))[2]))
+    team.real_kits = {'home': model.RealKit(**own, number_color=4, shorts_number_color=6),
+                      'away': model.RealKit(**own, number_color=4, shorts_number_color=4),
+                      'goalkeeper': model.RealKit(**{**own, 'number_font_file': str(other),
+                                                     'shorts_number_font_file': str(other)},
+                                                  number_color=5, shorts_number_color=6)}
+    result = builder.build(project, game, PALMEIRAS)
+    first_name, first_number = kitfonts.NAME_IDS[0], kitfonts.NUMBER_IDS[0]
+    # another font shares the number in a free color (5) and takes the next one where the color is used (6)
+    assert kitfonts.NUMBERS_FILE.format(first_number, 5) in result.loose
+    assert kitfonts.NUMBERS_FILE.format(first_number + 1, 6) in result.loose
+    assert chunk.decode(result.loose[kitfonts.NAME_FILE.format(first_name)]) == ttf.read_bytes()
+    for color in (4, 6):  # one file per color in use, the same digits
+        d = chunk.decode(result.loose[kitfonts.NUMBERS_FILE.format(first_number, color)])
+        assert [t['name'] for t in rx3tex.textures(d)][:10] == [f'numbers_{first_number}_{color}_{i}' for i in range(10)]
+    assert kitfonts.NUMBERS_FILE.format(first_number + 1, 4) not in result.loose  # the same file: one number
+
+    db = t3db.Database(result.database, game.meta)
+    kits = db.by_name('teamkits')
+    get = lambda r, f: kits.value(r, kits.field(f))
+    tid = result.assigned_team_ids[team.uid]
+    for r in (r for r in kits.records if get(r, 'teamtechid') == tid and get(r, 'teamkittypetechid') in (0, 1)):
+        assert (get(r, 'jerseynamefonttype'), get(r, 'numberfonttype'), get(r, 'shortsnumberfonttype')) == (
+            first_name, first_number, first_number)
+
+
+def test_real_kit_fonts_without_a_free_number_keep_a_game_font(game, tmp_path, monkeypatch):
+    """Own fonts beyond the free font numbers: the patch is still built, those kits keep a game font (the name and
+    the numbers show, in a generic font) and the validation warns."""
+    from PIL import Image
+    from fsmod import kit, kitfonts, t3db, validation
+    monkeypatch.setattr(kitfonts, 'NAME_IDS', range(25, 25))  # no name font number left
+    monkeypatch.setattr(kitfonts, 'NUMBER_IDS', range(31, 32))  # one number font: one file per color
+    paths = {}
+    for name, size in (('jersey', (256, 256)), ('shorts', (256, 128))):
+        paths[name] = str(tmp_path / f'{name}.png')
+        Image.new('RGB', size, (200, 10, 10)).save(paths[name])
+    files = {}
+    for name, (font, color) in (('a', (9, 4)), ('b', (3, 4))):
+        files[name] = tmp_path / f'{name}.rx3'
+        files[name].write_bytes(chunk.decode(game.read_entry(kitfonts.NUMBERS_FILE.format(font, color))[2]))
+    ttf = tmp_path / 'name.ttf'
+    ttf.write_bytes(chunk.decode(game.read_entry(kitfonts.NAME_FILE.format(7))[2]))
+    common = dict(jersey=paths['jersey'], shorts=paths['shorts'], name_font='kit', name_font_file=str(ttf),
+                  number_color=4, shorts_number_color=4)
+    project = load_palmeiras()
+    team = project.teams[0]
+    team.use_real_kits = True
+    team.real_kits = {'home': model.RealKit(**common, number_font='kit', number_font_file=str(files['a'])),
+                      'away': model.RealKit(**common, number_font='kit', number_font_file=str(files['b']))}
+    result = builder.build(project, game, PALMEIRAS)
+    assert kitfonts.NUMBERS_FILE.format(31, 4) in result.loose  # the first file got the only number
+    db = t3db.Database(result.database, game.meta)
+    kits = db.by_name('teamkits')
+    get = lambda r, f: kits.value(r, kits.field(f))
+    tid = result.assigned_team_ids[team.uid]
+    rows = {get(r, 'teamkittypetechid'): r for r in kits.records if get(r, 'teamtechid') == tid}
+    template = {get(r, 'teamkittypetechid'): r for r in kits.records if get(r, 'teamtechid') == team.template}
+    assert get(rows[0], 'numberfonttype') == 31
+    for kind in (0, 1):  # no name number: the template's name font (the name still shows)
+        assert get(rows[kind], 'jerseynamefonttype') == get(template[kind], 'jerseynamefonttype')
+    # the away file found no number: a game font that has the kit's color (the number still shows)
+    assert kit.number_font_ok(game, get(rows[1], 'numberfonttype'), 4)
+
+    issues = validation.validate(project, Catalog(game), PALMEIRAS)
+    left = sorted(i.field for i in issues if i.code == 'real_kit_font_no_slot')
+    assert left == ['real_kits.away.name_font', 'real_kits.away.number_font', 'real_kits.home.name_font']
+
+
 def test_lineup_order_fills_empty_slots_and_skips_players_out_of_the_team():
     roster = ['a', 'b', 'c', 'd', 'e', 'f']
     lineup = model.Lineup(players=5, goalkeeper=True, starters=['c', None, 'gone', 'a', 'c'], reserves=['f'])
@@ -786,6 +917,37 @@ def test_set_piece_takers_default_to_the_captain(game):
     assert get(row, 'leftcornerkicktakerid') == pid[roster[1].uid]
     assert get(row, 'penaltytakerid') == pid[roster[2].uid]
     assert get(row, 'rightcornerkicktakerid') == get(row, 'freekicktakerid') == pid[roster[0].uid]
+
+
+def test_goalkeeper_takes_a_set_piece_only_when_chosen(game):
+    """A goalkeeper captain keeps the armband, but the roles left out go to the first outfield player; a role given to
+    the goalkeeper stays his."""
+    from fsmod import t3db
+    project = load_palmeiras()
+    team = project.teams[0]
+    roster = project.roster(team.uid)
+    for k, pl in enumerate(roster):
+        pl.link(team.uid).position = builder.GOALKEEPER if k in (0, 1) else 25
+    team.captain = roster[0].uid
+    team.takers = {'penalty': roster[0].uid, 'left_corner': roster[3].uid}
+    result = builder.build(project, game, PALMEIRAS)
+    db = t3db.Database(result.database, game.meta)
+    teams = db.by_name('teams')
+    get = lambda r, f: teams.value(r, teams.field(f))
+    tid = result.assigned_team_ids[team.uid]
+    row = next(r for r in teams.records if get(r, 'teamid') == tid)
+    pid = {p.uid: result.assigned_player_ids[p.uid] for p in roster}
+    assert get(row, 'captainid') == get(row, 'penaltytakerid') == pid[roster[0].uid]
+    assert get(row, 'leftcornerkicktakerid') == pid[roster[3].uid]
+    assert (get(row, 'rightcornerkicktakerid') == get(row, 'freekicktakerid') == get(row, 'longkicktakerid')
+            == pid[roster[2].uid])
+
+
+def test_set_piece_fallback():
+    gk = builder.GOALKEEPER
+    assert builder.set_piece_fallback(1, [1, 2, 3], {1: 25, 2: gk}) == 1
+    assert builder.set_piece_fallback(1, [1, 2, 3], {1: gk, 2: gk, 3: 7}) == 3
+    assert builder.set_piece_fallback(1, [1, 2], {1: gk, 2: gk}) == 1
 
 
 def test_generated_players_build(game):

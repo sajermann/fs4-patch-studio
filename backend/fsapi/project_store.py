@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import time
 import uuid
 import zipfile
 
@@ -32,6 +33,9 @@ BOOTS_DIR = 'boots'  # the pack files of the project's boots (boot-<uid>.rx3, bo
 BOOT_EXTENSION = '.rx3'
 GLOVES_DIR = 'gloves'  # the pack files of the project's gloves (glove-<uid>_textures.rx3)
 BALLS_DIR = 'balls'  # the pack files of the project's balls (ball-<uid>.rx3, ball-<uid>_textures.rx3)
+# the real kits' own fonts (fsmod.kitfonts): font-<team uid>-<slot>-name.ttf, -numbers.rx3, -shorts-numbers.rx3
+FONTS_DIR = 'fonts'
+FONT_EXTENSIONS = {'.ttf', '.otf'}
 UPLOAD_PREFIX = 'upload-'  # provisional name of an upload until the project is saved
 BACKUP_MAX_BYTES = 2 * 1024 ** 3  # uncompressed size accepted when restoring a backup zip
 
@@ -52,6 +56,35 @@ class BackupError(ValueError):
     def __init__(self, code, detail=''):
         super().__init__(f'{code}: {detail}' if detail else code)
         self.code = code
+
+
+# Windows refuses to replace or delete a file another process has open for a moment (the app's own preview reading a
+# font or image it just imported, an antivirus scanning a new file): try again for a short while
+BUSY_TRIES = 40
+BUSY_WAIT = 0.05  # seconds
+
+
+def _retry(action, *args):
+    for n in range(BUSY_TRIES):
+        try:
+            return action(*args)
+        except PermissionError:
+            if n == BUSY_TRIES - 1:
+                raise
+            time.sleep(BUSY_WAIT)
+
+
+def _replace(source, target):
+    """os.replace that waits for a file busy for a moment (BUSY_TRIES)."""
+    _retry(os.replace, source, target)
+
+
+def _remove_unused(path):
+    """Deletes a file the project no longer uses; one still busy stays (the next save deletes it)."""
+    try:
+        _retry(os.remove, path)
+    except OSError:
+        pass
 
 
 def file_slug(text):
@@ -134,8 +167,24 @@ def ball_file_fields(project):
         yield b, 'texture', f'ball-{file_slug(b.uid)}_textures{BOOT_EXTENSION}'
 
 
+def font_file_fields(project):
+    """(real kit, field, fixed file name under fonts/) of every real kit font file slot of the project."""
+    for tm in project.teams:
+        for slot, real in tm.real_kits.items():
+            stem = f'font-{file_slug(tm.uid)}-{slot}'
+            yield real, 'name_font_file', f'{stem}-name{_extension(real.name_font_file, ".ttf")}'
+            yield real, 'number_font_file', f'{stem}-numbers{BOOT_EXTENSION}'
+            yield real, 'shorts_number_font_file', f'{stem}-shorts-numbers{BOOT_EXTENSION}'
+
+
+def _extension(path, default):
+    ext = os.path.splitext(path or '')[1].lower()
+    return ext if ext in FONT_EXTENSIONS else default
+
+
 # folder -> slots of pack files
-PACK_FILES = ((BOOTS_DIR, boot_file_fields), (GLOVES_DIR, glove_file_fields), (BALLS_DIR, ball_file_fields))
+PACK_FILES = ((BOOTS_DIR, boot_file_fields), (GLOVES_DIR, glove_file_fields), (BALLS_DIR, ball_file_fields),
+              (FONTS_DIR, font_file_fields))
 
 
 def migrate_folder(old, new):
@@ -263,7 +312,7 @@ class ProjectStore:
         tmp = self.path + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(project.to_json(), f, ensure_ascii=False, indent=2)
-        os.replace(tmp, self.path)
+        _replace(tmp, self.path)
         self._delete_unused(project)
 
     def _settle_images(self, project):
@@ -299,7 +348,7 @@ class ProjectStore:
                 tmp = target + '.tmp'
                 with open(tmp, 'wb') as f:
                     f.write(data)
-                os.replace(tmp, target)
+                _replace(tmp, target)
             setattr(entity, field, f'{IMAGES_DIR}/{name}')
 
     def _settle_pack_files(self, project, sub, fields):
@@ -324,7 +373,7 @@ class ProjectStore:
                 tmp = target + '.tmp'
                 with open(tmp, 'wb') as f:
                     f.write(data)
-                os.replace(tmp, target)
+                _replace(tmp, target)
             setattr(entity, field, f'{sub}/{name}')
 
     def _delete_unused(self, project):
@@ -336,10 +385,13 @@ class ProjectStore:
                 path = os.path.join(root, name)
                 ext = os.path.splitext(name)[1].lower()
                 if ext in IMAGE_EXTENSIONS | {'.tmp'} and os.path.normcase(path) not in used:
-                    os.remove(path)
+                    _remove_unused(path)
         for root, dirs, files in os.walk(self.images_dir, topdown=False):
             if root != self.images_dir and not os.listdir(root):
-                os.rmdir(root)  # a kind folder left empty
+                try:
+                    os.rmdir(root)  # a kind folder left empty
+                except OSError:
+                    pass
         for sub, fields in PACK_FILES:
             used = {os.path.normcase(os.path.join(self.folder, *getattr(e, f).split('/')))
                     for e, f, _ in fields(project) if getattr(e, f)}
@@ -348,7 +400,7 @@ class ProjectStore:
                 for name in os.listdir(folder):
                     path = os.path.join(folder, name)
                     if os.path.isfile(path) and os.path.normcase(path) not in used:
-                        os.remove(path)
+                        _remove_unused(path)
         faces = os.path.join(self.folder, scanface.PROJECT_DIR)
         with_face = {p.uid for p in project.players if p.face}
         if os.path.isdir(faces):
@@ -383,8 +435,8 @@ class ProjectStore:
                     h.update(_read(os.path.join(self.folder, relative)))
         return h.hexdigest()
 
-    def _save_pack_file(self, sub, data):
-        name = f'{UPLOAD_PREFIX}{uuid.uuid4().hex[:12]}{BOOT_EXTENSION}'
+    def _save_pack_file(self, sub, data, ext=BOOT_EXTENSION):
+        name = f'{UPLOAD_PREFIX}{uuid.uuid4().hex[:12]}{ext}'
         folder = os.path.join(self.folder, sub)
         os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, name), 'wb') as f:
@@ -422,6 +474,15 @@ class ProjectStore:
         """Absolute path of a project ball file, refusing anything outside balls/."""
         return self._pack_file_path(BALLS_DIR, relative)
 
+    def save_font_file(self, filename, data):
+        """Stores a real kit font file (.ttf for the name, .rx3 numbers) under fonts/ with a provisional name (like
+        save_boot_file)."""
+        return self._save_pack_file(FONTS_DIR, data, _extension(filename, BOOT_EXTENSION))
+
+    def font_file_path(self, relative):
+        """Absolute path of a project font file, refusing anything outside fonts/."""
+        return self._pack_file_path(FONTS_DIR, relative)
+
     def save_image(self, filename, data):
         """Stores an uploaded image under images/ with a provisional name and returns its project-relative path;
         the image gets the fixed name of its entity when the project is saved."""
@@ -435,11 +496,12 @@ class ProjectStore:
         return f'{IMAGES_DIR}/{name}'
 
     def write_backup(self, out):
-        """Zip of the whole project folder (database.json, images/, faces/, boots/, gloves/, balls/) into the binary file `out`."""
+        """Zip of the whole project folder (database.json, images/, faces/, boots/, gloves/, balls/, fonts/) into the
+        binary file `out`."""
         with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
             if self.exists():
                 z.write(self.path, PROJECT_FILE)
-            for sub in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR, BALLS_DIR):
+            for sub in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR, BALLS_DIR, FONTS_DIR):
                 for root, _, files in os.walk(os.path.join(self.folder, sub)):
                     for name in files:
                         if not name.endswith('.tmp'):
@@ -470,7 +532,8 @@ class ProjectStore:
                 if '..' in parts or rel.startswith('/') or ':' in rel or '\\' in rel:
                     raise BackupError('unsafe_path', info.filename)
                 if rel in (PROJECT_FILE, LEGACY_PROJECT_FILE) or \
-                        (len(parts) > 1 and parts[0] in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR, BALLS_DIR)):
+                        (len(parts) > 1 and parts[0] in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR,
+                                                         BALLS_DIR, FONTS_DIR)):
                     picked.append((info, rel))
             if sum(i.file_size for i, _ in picked) > BACKUP_MAX_BYTES:
                 raise BackupError('too_big')

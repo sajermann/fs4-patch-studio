@@ -470,6 +470,15 @@ export const kitTextureUrl = (part: 'jersey' | 'shorts', kit: PreviewKit) => {
       qs.set('shorts_number', String(p.shorts_number))
       qs.set('jersey', kit.real.jersey)
       if (p.loaded) qs.set('loaded', p.loaded)
+      if (p.name_layout != null) qs.set('name_layout', String(p.name_layout))
+      if (p.name_font != null) qs.set('name_font', String(p.name_font))
+      if (p.number_font != null) qs.set('number_font', String(p.number_font))
+      if (p.shorts_number_font != null) qs.set('shorts_number_font', String(p.shorts_number_font))
+      if (p.name_font_file) qs.set('name_font_file', p.name_font_file)
+      if (p.number_font_file) qs.set('number_font_file', p.number_font_file)
+      if (p.shorts_number_font_file) qs.set('shorts_number_font_file', p.shorts_number_font_file)
+      if (!p.show_name) qs.set('show_name', 'false')
+      if (p.positions?.length === 8) qs.set('positions', p.positions.flat().join(','))
     }
     return withRevision(`/api/preview/real-kit/${part}.png?${qs}`)
   }

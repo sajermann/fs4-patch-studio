@@ -157,6 +157,116 @@ def test_team_goes_with_its_links_and_kit_pictures(env):
     assert (tm['kit_credits'], tm['kit_credits_url']) == ('Kit maker', 'https://kits.example.com')
 
 
+def test_team_from_another_tool_gets_random_street_kits(env):
+    """A team without street_kits (a zip made by another tool) draws one piece per part, in its colors; the app's own
+    zip keeps what the team had (no street kits = the template's pieces)."""
+    client = env['client']
+    pool = env['state'].catalog().street_pieces_in_use
+    save(client, {'teams': [team(leagues=())]})
+    data = export(client, 'teams', ['t1'])
+    _, items = import_all(client, 'teams', data)
+    assert not items[0].get('street_kits')
+
+    manifest = {'type': 'fs4-teams', 'version': 1, 'teams': [team(uid='x1', leagues=()), team(uid='x2', leagues=())]}
+    zipped = make_zip({'manifest.json': json.dumps(manifest)})
+    found, items = import_all(client, 'teams', zipped)
+    assert [i['street_kits'] for i in found['items']] == [i['street_kits'] for i in items]  # same draw both steps
+    for item in items:
+        assert set(item['street_kits']) == {'home', 'away'}
+        for kind, (jersey, shorts) in (('home', ([10, 20, 30], [240, 240, 240])),
+                                       ('away', ([240, 240, 240], [10, 20, 30]))):
+            kit = item['street_kits'][kind]
+            for part in ('top', 'bottom', 'socks'):
+                assert len(kit[part]['pieces']) == 1 and kit[part]['pieces'][0] in pool[part]
+            assert kit['top']['colors'] == [jersey, shorts, jersey]
+            assert kit['bottom']['colors'] == [shorts, jersey, shorts]
+    assert items[0]['street_kits'] != items[1]['street_kits']  # each team draws its own
+
+
+def test_real_kit_fonts_the_game_lacks_are_dropped_on_import(env):
+    """A zip from another tool brings its game's font ids: the ones this game has no file for go out (the team's own
+    apply), the others stay."""
+    client = env['client']
+    real = {'name_color': [255, 255, 255], 'number_color': 1, 'shorts_number_color': 5, 'collar': 0,
+            'front_number': False, 'name_font': 40, 'number_font': 29, 'shorts_number_font': 29, 'name_layout': 1}
+    manifest = {'type': 'fs4-teams', 'version': 1,
+                'teams': [team(uid='x1', leagues=(), use_real_kits=True, real_kits={'home': real}),
+                          team(uid='x2', leagues=(), use_real_kits=True,
+                               real_kits={'home': {**real, 'name_font': 21, 'number_font': 12, 'name_layout': 7}})]}
+    _, items = import_all(client, 'teams', make_zip({'manifest.json': json.dumps(manifest)}))
+    first, second = (i['real_kits']['home'] for i in items)
+    # font 40 has no .ttf; font 29 has no digits in white (1) but has them in yellow (5)
+    assert 'name_font' not in first and 'number_font' not in first
+    assert (first['shorts_number_font'], first['name_layout']) == (29, 1)
+    assert (second['name_font'], second['number_font']) == (21, 12) and 'name_layout' not in second
+
+
+def test_real_kit_own_fonts_travel_in_the_zip(env):
+    """A kit's own font files come with the team: stored under fonts/ (fixed names on save), sent again on export; a
+    file that is not a font is left out and its font goes back to the team's."""
+    from fsmod import chunk, kitfonts
+    client, game = env['client'], env['state'].game
+    ttf = chunk.decode(game.read_entry(kitfonts.NAME_FILE.format(7))[2])
+    numbers = chunk.decode(game.read_entry(kitfonts.NUMBERS_FILE.format(9, 4))[2])
+    real = {'name_color': [255, 255, 255], 'number_color': 4, 'shorts_number_color': 4, 'collar': 0,
+            'front_number': False, 'name_font': 'kit', 'name_font_file': 'a.ttf', 'name_font_name': 'Bell',
+            'number_font': 'kit', 'number_font_file': 'n.rx3', 'shorts_number_font': 'kit',
+            'shorts_number_font_file': 'bad.rx3'}
+    manifest = {'type': 'fs4-teams', 'version': 1,
+                'teams': [team(uid='x1', leagues=(), use_real_kits=True, real_kits={'home': real})]}
+    data = make_zip({'manifest.json': json.dumps(manifest), 'a.ttf': ttf, 'n.rx3': numbers, 'bad.rx3': b'nope'})
+    found, items = import_all(client, 'teams', data)
+    assert [p['code'] for p in found['problems']] == ['font_invalid']
+    kit = items[0]['real_kits']['home']
+    assert kit['name_font'] == 'kit' and kit['number_font'] == 'kit' and 'shorts_number_font' not in kit
+    assert kit['name_font_file'].startswith('fonts/') and kit['number_font_file'].startswith('fonts/')
+
+    saved = save(client, {'teams': items})
+    kit = saved['teams'][0]['real_kits']['home']
+    folder = env['state'].store.folder
+    assert kit['name_font_file'] == 'fonts/font-x1-home-name.ttf'
+    assert kit['number_font_file'] == 'fonts/font-x1-home-numbers.rx3'
+    assert open(os.path.join(folder, *kit['name_font_file'].split('/')), 'rb').read() == ttf
+    assert sorted(os.listdir(os.path.join(folder, 'fonts'))) == ['font-x1-home-name.ttf', 'font-x1-home-numbers.rx3']
+
+    with zipfile.ZipFile(io.BytesIO(export(client, 'teams', ['x1']))) as z:
+        item = json.loads(z.read('manifest.json'))['team']
+        sent = item['real_kits']['home']
+        assert z.read(sent['name_font_file']) == ttf and z.read(sent['number_font_file']) == numbers
+
+
+def test_font_files_with_font_numbers_keep_the_games_font_when_it_is_the_same(env):
+    """Another tool sends every font file with its game's font numbers: the game's own font stays when the file is
+    the same (by the .ttf's name, by the digits), else the kit uses the file; the app's own zip only sends the files
+    in use."""
+    from fsmod import chunk, kitfonts
+    client, game = env['client'], env['state'].game
+    ttf = lambda n: chunk.decode(game.read_entry(kitfonts.NAME_FILE.format(n))[2])  # noqa: E731
+    numbers = lambda f, c: chunk.decode(game.read_entry(kitfonts.NUMBERS_FILE.format(f, c))[2])  # noqa: E731
+    base = {'name_color': [255, 255, 255], 'number_color': 4, 'shorts_number_color': 4, 'collar': 0,
+            'front_number': False, 'name_font_file': 'a.ttf', 'number_font_file': 'n.rx3',
+            'shorts_number_font_file': 'm.rx3'}
+    same = {**base, 'name_font': 7, 'number_font': 9, 'shorts_number_font': 9}
+    other = {**base, 'name_font': 21, 'number_font': 9, 'shorts_number_font': 200}
+    teams = [team(uid=uid, leagues=(), use_real_kits=True, real_kits={'home': real})
+             for uid, real in (('same', same), ('other', other))]
+    files = {'a.ttf': ttf(7), 'n.rx3': numbers(9, 4), 'm.rx3': numbers(3, 4)}
+    zipped = make_zip({'manifest.json': json.dumps({'type': 'fs4-teams', 'version': 1, 'teams': teams}), **files})
+    _, items = import_all(client, 'teams', zipped)
+    kept, own = (i['real_kits']['home'] for i in items)
+    # same team: font 7 is that .ttf, font 9 in color 4 those digits; its shorts file (font 3's digits) is not font 9
+    assert (kept['name_font'], kept['number_font'], kept['shorts_number_font']) == (7, 9, 'kit')
+    assert 'name_font_file' not in kept and 'number_font_file' not in kept and kept['shorts_number_font_file']
+    # other team: font 21 is another .ttf, font 200 does not exist in the game
+    assert (own['name_font'], own['number_font'], own['shorts_number_font']) == ('kit', 9, 'kit')
+
+    save(client, {'teams': items})
+    with zipfile.ZipFile(io.BytesIO(export(client, 'teams', ['same']))) as z:
+        sent = json.loads(z.read('manifest.json'))['team']['real_kits']['home']
+        assert sent['name_font_file'] is None and sent['number_font_file'] is None
+        assert z.read(sent['shorts_number_font_file']) == numbers(3, 4)
+
+
 def test_player_goes_with_his_face(env):
     client, folder = env['client'], env['state'].store.folder
     face_dir = scanface.project_face_dir(folder, 'p1')

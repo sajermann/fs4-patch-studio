@@ -29,8 +29,9 @@ from .original_images import OriginalImages
 from .share_service import ShareService, ShareZipError
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
 from .project_store import BackupError, ProjectFileError, ProjectStore, file_slug, migrate_folder
-from fsmod import (appearance_thumbs, balls, boots, buildcache, builder, gloves, kit, kitprint, model, original_league,
-                   original_player, original_team, photo, player_generator, preview, scanface, validation, workers)
+from fsmod import (appearance_thumbs, balls, boots, buildcache, builder, gloves, kit, kitfonts, kitprint, model,
+                   original_league, original_player, original_team, photo, player_generator, preview, scanface,
+                   validation, workers)
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
 
@@ -80,7 +81,8 @@ class AppState:
         self.boots = BootService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.gloves = GloveService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.balls = BallService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
-        self.shares = ShareService(os.path.join(os.path.dirname(prints), 'cache'))
+        self.shares = ShareService(os.path.join(os.path.dirname(prints), 'cache'),
+                                   street_pool=lambda: self.catalog().street_pieces_in_use, game=self.game)
         self.build_cache_dir = os.path.join(os.path.dirname(prints), 'cache', 'build')  # fsmod.buildcache
         self._catalog = None
 
@@ -528,6 +530,8 @@ def create_app(state=None):
                 'hair_colors': {code: preview.hair_color(code) for code in c.appearance_options['haircolorcode']},
                 'lineup_modes': c.lineup_modes,
                 'street_options': c.street_options,
+                'kit_fonts': c.kit_fonts,  # real kits: name fonts (with their names) and number fonts by color
+                'kit_print': c.kit_print,  # real kits: each team's fonts and name layout (empty fields keep these)
                 'gloves': {'slots': len(gloves.free_codes(state.game))},
                 'balls': {'slots': len(balls.free_ids(state.game))},
                 'stadium_filters': c.stadium_filters,
@@ -769,7 +773,7 @@ def create_app(state=None):
         faces in faces/<uid>/): the client merges them into the draft and saves."""
         try:
             items = state.shares.apply(kind, req.token, req.uids, state.store.folder, state.store.save_image,
-                                       req.as_uids)
+                                       req.as_uids, save_font=state.store.save_font_file)
         except ShareZipError as e:
             raise share_failure(e)
         return {'items': items}
@@ -1396,11 +1400,19 @@ def create_app(state=None):
                                  number: int | None = None, name: str | None = None, team: int | None = None,
                                  kind: int = 0, name_color: str = '255,255,255', number_color: int = 1,
                                  shorts_number_color: int = 1, front: bool = False, shorts_number: bool = False,
-                                 jersey: str | None = None, loaded: str | None = None):
+                                 jersey: str | None = None, loaded: str | None = None, name_font: int | None = None,
+                                 number_font: int | None = None, shorts_number_font: int | None = None,
+                                 name_layout: int | None = None, show_name: bool = True,
+                                 name_font_file: str | None = None, number_font_file: str | None = None,
+                                 shorts_number_font_file: str | None = None,
+                                 positions: str | None = Query(None, pattern=r'^-?[\d.]+(,-?[\d.]+){31}$')):
         """Real kit texture (project PNG of a FIFA 14-16 kit) as the game draws it; shorts also cover the socks.
         With number/name, the player's name and numbers are printed like the game does (fsmod.kitprint): fonts from
-        the teamkits row of `team` (an original team, or a new team's template) and `kind`; positions of the game's
-        own kit when `jersey` is still the one loaded from the game (its SHA-1 = `loaded`), else the real kits'."""
+        the teamkits row of `team` (an original team, or a new team's template) and `kind` unless the kit sets them
+        (name_font, number_font, shorts_number_font, name_layout: 1 = arc); positions of the game's own kit when `jersey` is still the one
+        loaded from the game (its SHA-1 = `loaded`), else the kit's own (`positions`: 8 rectangles, 32 numbers in
+        kit.REAL_POSITIONS order) or the real kits' table, without the name when show_name is false; the kit's own
+        fonts (name_font_file, number_font_file, shorts_number_font_file: project files under fonts/) win."""
         img = Image.open(project_image(image))
         if (number is not None or name) and team is not None:
             c = state.catalog()
@@ -1411,11 +1423,28 @@ def create_app(state=None):
             if row is not None:
                 same = loaded and jersey and original_team.image_sha1(state.store.folder, jersey) == loaded
                 get = lambda f: c.db.get(kits, row, f)  # noqa: E731
+                own = {}
+                for key, relative in (('name', name_font_file), ('number', number_font_file),
+                                      ('shorts', shorts_number_font_file)):
+                    if relative:
+                        try:
+                            with open(state.store.font_file_path(relative), 'rb') as f:
+                                data = f.read()
+                            own[key] = kitfonts.decode(data) if key == 'name' else kitfonts.preview_digits(data)
+                        except (OSError, ValueError):
+                            pass  # a missing or broken font file: the game font
+                values = [float(v) for v in positions.split(',')] if positions else None
+                table = [values[i:i + 4] for i in range(0, 32, 4)] if values else None
                 img = kitprint.print_kit(
                     img.convert('RGBA'), part, state.game, number=number, name=name,
-                    rects=kitprint.positions(state.game, team if same else None, kind),
-                    number_font=get('numberfonttype'), shorts_number_font=get('shortsnumberfonttype'),
-                    name_font=get('jerseynamefonttype'), name_case=get('jerseybacknamefontcase'),
+                    rects=kitprint.positions(state.game, team if same else None, kind, table, show_name),
+                    number_font=get('numberfonttype') if number_font is None else number_font,
+                    shorts_number_font=get('shortsnumberfonttype') if shorts_number_font is None else shorts_number_font,
+                    name_font=get('jerseynamefonttype') if name_font is None else name_font,
+                    name_case=get('jerseybacknamefontcase'),
+                    name_layout=get('jerseynamelayouttype') if name_layout is None else name_layout,
+                    name_font_data=own.get('name'), number_glyphs=own.get('number'),
+                    shorts_number_glyphs=own.get('shorts'),
                     number_color=number_color, shorts_number_color=shorts_number_color,
                     name_color=tuple(int(v) for v in name_color.split(',')), front_number=front,
                     shorts_number=shorts_number)

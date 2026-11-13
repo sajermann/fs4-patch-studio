@@ -165,8 +165,8 @@ def test_version_2_projects_are_converted_and_saved_as_the_current_version():
                       'secondary_color': [0, 0, 0]}],
            'players': [{'uid': 'jg_1', 'first_name': 'A', 'last_name': 'B', 'team': 'tm_1', 'number': 9}]}
     saved = model.load(old).model_dump(mode='json')
-    assert saved["version"] == model.CONTRACT_VERSION == 11
+    assert saved["version"] == model.CONTRACT_VERSION == 13
     assert saved['teams'][0]['leagues'] == ['lg_1']
-    assert saved['players'][0]['teams'] == [{'team': 'tm_1', 'number': 9, 'position': None}]
+    assert saved['players'][0]['teams'] == [{'team': 'tm_1', 'number': 9, 'position': None, 'hidden': None}]
     with pytest.raises(ValueError):  # a file from a newer app is refused, never read in part
         model.load({'version': model.CONTRACT_VERSION + 1})

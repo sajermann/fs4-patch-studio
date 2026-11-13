@@ -42,7 +42,12 @@ REAL_POSITIONS = (
     ('number', (0.5849999785423279, 0.754967212677002, 0.6551606059074402, 0.8554952144622803)),
 )
 # teamkits.numbercolor / shortsnumbercolor: palette of the game (same as FIFA); 1 white, 2 black, ... 19 dark green
-NUMBER_COLORS = (*range(1, 18), 19)
+# (18, a coral red, validated in game; 0 only has a file for font 0: any other font shows a broken texture)
+NUMBER_COLORS = tuple(range(1, 20))
+NAME_LAYOUTS = (0, 1)  # teamkits.jerseynamelayouttype: straight, arc (validated in game)
+NAME_FONT_FILE = 'data/sceneassets/jerseyfonts/font_{}.ttf'
+NUMBERS_FILE = 'data/sceneassets/kitnumbers/kitnumbers_{}_{}.rx3'
+NO_NAME = ('name', 'name_arccenter', 'name_arctangent')  # rectangles zeroed: no name on the back (validated in game)
 COLLARS = range(15)  # teamkits.jerseycollargeometrytype: the game has body/jersey_<collar>_* meshes 0-14
 REAL_TEXTURES = {'jersey_cm': (2048, 2048), 'shorts_cm': (2048, 1024)}  # real kit textures (the packs' size)
 THUMBNAIL_SIDES = (256, 512)  # kit-screen thumbnail: 512 when the source is bigger than 256 (validated in game)
@@ -137,6 +142,44 @@ def _positions(d):
     return out
 
 
+def name_fonts(game):
+    """Name fonts the game has a file for (jerseynamefonttype; 0-24, the same fonts as FIFA 14's 0-24)."""
+    fonts = getattr(game, '_name_fonts', None)
+    if fonts is None:
+        fonts = game._name_fonts = [n for n in range(256) if game.locate(NAME_FONT_FILE.format(n))]
+    return fonts
+
+
+def number_font_ok(game, font, color):
+    """The game has the digits of number font `font` in palette color `color` (kitnumbers_<font>_<color>.rx3)."""
+    return bool(game.locate(NUMBERS_FILE.format(font, color)))
+
+
+def unusable_print_fields(game, real):
+    """RealKit fields (name_font, number_font, shorts_number_font, name_layout) whose value the game cannot use: a
+    name font without its .ttf, a number font without the digits in the kit's color, a layout other than 0/1 ('kit',
+    the kit's own font file, is checked by the validation). A zip from another tool (e.g. FIFA 14 kits) brings its
+    game's values: these are dropped on import, the team's own apply."""
+    out = []
+    if isinstance(real.name_font, int) and real.name_font not in name_fonts(game):
+        out.append('name_font')
+    for font, color in (('number_font', real.number_color), ('shorts_number_font', real.shorts_number_color)):
+        value = getattr(real, font)
+        if isinstance(value, int) and not number_font_ok(game, value, color):
+            out.append(font)
+    if real.name_layout is not None and real.name_layout not in NAME_LAYOUTS:
+        out.append('name_layout')
+    return out
+
+
+def position_table(positions=None, show_name=True):
+    """(name, rect) table a built real kit gets: its own positions (RealKit.positions, REAL_POSITIONS order) or
+    REAL_POSITIONS; without a name the NO_NAME rectangles are zeroed."""
+    rects = [tuple(r) for r in positions] if positions else [r for _, r in REAL_POSITIONS]
+    return tuple((n, (0.0, 0.0, 0.0, 0.0) if not show_name and n in NO_NAME else r)
+                 for (n, _), r in zip(REAL_POSITIONS, rects))
+
+
 def set_positions(d, table=REAL_POSITIONS):
     """Writes a position table into a kit rx3 (big-endian, d = bytearray)."""
     entries = _positions(d)
@@ -193,13 +236,14 @@ def thumbnail_dds(img):
     return chunk.chunkzip(buf.getvalue(), 0x40000)
 
 
-def build_real(game, teamid, kind, jersey, shorts, thumb=None, crest=None, log=print):
+def build_real(game, teamid, kind, jersey, shorts, thumb=None, crest=None, log=print, positions=None, show_name=True):
     """Returns {loose file name: bytes}: kit rx3 + thumbnail of teamid from a FIFA 14-16 kit.
-    jersey/shorts/thumb/crest = PIL images (thumb None: the generic thumbnail tinted with the jersey's front color)."""
+    jersey/shorts/thumb/crest = PIL images (thumb None: the generic thumbnail tinted with the jersey's front color);
+    positions/show_name: RealKit.positions / show_name (position_table)."""
     d = bytearray(chunk.decode(game.read_entry(kit_name(TEMPLATE_TEAM, 0))[2]))
     d = set_real_texture(d, 'jersey_cm', jersey)
     d = set_real_texture(d, 'shorts_cm', shorts)
-    set_positions(d)
+    set_positions(d, position_table(positions, show_name))
     clear_crest(d)
     erase_badge(d)
     name = kit_name(teamid, kind)

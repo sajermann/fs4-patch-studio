@@ -20,6 +20,31 @@ export interface RealKit {
   collar: number // 0-14
   front_number: boolean
   shorts_number?: boolean // number on the shorts; unset = the row's (new team: off; original: the game's)
+  // fonts and name layout; unset = the row's (new team: the template's; original: the game's); KIT_FONT = the
+  // kit's own font file below (the build gives it a free font number)
+  name_font?: number | typeof KIT_FONT // jerseyfonts/font_<n>.ttf (0-24)
+  number_font?: number | typeof KIT_FONT // kitnumbers_<font>_<number_color>.rx3 must exist
+  shorts_number_font?: number | typeof KIT_FONT
+  name_font_file?: string | null // the kit's own fonts: project files under fonts/ (.ttf; numbers .rx3, colors
+  name_font_name?: string | null // painted in)
+  number_font_file?: string | null
+  shorts_number_font_file?: string | null
+  name_layout?: number // 0 straight, 1 arc
+  // used when the kit is built from the images (new team): no name on the back, and the kit's own position table
+  // (8 rectangles u0, v0, u1, v1, fsmod.kit.REAL_POSITIONS order, e.g. a FIFA 14 kit's); unset = the Studio's table
+  show_name?: boolean
+  positions?: [number, number, number, number][] | null
+}
+
+/** RealKit font value: the kit's own font file (fsmod.kitfonts.KIT). */
+export const KIT_FONT = 'kit'
+
+/** Fonts and name layout of a teamkits row (Catalog.kit_print). */
+export interface KitPrintFields {
+  name_font: number
+  number_font: number
+  shorts_number_font: number
+  name_layout: number
 }
 
 /** When an entry of the project was created and last changed (ISO 8601, UTC), set by the backend on save; entries
@@ -89,6 +114,7 @@ export interface TeamLink {
   team: TeamKey
   number?: number | null // unset: new team = the template's (game player: his own); game team = a free one
   position?: number | null // unset: new team = the template's (game player: his own); game team = his first team's
+  hidden?: boolean // out of the patch in this team only (stays in its roster; Player.hidden = out of every team)
 }
 
 /** A game mode a lineup can be set for: {tactic id: area per starter slot} (0 GK, 1 DEF, 2 ATT). */
@@ -634,6 +660,11 @@ export interface Catalog {
   hair_colors: Record<number, string>
   lineup_modes: LineupMode[]
   street_options: Record<StreetPartName, Record<string, number[]>> // {part: {style: [patterns]}}
+  // real kits: name fonts (the font's own name, null when unreadable) and number fonts by palette color
+  kit_fonts: { name: { id: number; name: string | null }[]; number: Record<string, number[]> }
+  // real kits: each team's fonts and name layout by kit kind (0 home, 1 away, 2 goalkeeper): an empty RealKit field
+  // keeps these (new team: its template's row; original team: its own)
+  kit_print: Record<string, Record<string, KitPrintFields>>
   street_arms: Record<string, number> // top style -> arms mesh (long/short sleeves, tank top)
   street_full_length_bottoms: number[] // trousers: legs and socks are hidden under them
   template_street: Record<string, Partial<Record<KitKind, Record<StreetPartName, StreetSlot[]>>>>
