@@ -135,6 +135,18 @@ def test_head_stored_eyes_first_has_the_usual_order_after_the_fix(game):
     assert scanface.head_mesh_first(fixed) == fixed
 
 
+
+def test_console_files_in_a_pc_pack(tmp_path):
+    """A big-endian (console) RX3 mixed into a PC pack: an optional part is left out, a required one is refused."""
+    pc, console = b'RX3l' + bytes(12), b'RX3b' + bytes(12)
+    files = {'head': pc, 'face': pc, 'eyes': console, 'hair': pc, 'hairlod': console}
+    folder = str(tmp_path)
+    scanface.write_files(folder, FACE, files)
+    assert set(scanface.read_files(folder, FACE)) == {'head', 'face', 'hair'}
+    scanface.write_files(folder, FACE, {'head': console})
+    with pytest.raises(scanface.FaceFormatError, match='not a PC RX3'):
+        scanface.read_files(folder, FACE)
+
 @pytest.mark.parametrize('face_id, case', [
     (215107, 'eyes stored first, meshes named eyes/head without the underscore'),
     (215108, 'hair texture whose 2x2/1x1 mips have another pitch')])

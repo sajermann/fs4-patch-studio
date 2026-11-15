@@ -101,6 +101,10 @@ def read_files(folder, face_id):
                     data = chunk.decode(data)
                 except (zlib.error, ValueError, struct.error) as e:  # truncated download, broken pack
                     raise FaceFormatError(f'{os.path.basename(path)}: damaged compressed file ({e})') from e
+            if data[:4] != b'RX3l':  # a console (big-endian RX3b) file mixed into a PC pack (FIFA 14 classic patch)
+                if kind in REQUIRED:
+                    raise FaceFormatError(f'{os.path.basename(path)}: not a PC RX3 file ({data[:4]!r})')
+                continue  # optional part: the face goes without it, as when the pack does not ship it
             out[kind] = data
     # some packs ship a copy of the hair mesh under the hair textures name (FIFA 14 classic patch, 51793): without
     # its two textures (coeff, cm) the detailed hair cannot be built, so the face goes without it (hairlod stays)

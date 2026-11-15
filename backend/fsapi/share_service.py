@@ -47,7 +47,7 @@ from .project_store import IMAGE_EXTENSIONS, file_slug
 
 MANIFEST = 'manifest.json'
 VERSION = 1  # zip format; bump when its layout changes (older ones are read, newer ones refused)
-MAX_ZIP = 2 * 1024 ** 3  # uncompressed bytes of an import
+MAX_ZIP = 32 * 1024 ** 3  # uncompressed bytes of an import (a zip of thousands of players with real faces passes 2 GB)
 MAX_IMAGE = 30 * 1024 * 1024
 MAX_FONT = 8 * 1024 * 1024  # a real kit font file (.ttf, numbers .rx3)
 MAX_FACE_FILE = 64 * 1024 * 1024
