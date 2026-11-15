@@ -28,6 +28,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { BuildProgressDialog } from '@/components/layout/BuildProgress'
+import { InstallProgress } from '@/components/layout/InstallProgress'
 import { useI18n } from '@/i18n'
 import { issueText } from '@/lib/issues'
 import { entityLink } from '@/lib/entityLink'
@@ -138,6 +139,15 @@ export function ProjectActions() {
           : t('patch.durationMinutes', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 })
       toast.success(t('patch.built'), { description: t('patch.builtDetail', { count, made: count - reused, reused, time }) })
     } catch (e) {
+      if (e instanceof ApiError && e.code === 'build_cancelled') {
+        // stopped by the user: what was converted is in the build cache, building again continues from there
+        toast.info(t('patch.buildStopped'), {
+          description: t('patch.buildStoppedDetail'),
+          duration: 15000,
+          action: { label: t('patch.buildContinue'), onClick: () => void doBuild() },
+        })
+        return
+      }
       if (e instanceof ApiError && e.issues) setIssuesOpen(true)
       toast.error(e instanceof ApiError ? e.message : t('patch.buildFailed'), { entity: e instanceof ApiError ? e.entity : undefined })
     } finally {
@@ -303,8 +313,8 @@ export function ProjectActions() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={installOpen} onOpenChange={setInstallOpen}>
-        <AlertDialogContent>
+      <AlertDialog open={installOpen} onOpenChange={(next) => !installing && setInstallOpen(next)}>
+        <AlertDialogContent className="data-[size=default]:sm:max-w-xl">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('patch.installTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -317,6 +327,7 @@ export function ProjectActions() {
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
             {t('patch.installSaveWarning')}
           </p>
+          <InstallProgress action="install" active={installing && installOpen} />
           <AlertDialogFooter>
             <AlertDialogCancel disabled={installing}>{t('common.cancel')}</AlertDialogCancel>
             <Button onClick={install} disabled={installing}>
@@ -341,8 +352,8 @@ export function ProjectActions() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={uninstallOpen} onOpenChange={setUninstallOpen}>
-        <AlertDialogContent>
+      <AlertDialog open={uninstallOpen} onOpenChange={(next) => !installing && setUninstallOpen(next)}>
+        <AlertDialogContent className="data-[size=default]:sm:max-w-xl">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('patch.uninstallTitle')}</AlertDialogTitle>
             <AlertDialogDescription>{t('patch.uninstallDescription')}</AlertDialogDescription>
@@ -351,6 +362,7 @@ export function ProjectActions() {
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
             {t('patch.uninstallSaveWarning')}
           </p>
+          <InstallProgress action="uninstall" active={installing && uninstallOpen} />
           <AlertDialogFooter>
             <AlertDialogCancel disabled={installing}>{t('common.cancel')}</AlertDialogCancel>
             <Button onClick={uninstall} disabled={installing}>

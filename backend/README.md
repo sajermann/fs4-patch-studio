@@ -50,6 +50,7 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 
 | Route | What it does |
 |---|---|
+| `GET /api/startup` | what the backend is doing now for the opening screen (`fsapi.activity`): `tasks.status/game_data/project` with `phase` (a code the UI has a text for), `params` (counts, sizes) and `elapsed` |
 | `GET /api/status` | missing original files, config, `setup` (first-run state: `required`/`reasons`, the app's originals checked, ReStreet version, patch installed in the game and files changed outside the app — cheap, only changed files are hashed), project, patch state (`up_to_date` = built from the saved project) |
 | `POST /api/setup/check` `{game_dir}` | checks a game folder: ReStreet root, version (`online-patch.json`), SHA-1 of the 12 files against the official ones (`fsapi/game_setup.py`), guess of the save folder |
 | `POST /api/setup/apply` `{game_dir, save_dir, face_pack_dirs, terms_version}` | saves the first-run choices; imports the 12 originals from the game (only official files) when the app does not have them verified |
@@ -124,9 +125,11 @@ backend tests use temporary folders and a fake game; they never touch a real ins
 | `GET /api/preview/scanned/{head.glb\|hair.glb\|hairlod.glb\|face.png\|eyes.png\|hair.png\|cap.png\|strands.png}?face=&haircolor=&folder=\|player=` | real face converted exactly like the build will (`fsmod.scanface`, ~3 s, cached) |
 | `GET /api/preview/lodhead.glb` | head every player has at the normal play camera (`body/playerlod_head.rx3`) |
 | `POST /api/patch/build` | validate + build `patch/` (assigns ids and saves them in the project) |
-| `GET /api/patch/progress` | step of the current/last build (`builder.BUILD_STEPS`), done/total, last message, elapsed |
+| `GET /api/patch/progress` | step of the current/last build (`builder.BUILD_STEPS`), done/total, last message, elapsed, `item` (the face/kit/crest the images step waits for), `cache` (entries reused/made so far), `stopping`/`cancelled` |
+| `POST /api/patch/build/cancel` | asks the running build to stop: it ends the faces already being converted (they go to the build cache, like everything converted before) and the build answers 409 `build_cancelled`; building again continues from the cache |
 | `POST /api/patch/install` | copy `patch/Game` into the game's `Game` (game closed, free space checked; each file through a temporary name, everything put back if one fails; files that left the patch come back from `original_files`; manifest with size/mtime/SHA-1) and **delete the save** (no copy) |
 | `POST /api/patch/uninstall` | originals back over what the patch changed, what it added removed (manifest), save deleted |
+| `GET /api/patch/install/progress` | where the current (or last) install / uninstall is: `action`, `phase` (`checking`, `backup`, `restoring`, `copying`, `save`, `undoing`), files `done`/`total` and the current `name`, `bytes_done`/`bytes_total` copied, `elapsed` |
 | `POST /api/patch/export` | zip of `patch/Game` saved where the user picks (Windows dialog); `{path}` or null |
 | `POST /api/save/delete` | deletes the save (only a `…\4541097B` profile folder is ever touched) |
 | `POST /api/log` `{level, message, detail, page}` | errors of the interface (React, browser exceptions, requests the backend never saw) into the backend log |

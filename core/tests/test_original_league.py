@@ -115,6 +115,20 @@ def test_original_team_without_a_league_is_hidden_in_the_game(game, catalog, ass
     assert [t.value(r, t.field('leagueid')) for r in links] == [builder.HIDDEN_TEAMS_LEAGUE]
 
 
+def test_original_team_hidden_in_its_only_league_is_hidden_in_the_game(game, catalog, assets):
+    """An original team hidden in every league it plays in goes as one without a league (hidden in the game), and
+    the entry is not dropped as untouched."""
+    tm = original_team.load(game, catalog, BARCELONA, 'tm_barca', assets[1])
+    tm.hidden_in_leagues = list(tm.leagues)
+    assert tm.hidden_in_leagues and not original_team.untouched(tm, assets[0], catalog)
+    project = model.Project(teams=[tm])
+    assert project.visible().teams[0].leagues == []
+    db = t3db.Database(builder.build(project, game, assets[0]).database, game.meta)
+    t = db.by_name('leagueteamlinks')
+    links = [r for r in t.records if t.value(r, t.field('teamid')) == BARCELONA]
+    assert [t.value(r, t.field('leagueid')) for r in links] == [builder.HIDDEN_TEAMS_LEAGUE]
+
+
 def test_new_team_without_a_league_is_left_out(game, catalog, assets):
     team = model.Team(uid='tm_new', name='Sem Liga', leagues=[], primary_color=(0, 0, 0),
                       secondary_color=(255, 255, 255))
@@ -165,7 +179,7 @@ def test_version_2_projects_are_converted_and_saved_as_the_current_version():
                       'secondary_color': [0, 0, 0]}],
            'players': [{'uid': 'jg_1', 'first_name': 'A', 'last_name': 'B', 'team': 'tm_1', 'number': 9}]}
     saved = model.load(old).model_dump(mode='json')
-    assert saved["version"] == model.CONTRACT_VERSION == 13
+    assert saved["version"] == model.CONTRACT_VERSION == 14
     assert saved['teams'][0]['leagues'] == ['lg_1']
     assert saved['players'][0]['teams'] == [{'team': 'tm_1', 'number': 9, 'position': None, 'hidden': None}]
     with pytest.raises(ValueError):  # a file from a newer app is refused, never read in part

@@ -1,9 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
-import { Check, Circle, Loader2 } from 'lucide-react'
+import { Check, Circle, Loader2, Square } from 'lucide-react'
+import { useState } from 'react'
 import { api } from '@/api/client'
-import type { BuildStep } from '@/api/types'
+import type { BuildItemKind, BuildStep } from '@/api/types'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useI18n, type MessageKey } from '@/i18n'
+import { logClientError } from '@/lib/clientLog'
+import { clock } from '@/lib/clock'
 import { cn } from '@/lib/utils'
 
 const STEP_LABELS: Record<BuildStep, MessageKey> = {
@@ -14,13 +18,22 @@ const STEP_LABELS: Record<BuildStep, MessageKey> = {
   texts: 'build.stepTexts',
   files: 'build.stepFiles',
 }
+const ITEM_LABELS: Record<BuildItemKind, MessageKey> = {
+  face: 'build.itemFace',
+  kit: 'build.itemKit',
+  crest: 'build.itemCrest',
+  photo: 'build.itemPhoto',
+  player: 'build.itemPlayer',
+  team: 'build.itemTeam',
+}
 const POLL_MS = 500
 
-const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
-
-/** Step by step progress of "Gerar patch", polled from the backend while `open` (it cannot be closed meanwhile). */
+/** Step by step progress of "Gerar patch", polled from the backend while `open` (it cannot be closed meanwhile).
+ * "Parar" asks the backend to stop: what was converted stays in the build cache, so building again continues. */
 export function BuildProgressDialog({ open }: { open: boolean }) {
   const { t } = useI18n()
+  const [asked, setAsked] = useState(false)
+  const [seen, setSeen] = useState(false) // this build answered at least once (the data is not the previous one's)
   const { data } = useQuery({
     queryKey: ['patch-progress'],
     queryFn: api.buildProgress,
@@ -28,15 +41,29 @@ export function BuildProgressDialog({ open }: { open: boolean }) {
     refetchInterval: open ? POLL_MS : false,
     gcTime: 0,
   })
-  // until the first answer of this build arrives, show it starting (not the previous build)
-  const prog = data?.running ? data : undefined
-  const current = prog?.step ? prog.steps.indexOf(prog.step) : -1
-  const stepShare = prog?.total ? prog.done / prog.total : 0
+  if (open && !seen && data?.running) setSeen(true)
+  if (!open && (asked || seen)) {
+    setAsked(false) // the next build starts with the button available
+    setSeen(false)
+  }
+  // until the first answer of this build arrives, show it starting (not the previous build); once it ended, the
+  // dialog stays a moment while the screen reloads the project: show it complete, not back at zero
+  const prog = data?.running || (seen && data) ? data : undefined
+  const finished = !!prog && !prog.running
+  const current = finished ? prog.steps.length : prog?.step ? prog.steps.indexOf(prog.step) : -1
+  const stepShare = prog?.total && !finished ? prog.done / prog.total : 0
   const overall = prog ? Math.round(((Math.max(current, 0) + stepShare) / prog.steps.length) * 100) : 0
+  const stopping = !finished && (asked || !!prog?.stopping)
+  const cache = prog?.cache
+
+  const stop = () => {
+    setAsked(true)
+    api.cancelBuild().catch((e) => logClientError('cancel build', e))
+  }
 
   return (
     <Dialog open={open}>
-      <DialogContent showCloseButton={false} onEscapeKeyDown={(e) => e.preventDefault()} onInteractOutside={(e) => e.preventDefault()}>
+      <DialogContent className="sm:max-w-xl" showCloseButton={false} onEscapeKeyDown={(e) => e.preventDefault()} onInteractOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle>{t('build.title')}</DialogTitle>
           <DialogDescription>{t('build.description')}</DialogDescription>
@@ -72,7 +99,24 @@ export function BuildProgressDialog({ open }: { open: boolean }) {
             )
           })}
         </ul>
-        {prog?.message && <p className="truncate text-xs text-muted-foreground">{prog.message}</p>}
+        <div className="space-y-1 text-xs text-muted-foreground">
+          {finished ? (
+            <p>{t('build.finishing')}</p>
+          ) : prog?.item ? (
+            <p className="truncate">{t(ITEM_LABELS[prog.item.kind], { name: prog.item.name })}</p>
+          ) : (
+            prog?.message && <p className="truncate">{prog.message}</p>
+          )}
+          {cache && cache.reused + cache.made > 0 && (
+            <p className="tabular-nums">{t('build.cacheCount', { reused: cache.reused, made: cache.made })}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-3 border-t pt-3">
+          <p className="flex-1 text-xs text-muted-foreground">{finished ? null : stopping ? t('build.stopping') : t('build.stopHint')}</p>
+          <Button variant="outline" size="sm" onClick={stop} disabled={stopping || !prog || finished}>
+            {stopping ? <Loader2 className="animate-spin" /> : <Square />} {t('build.stop')}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   )

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from . import settings  # noqa: F401  (puts core on sys.path)
 from .messages import issue_json
 from . import diagnostics, ea_players, game_setup
+from .activity import Activity
 from .ball_service import BallService, BallZipError
 from .boot_service import BootService, BootZipError
 from .glove_service import GloveService, GloveZipError
@@ -62,11 +63,14 @@ class AppState:
         self.config_path = config_path
         self.config = settings.load_config(config_path)
         self._lock = threading.Lock()
+        self.activity = Activity()  # what the opening screen shows (GET /api/startup)
         self.patch_dir = patch_dir or default_patch_dir()
         self.load_game(original_files or default_original_files())
         self.upgrade_project()
         self.build_lock = threading.Lock()
         self.build_progress = {'running': False}  # last/current build, read by GET /api/patch/progress
+        self.install_progress = {'running': False}  # last/current install or uninstall (GET /api/patch/install/progress)
+        self.build_cancel = threading.Event()  # set by POST /api/patch/build/cancel: the build stops at its next check
         self.notifications = NotificationStore(os.path.join(
             os.path.dirname(os.path.abspath(self.config_path or settings.CONFIG_PATH)), 'notifications.json'))
 
@@ -185,12 +189,21 @@ def create_app(state=None):
                 + [g.uid for g in project.gloves if gloves.untouched(g)]
                 + [b.uid for b in project.balls if balls.untouched(b)])
 
-    def state_of(project, untouched=True):
+    def state_of(project, untouched=True, phase=None):
         """What the UI shows next to the project: issues, inherited values, untouched original entries and the
-        game's teams whose squad the project changes (shown as edited too)."""
+        game's teams whose squad the project changes (shown as edited too). phase: an Activity phase callback."""
+        phase = phase or (lambda *_, **__: None)
+        counts = {'leagues': len(project.leagues), 'teams': len(project.teams), 'players': len(project.players)}
+        phase('game_data')
         c = state.catalog()
-        return {'issues': issues_for(project), 'defaults': c.player_defaults(project),
-                'untouched': untouched_uids(project) if untouched else [],
+        phase('checking', **counts)
+        issues = issues_for(project)
+        phase('defaults', players=counts['players'])
+        defaults = c.player_defaults(project)
+        phase('originals', **counts)
+        untouched_list = untouched_uids(project) if untouched else []
+        phase('squads', teams=counts['teams'])
+        return {'issues': issues, 'defaults': defaults, 'untouched': untouched_list,
                 'changed_squads': original_player.changed_squads(project, c),
                 'changed_leagues': original_league.changed_teams(project, c)}
 
@@ -209,8 +222,18 @@ def create_app(state=None):
                 'game': {'version': version, 'tested': version in game_setup.TESTED_VERSIONS,
                          'tested_versions': list(game_setup.TESTED_VERSIONS), **installed_state(cfg.game_dir)}}
 
+    @app.get('/api/startup')
+    def startup():
+        """What the backend is doing now (fsapi.activity): the opening screen polls it while it waits."""
+        return {'tasks': state.activity.snapshot()}
+
     @app.get('/api/status')
     def status():
+        with state.activity.task('status') as phase:
+            phase('checking')
+            return status_body()
+
+    def status_body():
         store = state.store
         return {'original_files': {'folder': state.game.folder, 'missing': state.game.missing_files()},
                 'config': state.config.model_dump(),
@@ -345,8 +368,14 @@ def create_app(state=None):
 
     @app.get('/api/project')
     def get_project():
-        project = load_project()
-        return {'project': project.to_json(), **state_of(project)}
+        with state.activity.task('project') as phase:
+            path = state.store.path
+            size = os.path.getsize(path) if os.path.isfile(path) else 0
+            phase('reading', size_mb=round(size / 2 ** 20, 1))
+            project = load_project()
+            extra = state_of(project, phase=phase)
+            phase('sending', size_mb=round(size / 2 ** 20, 1))
+            return {'project': project.to_json(), **extra}
 
     @app.put('/api/project')
     def put_project(project: model.Project):
@@ -408,11 +437,15 @@ def create_app(state=None):
     # ---------------------------------------------------------------- originals (read-only)
     @app.get('/api/originals/leagues')
     def original_leagues():
-        return state.catalog().leagues
+        with state.activity.task('game_data') as phase:
+            phase('leagues')
+            return state.catalog().leagues
 
     @app.get('/api/originals/teams')
     def original_teams(league: int | None = None):
-        teams = state.catalog().teams
+        with state.activity.task('game_data') as phase:
+            phase('teams')
+            teams = state.catalog().teams
         images = state.original_images
         return [{**t, 'crest': images.has_crest(t['id'])} for t in teams if league is None or t['league'] == league]
 
@@ -460,7 +493,9 @@ def create_app(state=None):
     def original_stadiums():
         """Every stadium of the game (catalog.all_stadiums): its country versions with their balls, the match setups
         that offer it and the lock of the ones the game can lock."""
-        return state.catalog().all_stadiums
+        with state.activity.task('game_data') as phase:
+            phase('stadiums')
+            return state.catalog().all_stadiums
 
     @app.get('/api/originals/players')
     def original_players(team: int | None = None, q: str | None = None,
@@ -517,6 +552,11 @@ def create_app(state=None):
     # ---------------------------------------------------------------- valid values
     @app.get('/api/catalog')
     def catalog():
+        with state.activity.task('game_data') as phase:
+            phase('database')
+            return catalog_body()
+
+    def catalog_body():
         c = state.catalog()
         return {'positions': c.positions,
                 'nations': c.nations, 'appearance': c.appearance_options,
@@ -1459,25 +1499,33 @@ def create_app(state=None):
             raise HTTPException(422, {'code': 'project_has_errors', 'issues': [issue_json(i) for i in issues],
                                       'message': 'Corrija os erros do projeto antes de gerar o patch.'})
         with state.build_lock:
+            state.build_cancel.clear()
+            cache = buildcache.BuildCache(state.build_cache_dir)
             prog = state.build_progress = {'running': True, 'steps': list(builder.BUILD_STEPS), 'step': None,
                                            'done': 0, 'total': 0, 'message': '', 'started_at': time.time(),
-                                           'finished_at': None, 'error': None}
+                                           'finished_at': None, 'error': None, 'item': None,
+                                           'stopping': False, 'cancelled': False, 'cache': {'reused': 0, 'made': 0}}
 
-            def progress(step, done, total):
-                prog.update(step=step, done=done, total=total)
+            def progress(step, done, total, kind=None, name=None):
+                # item: what the 'images' step waits for (a face, a kit...); cache: entries reused / made so far
+                prog.update(step=step, done=done, total=total, item={'kind': kind, 'name': name} if kind else None,
+                            cache={'reused': cache.hits, 'made': cache.misses})
 
             def log(line):
                 if not line.startswith(' '):  # leagues / teams / summary, not every player and file
                     prog['message'] = line
 
-            cache = buildcache.BuildCache(state.build_cache_dir)
             try:
                 result = build_patch(project, state.store, state.game, state.patch_dir, log=log, progress=progress,
                                      boot_converter=state.boots.converter, glove_converter=state.gloves.converter,
                                      ball_converter=state.balls.converter,
                                      worker_count=workers.plan(state.config.build_cores,
                                                                state.config.build_memory_percent),
-                                     cache=cache)
+                                     cache=cache, cancel=state.build_cancel)
+            except builder.BuildCancelled:
+                prog['cancelled'] = True
+                raise HTTPException(409, {'code': 'build_cancelled', 'message': 'Geração do patch interrompida.',
+                                          'cache_files': cache.hits + cache.misses})
             except builder.BuildError as e:
                 prog['error'] = str(e)
                 raise HTTPException(422, {'code': 'build_failed', 'entity': e.entity, 'message': str(e)})
@@ -1498,6 +1546,16 @@ def create_app(state=None):
                 'assigned_ball_codes': result.assigned_ball_codes,
                 'patch': patch_status(state.store, state.patch_dir)}
 
+    @app.post('/api/patch/build/cancel')
+    def cancel_build():
+        """Asks the running build to stop. It stops at its next check, after the faces being converted end (they
+        go to the build cache, like everything converted before: building again starts from there)."""
+        if not state.build_progress.get('running'):
+            return {'stopping': False}
+        state.build_cancel.set()
+        state.build_progress['stopping'] = True
+        return {'stopping': True}
+
     @app.get('/api/patch/progress')
     def build_progress():
         """Where the current (or last) build is: step (builder.BUILD_STEPS), done/total of that step, last message."""
@@ -1506,14 +1564,33 @@ def create_app(state=None):
             prog['elapsed'] = round((prog['finished_at'] or time.time()) - prog['started_at'], 1)
         return prog
 
-    def game_action(fn, *args):
+    def game_action(fn, *args, **kwargs):
         if not state.originals.state()['verified']:
             raise HTTPException(409, {'code': 'originals_not_verified',
                                       'message': 'Os arquivos originais do app mudaram: refaça a configuração inicial.'})
         try:
-            return fn(*args)
+            return fn(*args, **kwargs)
         except (InstallError, game_setup.SetupError) as e:
             raise HTTPException(409, {'code': str(e), 'message': INSTALL_ERROR_TEXT.get(str(e), str(e))})
+
+    def tracked_game_action(action, fn, *args):
+        """game_action with its progress in state.install_progress (the install / uninstall screen polls it)."""
+        prog = state.install_progress = {'running': True, 'action': action, 'phase': None, 'done': 0, 'total': 0,
+                                         'name': None, 'bytes_done': 0, 'bytes_total': 0, 'started_at': time.time(),
+                                         'finished_at': None}
+
+        def progress(phase, done=0, total=0, name=None, bytes_done=0, bytes_total=0):
+            # a phase without counts ('save') keeps the last ones: the screen still shows the files copied
+            prog.update(phase=phase, name=name)
+            if total:
+                prog.update(done=done, total=total)
+            if bytes_total:
+                prog.update(bytes_done=bytes_done, bytes_total=bytes_total)
+
+        try:
+            return game_action(fn, *args, progress=progress)
+        finally:
+            prog.update(running=False, finished_at=time.time())
 
     @app.post('/api/patch/install')
     def install_patch():
@@ -1521,13 +1598,22 @@ def create_app(state=None):
         cfg = state.config
         if not patch_status(state.store, state.patch_dir)['up_to_date']:
             raise HTTPException(409, {'code': 'patch_outdated', 'message': 'O patch está desatualizado; gere de novo antes de instalar.'})
-        return game_action(install, state.patch_dir, cfg.game_dir, cfg.backups_dir, state.game.folder, cfg.save_dir)
+        return tracked_game_action('install', install, state.patch_dir, cfg.game_dir, cfg.backups_dir,
+                                   state.game.folder, cfg.save_dir)
 
     @app.post('/api/patch/uninstall')
     def uninstall_patch():
         """Puts the game's original files back, removes what the patch added and deletes the save."""
         cfg = state.config
-        return game_action(uninstall, cfg.game_dir, state.game.folder, cfg.save_dir)
+        return tracked_game_action('uninstall', uninstall, cfg.game_dir, state.game.folder, cfg.save_dir)
+
+    @app.get('/api/patch/install/progress')
+    def install_progress():
+        """Where the current (or last) install / uninstall is: phase, file done/total and its name, bytes copied."""
+        prog = dict(state.install_progress)
+        if prog.get('started_at'):
+            prog['elapsed'] = round((prog['finished_at'] or time.time()) - prog['started_at'], 1)
+        return prog
 
     @app.post('/api/patch/export')
     def export():

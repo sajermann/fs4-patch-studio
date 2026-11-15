@@ -3,7 +3,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from '@/lib/notify'
 import { ApiError, api, saveBlob } from '@/api/client'
-import type { Dated, Player, ShareKind, ShareProblem } from '@/api/types'
+import type { Dated, Player, ShareKind, ShareProblem, Team } from '@/api/types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,7 +22,9 @@ import { hasMessage, useI18n, type MessageKey, type TFunction } from '@/i18n'
 import { analyzeShare, entryName, mergeShared, planSingle, replaceEntry, type ImportKind, type ShareAnalysis, type SharedEntry } from '@/lib/share'
 import { useKeepBack } from '@/lib/back'
 import { useFitImported } from '@/lib/members'
+import { fitImportedLeagues, hiddenInLeague } from '@/lib/teams'
 import { useProject } from '@/state/project'
+import { useCatalog, useOriginalTeams } from '@/state/queries'
 
 // ---------------------------------------------------------------- selection in the lists
 /** Rows picked by their checkbox; the header one asks "this page or every page". */
@@ -217,6 +219,8 @@ export function ZipImportButton({
   const [pending, setPending] = useState<Pending | null>(null)
   const input = useRef<HTMLInputElement>(null)
   const fitImported = useFitImported()
+  const originalTeams = useOriginalTeams().data ?? []
+  const maxLeagueTeams = useCatalog().data?.max_league_teams ?? 30
 
   const apply = async (p: Pending) => {
     setPending(null)
@@ -228,10 +232,15 @@ export function ZipImportButton({
       const out = items.filter((e, k) => hidden(e) && !hidden(got[k])).length
       // players: in a team that already has max_roster in the patch they join hidden there (no dialog)
       const fit = kind === 'players' ? await fitImported(items as unknown as Player[]) : undefined
-      setDraft((project) => {
-        const merged = mergeShared(kind, project, items, p.analysis)
-        return fit ? fit(project, merged) : merged
-      })
+      // teams: in a league that already has max_league_teams in the patch they join hidden there (no dialog)
+      const uids = items.map((e) => e.uid)
+      const place = (project: typeof draft, merged: typeof draft) =>
+        kind === 'teams' ? fitImportedLeagues(project, merged, uids, originalTeams, maxLeagueTeams) : fit ? fit(project, merged) : merged
+      const hiddenCount = (teams: Team[]) =>
+        teams.filter((tm) => uids.includes(tm.uid)).reduce((n, tm) => n + tm.leagues.filter((l) => hiddenInLeague(tm, l)).length, 0)
+      const preview = mergeShared(kind, draft, items, p.analysis)
+      const leagueOut = kind === 'teams' ? hiddenCount(place(draft, preview).teams) - hiddenCount(preview.teams) : 0
+      setDraft((project) => place(project, mergeShared(kind, project, items, p.analysis)))
       requestSave()
       const ignored = [...p.analysis.missing.values()].reduce((n, l) => n + l.length, 0)
       toast.success(t('share.imported', { count: items.length }), {
@@ -239,6 +248,7 @@ export function ZipImportButton({
           p.analysis.replaces.size ? t('share.importedReplaced', { count: p.analysis.replaces.size }) : '',
           ignored ? t('share.importedIgnored', { count: ignored }) : '',
           out ? t('share.importedOut', { count: out }) : '',
+          leagueOut > 0 ? t('share.importedLeagueOut', { count: leagueOut }) : '',
         ]
           .filter(Boolean)
           .join(' '),

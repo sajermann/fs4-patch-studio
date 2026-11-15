@@ -231,7 +231,7 @@ def restore_street_slots(data, db):
 def untouched(tm, assets_dir, catalog):
     """The entry still has exactly what was loaded from the game (opened without changing anything): the project
     can drop it (the team stays the game's) and the UI shows it as an original, not as an edited one."""
-    if tm.loaded is None or tm.hidden or tm.lineups:
+    if tm.loaded is None or tm.hidden or tm.hidden_in_leagues or tm.lineups:
         return False
     captain, takers = game_leaders(catalog.db, tm.original_id)
     return tm.captain == captain and tm.takers == takers and not changes(tm, assets_dir).any

@@ -142,6 +142,9 @@ def test_build_then_install_into_a_fake_game(env):
     assert (game / '.fsmod_manifest.json').exists()
     save = env['state'].config.save_dir
     assert report['save_removed'] == 2 and os.listdir(save) == ['Headers']  # the save is deleted, no copy
+    prog = c.get('/api/patch/install/progress').json()  # what the install screen showed, at its end
+    assert prog['running'] is False and prog['action'] == 'install' and prog['phase'] == 'save'
+    assert prog['bytes_done'] == prog['bytes_total'] > 0 and prog['done'] == prog['total'] == len(body['patch']['files'])
     assert c.get('/api/status').json()['setup']['game'] == {
         'version': '2.0.8', 'tested': True, 'tested_versions': ['2.0.4', '2.0.8', '2.1.3', '2.1.4'], 'installed': True, 'changed': []}
     (game / 'data8.bh').write_bytes(b'changed outside the app')
@@ -161,6 +164,7 @@ def test_build_then_install_into_a_fake_game(env):
     assert (game / 'data1.bh').read_bytes() == open(os.path.join(env['state'].game.folder, 'Game', 'data1.bh'), 'rb').read()
     assert not (game / 'data8.big').exists() and not (game / 'data' / 'sceneassets').exists()
     assert not (game / '.fsmod_manifest.json').exists()
+    assert c.get('/api/patch/install/progress').json()['action'] == 'uninstall'
     assert c.get('/api/status').json()['setup']['game']['installed'] is False
     assert c.post('/api/patch/uninstall').json()['detail']['code'] == 'not_installed'
 
@@ -1132,3 +1136,35 @@ def test_build_settings_out_of_range_in_an_old_file_do_not_reset_the_config(tmp_
                     encoding='utf-8')
     config = settings.load_config(str(path))
     assert config.game_dir == 'G:/game' and config.build_memory_percent == 90 and config.build_cores >= 1
+
+
+def test_startup_activity_lists_what_the_backend_is_doing(env):
+    """The opening screen polls GET /api/startup: requests in progress say their phase; none when idle."""
+    c = env['client']
+    assert c.get('/api/startup').json() == {'tasks': {}}
+    state = env['state']
+    with state.activity.task('project') as phase:
+        phase('checking', players=3)
+        tasks = c.get('/api/startup').json()['tasks']
+        assert tasks['project']['phase'] == 'checking' and tasks['project']['params'] == {'players': 3}
+        assert tasks['project']['elapsed'] >= 0
+    assert c.get('/api/startup').json() == {'tasks': {}}
+    assert c.get('/api/project').status_code == 200 and c.get('/api/startup').json() == {'tasks': {}}
+
+
+def test_a_stopped_build_answers_build_cancelled(env, monkeypatch):
+    from fsmod import builder
+    c = env['client']
+    assert c.post('/api/patch/build/cancel').json() == {'stopping': False}  # nothing running
+    project, _ = palmeiras_v2(c)
+    c.put('/api/project', json=project)
+
+    def stopped(*args, **kwargs):
+        assert kwargs['cancel'] is env['state'].build_cancel
+        raise builder.BuildCancelled()
+    monkeypatch.setattr(builder, 'build', stopped)
+    r = c.post('/api/patch/build')
+    assert r.status_code == 409 and r.json()['detail']['code'] == 'build_cancelled'
+    prog = c.get('/api/patch/progress').json()
+    assert prog['cancelled'] is True and not prog['running']
+    assert c.get('/api/status').json()['patch']['built'] is False  # the patch folder was not touched

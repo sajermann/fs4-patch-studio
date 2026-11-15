@@ -76,6 +76,9 @@ export interface Team extends Dated {
   uid: string
   name: string
   leagues: LeagueKey[] // new league uids / original league ids it plays in; none = left out of the patch
+  // leagues of `leagues` where it is left out of the patch (it stays in them in the app); in every one = out of the
+  // patch (an original team is hidden in the game)
+  hidden_in_leagues?: LeagueKey[]
   primary_color: RGB
   secondary_color: RGB
   team_id?: number | null // teamid in the game, given by the build
@@ -705,6 +708,41 @@ export interface BuildProgress {
   message: string
   elapsed?: number
   error: string | null
+  /** what the 'images' step is waiting for (a face, a kit...) */
+  item?: { kind: BuildItemKind; name: string } | null
+  /** the user asked the build to stop (it ends the conversions already running first) */
+  stopping?: boolean
+  cancelled?: boolean
+  /** build cache entries (real faces and kits) reused / converted so far */
+  cache?: { reused: number; made: number }
+}
+
+/** GET /api/patch/install/progress: where the current (or last) install / uninstall is. */
+export type InstallPhase = 'checking' | 'backup' | 'restoring' | 'copying' | 'save' | 'undoing'
+export interface InstallProgress {
+  running: boolean
+  action?: 'install' | 'uninstall'
+  phase?: InstallPhase | null
+  /** files of the phase done / total, and the one being copied or restored */
+  done: number
+  total: number
+  name?: string | null
+  bytes_done: number
+  bytes_total: number
+  elapsed?: number
+}
+
+export type BuildItemKind = 'face' | 'kit' | 'crest' | 'photo' | 'player' | 'team'
+
+/** GET /api/startup: what the backend is doing now (the opening screen). Phases are codes the UI has texts for. */
+export interface StartupTask {
+  phase: string | null
+  params: Record<string, number | string>
+  elapsed: number
+  phase_elapsed: number
+}
+export interface StartupActivity {
+  tasks: Partial<Record<'status' | 'game_data' | 'project', StartupTask>>
 }
 
 export interface InstallResponse {

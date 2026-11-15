@@ -677,6 +677,38 @@ def test_hidden_project_leagues_and_teams_are_left_out(game):
     assert not db.rows('teams', 'teamid', 150001)
 
 
+def test_team_hidden_in_one_league_only_leaves_that_league(game):
+    """Team.hidden_in_leagues: the team stays in the league in the project but not in the patch, so it does not
+    count for the league limit; it keeps its other leagues; hidden in every league = left out with its players."""
+    from fsmod import validation
+    from fsmod.catalog import Catalog
+    catalog = Catalog(game)
+    project = load_palmeiras()
+    league = project.teams[0].leagues[0]
+    copies = [project.teams[0].model_copy(update={'uid': f'tm_{k}', 'team_id': None})
+              for k in range(builder.MAX_LEAGUE_TEAMS)]
+    project.teams += copies
+
+    def too_many():
+        return [i for i in validation.validate(project, catalog, PALMEIRAS) if i.code == 'league_too_many_teams']
+    assert too_many()
+    copies[-1].hidden_in_leagues = [league]
+    assert not too_many()
+    assert copies[-1].uid not in {t.uid for t in project.visible().teams}  # its only league: out of the patch
+
+    copies[-1].leagues = [league, 39]  # still plays in MLS
+    visible = {t.uid: t for t in project.visible().teams}
+    assert visible[copies[-1].uid].leagues == [39] and visible[copies[-1].uid].hidden_in_leagues == []
+    assert project.teams[-1].leagues == [league, 39]  # the project keeps both
+
+
+def test_hidden_in_leagues_only_names_leagues_of_the_team():
+    team = model.Team(uid='t', name='T', leagues=['a', 7], hidden_in_leagues=['a', 'gone', 'a', 7],
+                      primary_color=(0, 0, 0), secondary_color=(1, 1, 1))
+    assert team.hidden_in_leagues == ['a', 7]
+    assert model.Team(uid='t', name='T', primary_color=(0, 0, 0), secondary_color=(1, 1, 1)).hidden_in_leagues == []
+
+
 def test_real_kits_go_as_loose_files_with_their_teamkits_fields(game, tmp_path):
     """Real kits (FIFA 14-16 PNGs): kit rx3 with the PNGs, the default position table and a
     transparent crest_cm; teamkits fields of the slot; a goalkeeper row (type 2) only when that slot is used."""

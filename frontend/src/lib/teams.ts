@@ -31,22 +31,70 @@ export function useLeagueName() {
 /** The project's new leagues (entries that edit one of the game's leagues left out). */
 export const newLeagues = (project: Project): League[] => project.leagues.filter((l) => l.original_id == null)
 
-/** Teams of a league as the game's team selector shows them: the project's (not hidden) + the original ones the
- * project does not hide. Same count as fsmod.validation (league_too_many_teams). */
+/** The team is left out of the patch in this league only (Team.hidden_in_leagues): it stays in the league in the app. */
+export const hiddenInLeague = (team: Team, league: LeagueKey) => !!team.hidden_in_leagues?.includes(league)
+
+/** The team with one of its leagues shown or hidden in the patch (Team.hidden_in_leagues). */
+export function withLeagueShown(team: Team, league: LeagueKey, shown: boolean): Team {
+  const rest = (team.hidden_in_leagues ?? []).filter((l) => l !== league)
+  return { ...team, hidden_in_leagues: shown ? rest : [...rest, league] }
+}
+
+/** Teams of a league in the patch, as the game's team selector shows them: the project's (not hidden, not hidden in
+ * that league) + the original ones the project does not hide. Same count as fsmod.validation
+ * (league_too_many_teams). total: every team in the league in the app, out of the patch there or not. */
+export function leagueTeamCount(project: Project, originals: { id: number; league: number | null }[]) {
+  const hidden = new Set(project.originals?.hidden_teams ?? [])
+  const edited = editedOriginals(project)
+  const inLeague = (league: LeagueKey, patchOnly: boolean) =>
+    project.teams.filter(
+      (t) =>
+        t.leagues.includes(league) &&
+        !(patchOnly && (t.hidden || hiddenInLeague(t, league) || (t.original_id != null && hidden.has(t.original_id)))),
+    ).length +
+    (typeof league === 'number'
+      ? originals.filter((t) => t.league === league && !edited.has(t.id) && !(patchOnly && hidden.has(t.id))).length
+      : 0)
+  return { count: (league: LeagueKey) => inLeague(league, true), total: (league: LeagueKey) => inLeague(league, false) }
+}
+
 export function useLeagueTeams() {
   const { draft } = useProject()
   const originals = useOriginalTeams().data ?? []
   const max = useCatalog().data?.max_league_teams ?? 30
-  const hidden = new Set(draft.originals?.hidden_teams ?? [])
-  const edited = editedOriginals(draft)
-  const count = (league: number | string) =>
-    draft.teams.filter(
-      (t) => t.leagues.includes(league) && !t.hidden && !(t.original_id != null && hidden.has(t.original_id)),
-    ).length +
-    (typeof league === 'number'
-      ? originals.filter((t) => t.league === league && !hidden.has(t.id) && !edited.has(t.id)).length
-      : 0)
-  return { count, max, isFull: (league: number | string) => count(league) >= max }
+  const { count, total } = leagueTeamCount(draft, originals)
+  return { count, total, max, isFull: (league: LeagueKey) => count(league) >= max }
+}
+
+/** Teams that came in a shared zip fitted to the patch limit of their leagues (no dialog): in each league they joined,
+ * the ones already in the project keep how they were; the newcomers fill the places left up to max, in the zip's
+ * order, and the others join hidden in that league. */
+export function fitImportedLeagues(
+  before: Project,
+  after: Project,
+  imported: string[],
+  originals: { id: number; league: number | null }[],
+  max: number,
+): Project {
+  const was = (t: Team) => before.teams.find((b) => b.uid === t.uid || (t.original_id != null && b.original_id === t.original_id))
+  let project = after
+  const order = imported.map((uid) => after.teams.find((t) => t.uid === uid)).filter((t): t is Team => !!t)
+  for (const team of order) {
+    const old = was(team)
+    let current = project.teams.find((t) => t.uid === team.uid)!
+    for (const league of current.leagues) {
+      if (old?.leagues.includes(league)) {
+        current = withLeagueShown(current, league, !hiddenInLeague(old, league)) // as it was
+        continue
+      }
+      if (current.hidden || hiddenInLeague(current, league)) continue
+      const others = { ...project, teams: project.teams.filter((t) => t.uid !== current.uid) }
+      if (leagueTeamCount(others, originals).count(league) >= max) current = withLeagueShown(current, league, false)
+    }
+    const done = current
+    project = { ...project, teams: project.teams.map((t) => (t.uid === done.uid ? done : t)) }
+  }
+  return project
 }
 
 /** Original teams the project edits in place (Team.original_id), by teamid. */

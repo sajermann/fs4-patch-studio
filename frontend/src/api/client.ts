@@ -12,6 +12,7 @@ import type {
   OriginalGlove,
   League,
   BuildProgress,
+  StartupActivity,
   BuildResponse,
   GameCheck,
   Catalog,
@@ -22,6 +23,7 @@ import type {
   FacePlayer,
   ImageUpload,
   InstallResponse,
+  InstallProgress,
   SetupState,
   UninstallResponse,
   Issue,
@@ -320,8 +322,13 @@ export const api = {
     request<{ ok: true }>('/api/faces/copy', json('POST', { from_player: fromPlayer, to_player: toPlayer, face_id: faceId })),
   buildPatch: () => request<BuildResponse>('/api/patch/build', { method: 'POST' }),
   buildProgress: () => request<BuildProgress>('/api/patch/progress'),
+  /** Asks the running build to stop (what it converted stays in the build cache). */
+  cancelBuild: () => request<{ stopping: boolean }>('/api/patch/build/cancel', { method: 'POST' }),
+  /** What the backend is doing now, for the opening screen. */
+  startup: () => request<StartupActivity>('/api/startup'),
   installPatch: () => request<InstallResponse>('/api/patch/install', { method: 'POST' }),
   uninstallPatch: () => request<UninstallResponse>('/api/patch/uninstall', { method: 'POST' }),
+  installProgress: () => request<InstallProgress>('/api/patch/install/progress'),
   /** Opens the Windows "save as" dialog on this machine; path null when cancelled. */
   exportPatch: () => request<{ path: string | null; files?: number }>('/api/patch/export', { method: 'POST' }),
   deleteSave: () => request<{ removed: number }>('/api/save/delete', { method: 'POST' }),

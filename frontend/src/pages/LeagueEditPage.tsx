@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table'
 import { BackButton, useBack, useFrom, useGoBack, useKeepBack } from '@/lib/back'
 import { useI18n } from '@/i18n'
@@ -31,7 +32,7 @@ import { useCopy } from '@/lib/copy'
 import { useEntryOfPath, useTeamLeagues } from '@/lib/members'
 import { useOriginalChanges } from '@/lib/originals'
 import { keyOfPath, leagueKey, leaguePath, teamKey, teamPath } from '@/lib/players'
-import { editedOriginals, useLeagueName, useLeagueTeams } from '@/lib/teams'
+import { editedOriginals, hiddenInLeague, useLeagueName, useLeagueTeams } from '@/lib/teams'
 import { useProject, useSameAsGame, useWasEdited } from '@/state/project'
 import { useOriginalLeagues, useOriginalTeams } from '@/state/queries'
 
@@ -109,22 +110,23 @@ function AddTeamDialog({ league, open, onOpenChange }: { league: LeagueKey; open
         { label: t('players.newTeams'), items: newTeams },
         { label: t('players.originalTeams'), items: gameTeams },
       ]}
-      notice={full ? t('leagueEdit.full', { max: leagueTeams.max }) : undefined}
+      notice={full ? t('leagueEdit.fullJoinsHidden', { max: leagueTeams.max }) : undefined}
       empty={t('leagueEdit.noTeamsFound')}
-      disabled={full}
       onPick={(key) => join(key, league)}
     />
   )
 }
 
-/** The league's teams: crest, name (link to the team), badges and a button that takes the team out of the league
- * (it is left without a league, out of the patch, until it joins another one). readOnly: a league the game hides. */
+/** The league's teams: crest, name (link to the team), badges, a switch that leaves the team out of the patch in this
+ * league only (Team.hidden_in_leagues: a league may have any number of teams, at most max_league_teams in the patch)
+ * and a button that takes the team out of the league (it is left without a league, out of the patch, until it joins
+ * another one). readOnly: a league the game hides. */
 function LeagueTeamsCard({ league, leagueName, readOnly }: { league: LeagueKey; leagueName: string; readOnly?: boolean }) {
   const { t } = useI18n()
   const teams = useTeamsIn(league)
   const leagueTeams = useLeagueTeams()
   const { isTeamHidden } = useOriginalChanges()
-  const { leave } = useTeamLeagues()
+  const { leave, setShown } = useTeamLeagues()
   const from = useFrom(leagueName)
   const [addOpen, setAddOpen] = useState(false)
   const [removing, setRemoving] = useState<LeagueTeam>()
@@ -135,16 +137,16 @@ function LeagueTeamsCard({ league, leagueName, readOnly }: { league: LeagueKey; 
         <CardTitle>
           {t('leagueEdit.teams')}{' '}
           <span className="font-normal text-muted-foreground">
-            ({leagueTeams.count(league)}/{leagueTeams.max})
+            ({t('leagueEdit.count', { count: leagueTeams.count(league), max: leagueTeams.max, total: leagueTeams.total(league) })})
           </span>
         </CardTitle>
-        <CardDescription>{t('leagueEdit.teamsDescription')}</CardDescription>
+        <CardDescription>{t('leagueEdit.teamsDescription', { max: leagueTeams.max })}</CardDescription>
         {!readOnly && (
           <CardAction>
             <Button
               variant="outline"
               size="sm"
-              title={leagueTeams.isFull(league) ? t('leagueEdit.full', { max: leagueTeams.max }) : undefined}
+              title={leagueTeams.isFull(league) ? t('leagueEdit.fullJoinsHidden', { max: leagueTeams.max }) : undefined}
               onClick={() => setAddOpen(true)}
             >
               <Plus /> {t('leagueEdit.addTeam')}
@@ -160,7 +162,9 @@ function LeagueTeamsCard({ league, leagueName, readOnly }: { league: LeagueKey; 
             <TableBody>
               {teams.map((r) => {
                 const gameId = r.team?.original_id ?? r.game?.id
-                const hidden = !!r.team?.hidden || (gameId != null && isTeamHidden(gameId))
+                const teamOut = !!r.team?.hidden || (gameId != null && isTeamHidden(gameId)) // out of the patch everywhere
+                const hiddenHere = !!r.team && hiddenInLeague(r.team, league)
+                const hidden = teamOut || hiddenHere
                 return (
                   <TableRow key={String(r.key)}>
                     <TableCell className="w-12">{r.icon}</TableCell>
@@ -175,6 +179,11 @@ function LeagueTeamsCard({ league, leagueName, readOnly }: { league: LeagueKey; 
                         </Link>
                         {gameId != null && <OriginalBadge entry={r.team?.uid} team={gameId} />}
                         {r.team?.hidden && <OutOfPatchBadge />}
+                        {!teamOut && hiddenHere && (
+                          <Badge variant="outline" className="font-normal">
+                            {t('leagueEdit.outOfPatchHere')}
+                          </Badge>
+                        )}
                         {!r.team?.hidden && gameId != null && isTeamHidden(gameId) && (
                           <Badge variant="outline" className="font-normal">
                             {t('teams.hiddenByProject')}
@@ -183,6 +192,16 @@ function LeagueTeamsCard({ league, leagueName, readOnly }: { league: LeagueKey; 
                       </span>
                     </TableCell>
                     <TableCell className="w-20">{r.team && <EntityIssues uid={r.team.uid} />}</TableCell>
+                    {!readOnly && (
+                      <TableCell className="w-14">
+                        <Switch
+                          checked={!hidden}
+                          disabled={teamOut}
+                          title={teamOut ? t('leagueEdit.teamOutOfPatch') : hiddenHere ? t('leagueEdit.showInLeague') : t('leagueEdit.hideInLeague')}
+                          onCheckedChange={(v) => void setShown(r.key, league, v)}
+                        />
+                      </TableCell>
+                    )}
                     {!readOnly && (
                       <TableCell className="w-12">
                         <Button variant="ghost" size="icon" title={t('leagueEdit.removeTeam')} onClick={() => setRemoving(r)}>

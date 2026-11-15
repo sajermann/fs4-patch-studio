@@ -1,11 +1,11 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { toast } from '@/lib/notify'
 import { AppShell } from '@/components/layout/AppShell'
 import { ErrorBoundary } from '@/components/layout/ErrorBoundary'
 import { LoadError } from '@/components/layout/LoadError'
+import { StartupScreen } from '@/components/layout/StartupScreen'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { api } from '@/api/client'
@@ -91,9 +91,14 @@ function Gate() {
   if (error && !status) return <LoadError page error={error} title={t('app.startFailed')} onRetry={() => void refetch()} />
   if (!status) {
     return (
-      <div className="flex min-h-svh items-center justify-center gap-2 text-muted-foreground">
-        <Loader2 className="animate-spin" /> {t('common.loading')}
-      </div>
+      <StartupScreen
+        page
+        steps={[
+          { label: 'startup.stepConnect', state: 'running', task: 'status' },
+          { label: 'startup.stepGameData', state: 'pending', task: 'game_data' },
+          { label: 'startup.stepProject', state: 'pending', task: 'project' },
+        ]}
+      />
     )
   }
   // first run (or the originals / folders / notice changed): nothing else opens before the setup screen

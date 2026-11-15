@@ -22,8 +22,9 @@ from . import weblink
 # boots, gloves and balls; kit_credits / kit_credits_url of a team (one credit for its real kits); 12 = name and
 # number fonts (a game font or the kit's own file), name layout, name shown or not and position table of a real kit
 # (RealKit); 13 = TeamLink.hidden (a player left out of the patch in one team only: a team may have any number of
-# players, at most 13 of them in the patch)
-CONTRACT_VERSION = 13
+# players, at most 13 of them in the patch); 14 = Team.hidden_in_leagues (a team left out of the patch in one league
+# only: a league may have any number of teams, at most builder.MAX_LEAGUE_TEAMS of them in the patch)
+CONTRACT_VERSION = 14
 NO_NATIONALITY = 0  # Player.fields['nationality'] of a player with no nationality
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
@@ -394,6 +395,9 @@ class Team(Dated):
     # leagues the team plays in (validated in game: one leagueteamlinks row each): uid of a new league or id of an
     # original league; empty = no league: left out of the patch (an original team is hidden in the game)
     leagues: list[Union[int, str]] = []
+    # leagues of `leagues` where the team is left out of the patch (it stays in that league in the app and plays in
+    # its other ones); an original team left out of every league is hidden in the game, like one without a league
+    hidden_in_leagues: list[Union[int, str]] = []
     primary_color: RGB
     secondary_color: RGB
     team_id: Optional[int] = None  # teamid in the game (a new one, unused by the game); None = given by the build
@@ -429,6 +433,15 @@ class Team(Dated):
             data = {k: v for k, v in data.items() if k != 'league'}
             data['leagues'] = [] if league is None else [league]
         return data
+
+    @model_validator(mode='after')
+    def _hidden_in_own_leagues(self):
+        """hidden_in_leagues only names leagues the team plays in (a league it left is dropped), once each."""
+        kept = [lg for i, lg in enumerate(self.hidden_in_leagues)
+                if lg in self.leagues and lg not in self.hidden_in_leagues[:i]]
+        if kept != self.hidden_in_leagues:
+            self.hidden_in_leagues = kept
+        return self
 
     def kit(self, kind):
         """Full KitColors for 'home' / 'away' (defaults derived from the team colors)."""
@@ -492,7 +505,7 @@ class WorldTour(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []
@@ -546,7 +559,7 @@ class Project(Entity):
 
     def visible(self):
         """The project without what the user hid: hidden leagues (and their teams), hidden teams (and their
-        players) and hidden players. This is what goes into the patch and what is validated."""
+        players), teams hidden in one league (out of that league only) and hidden players. This is what goes into the patch and what is validated."""
         leagues = [lg for lg in self.leagues if not lg.hidden]
         hidden_leagues = {lg.uid for lg in self.leagues if lg.hidden}
         teams = []
@@ -556,7 +569,11 @@ class Project(Entity):
             # the game by the build)
             if t.hidden or (t.leagues and not kept) or (not kept and not t.is_original):
                 continue
-            teams.append(t if len(kept) == len(t.leagues) else t.model_copy(update={'leagues': kept}))
+            shown = [lg for lg in kept if lg not in t.hidden_in_leagues]  # hidden in a league: not in it in the patch
+            if kept and not shown and not t.is_original:  # hidden in every league (a game team is hidden in the game)
+                continue
+            teams.append(t if len(shown) == len(t.leagues) and not t.hidden_in_leagues
+                         else t.model_copy(update={'leagues': shown, 'hidden_in_leagues': []}))
         left_out = {t.uid for t in self.teams if not t.is_original} - {t.uid for t in teams}
         players = []
         for p in self.players:

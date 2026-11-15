@@ -382,3 +382,31 @@ def test_hair_color_suggested_from_the_face():
     assert scanface.hair_rgb({}) is None  # bald: no suggestion
     files = _pack_face('some-faces-from-jgarca', face_id=215108)  # textures named hair_coeff.dds / hair_cm.dds
     assert preview.nearest_hair_color(scanface.hair_rgb(files), codes) == 6
+
+
+def test_a_stopped_build_keeps_the_faces_it_converted(game, assets, tmp_path):
+    """Stopping the build (cancel) while the faces are being converted: the ones already running end and go to the
+    cache, so the next build reuses them."""
+    import shutil
+    import threading
+    from fsmod import builder, buildcache
+    from test_builder import PALMEIRAS, load_palmeiras
+    project = load_palmeiras()
+    shutil.copy(os.path.join(PALMEIRAS, 'escudo_palmeiras.png'), tmp_path)
+    for pl in project.roster(project.teams[0].uid)[:2]:
+        pl.generic, pl.face = False, model.ScannedFace(source_id=FACE)
+        scanface.write_files(scanface.project_face_dir(str(tmp_path), pl.uid), FACE, facepack.read_face(assets, FACE))
+    cancel = threading.Event()
+    seen = []
+
+    def progress(step, done, total, **info):
+        seen.append((step, info))
+        if step == 'images':
+            cancel.set()
+    cache = buildcache.BuildCache(str(tmp_path / 'cache'))
+    with pytest.raises(builder.BuildCancelled):
+        builder.build(project, game, str(tmp_path), progress=progress, worker_count=2, cache=cache, cancel=cancel)
+    assert any(step == 'images' and info.get('kind') for step, info in seen)  # says what it waits for
+    cache = buildcache.BuildCache(str(tmp_path / 'cache'))
+    builder.build(project, game, str(tmp_path), worker_count=2, cache=cache)
+    assert cache.hits >= 2  # both faces (and nothing else made them again)

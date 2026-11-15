@@ -18,19 +18,24 @@ import {
 import { FieldIssues } from '@/components/common/form'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table'
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
-import { leaguePath } from '@/lib/players'
-import { newLeagues, useLeagueName, useLeagueTeams } from '@/lib/teams'
+import { leaguePath, teamKey } from '@/lib/players'
+import { useTeamLeagues } from '@/lib/members'
+import { hiddenInLeague, newLeagues, useLeagueName, useLeagueTeams } from '@/lib/teams'
 import { useIssues, useProject } from '@/state/project'
 import { useOriginalLeagues } from '@/state/queries'
 
 /** The leagues a team plays in (one leagueteamlinks row each): image, name (link to the league), a button that takes
- * the team out of one league (confirmed) and an "Add league" dialog (new leagues and the game's, with a search). */
+ * the team out of one league (confirmed), a switch that leaves it out of the patch in one league only and an "Add
+ * league" dialog (new leagues and the game's, with a search; a league with max_league_teams in the patch: it joins
+ * hidden there). */
 export function TeamLeagues({ team }: { team: Team }) {
   const { t } = useI18n()
-  const { draft, updateTeam } = useProject()
+  const { draft } = useProject()
+  const { join, leave, setShown } = useTeamLeagues()
   const originals = (useOriginalLeagues().data ?? []).filter((l) => !l.hidden)
   const leagueName = useLeagueName()
   const leagueTeams = useLeagueTeams()
@@ -43,8 +48,9 @@ export function TeamLeagues({ team }: { team: Team }) {
     key,
     icon: <LeagueIcon league={key} />,
     title: leagueName(key),
-    subtitle: t('teamEdit.leagueTeamsCount', { count: leagueTeams.count(key), max: leagueTeams.max }),
-    disabled: leagueTeams.isFull(key),
+    subtitle: leagueTeams.isFull(key)
+      ? t('teamEdit.leagueFullJoinsHidden', { count: leagueTeams.count(key), max: leagueTeams.max })
+      : t('teamEdit.leagueTeamsCount', { count: leagueTeams.count(key), max: leagueTeams.max }),
   })
   const shown = (key: LeagueKey) => !team.leagues.includes(key) && matches(q, leagueName(key))
   const groups = [
@@ -81,6 +87,14 @@ export function TeamLeagues({ team }: { team: Team }) {
                       {leagueName(key)}
                     </Link>
                   </TableCell>
+                  <TableCell className="w-14">
+                    <Switch
+                      checked={!team.hidden && !hiddenInLeague(team, key)}
+                      disabled={team.hidden}
+                      title={team.hidden ? t('leagueEdit.teamOutOfPatch') : hiddenInLeague(team, key) ? t('leagueEdit.showInLeague') : t('leagueEdit.hideInLeague')}
+                      onCheckedChange={(v) => void setShown(teamKey(team), key, v)}
+                    />
+                  </TableCell>
                   <TableCell className="w-12">
                     <Button variant="ghost" size="icon" title={t('teamEdit.leaveLeague')} onClick={() => setLeaving(key)}>
                       <X />
@@ -102,7 +116,7 @@ export function TeamLeagues({ team }: { team: Team }) {
         onQuery={setQ}
         groups={groups}
         empty={t('teamEdit.noLeaguesFound')}
-        onPick={(key) => updateTeam(team.uid, { leagues: [...team.leagues, key] })}
+        onPick={(key) => void join(teamKey(team), key)}
       />
       <AlertDialog open={leaving !== undefined} onOpenChange={(o) => !o && setLeaving(undefined)}>
         <AlertDialogContent>
@@ -113,7 +127,7 @@ export function TeamLeagues({ team }: { team: Team }) {
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => leaving !== undefined && updateTeam(team.uid, { leagues: team.leagues.filter((l) => l !== leaving) })}
+              onClick={() => leaving !== undefined && void leave(teamKey(team), leaving)}
             >
               {t('teamEdit.leaveLeague')}
             </AlertDialogAction>

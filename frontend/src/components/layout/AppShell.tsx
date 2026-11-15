@@ -5,7 +5,6 @@ import {
   Hand,
   Heart,
   Landmark,
-  Loader2,
   Puzzle,
   Settings,
   Shield,
@@ -25,6 +24,7 @@ import { LoadError } from './LoadError'
 import { NotificationBell } from './NotificationBell'
 import { PreferencesMenu } from './PreferencesMenu'
 import { ProjectActions } from './ProjectActions'
+import { StartupScreen } from './StartupScreen'
 
 const NAV: { to: string; label: MessageKey; icon: typeof Trophy }[] = [
   { to: '/leagues', label: 'nav.leagues', icon: Trophy },
@@ -182,9 +182,17 @@ export function AppShell() {
               <Outlet />
             </ErrorBoundary>
           ) : (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="animate-spin" /> {t('shell.loadingGame')}
-            </div>
+            <StartupScreen
+              steps={[
+                { label: 'startup.stepConnect', state: 'done', task: 'status' },
+                {
+                  label: 'startup.stepGameData',
+                  state: catalog && leagues && teams && stadiums ? 'done' : 'running',
+                  task: 'game_data',
+                },
+                { label: 'startup.stepProject', state: loaded ? 'done' : 'running', task: 'project' },
+              ]}
+            />
           )}
         </main>
       </div>

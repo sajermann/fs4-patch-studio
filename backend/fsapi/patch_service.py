@@ -38,12 +38,13 @@ class InstallError(Exception):
 
 
 def build_patch(project, store, game, patch_dir, log=None, progress=None, boot_converter=None, glove_converter=None,
-                ball_converter=None, worker_count=None, cache=None):
+                ball_converter=None, worker_count=None, cache=None, cancel=None):
     """Builds the patch from the saved project. Ids and boot/glove/ball codes given by the build are written back.
-    progress(step, done, total): see builder.BUILD_STEPS. worker_count / cache: see builder.build."""
+    progress(step, done, total, **info): see builder.build. worker_count / cache / cancel: see builder.build (a
+    cancelled build raises builder.BuildCancelled and leaves the patch folder as it was)."""
     result = builder.build(project, game, store.folder, log=log, progress=progress, boot_converter=boot_converter,
                            glove_converter=glove_converter, ball_converter=ball_converter, worker_count=worker_count,
-                           cache=cache)
+                           cache=cache, cancel=cancel)
     if (result.assigned_league_ids or result.assigned_team_ids or result.assigned_player_ids
             or result.assigned_boot_codes or result.assigned_glove_codes or result.assigned_ball_codes):
         for boot in project.boots:
@@ -149,6 +150,10 @@ def _fingerprint(path, sha1):
     return [st.st_size, st.st_mtime_ns, sha1]
 
 
+def _no_progress(phase, done=0, total=0, name=None, **_):
+    pass
+
+
 def _put_back(game_data, original_dir, rel):
     """The game file as it was before the app: the original (copied back) or nothing (an added file is removed).
     Returns 'restored' / 'removed' / None."""
@@ -182,7 +187,7 @@ def _check_target(game_dir, save_dir, check_running):
     return game_data
 
 
-def install(patch_dir, game_dir, backups_dir, original_dir, save_dir, check_running=True):
+def install(patch_dir, game_dir, backups_dir, original_dir, save_dir, check_running=True, progress=None):
     """Copies patch/Game over <game_dir>/Game and deletes the save (the game reads leagues/teams/players from it,
     so every mod needs a new one; decision of the user 23/10: no copy kept). Returns a report dict.
 
@@ -190,7 +195,12 @@ def install(patch_dir, game_dir, backups_dir, original_dir, save_dir, check_runn
     Every file is copied under a temporary name and renamed when complete; if anything fails, what this install
     already wrote is put back. GAME_MANIFEST lists what was written (size, mtime, SHA-1) for uninstall and for
     noticing later changes. A data8 the app did not install (no manifest) is backed up first.
+
+    progress(phase, done, total, name, bytes_done=, bytes_total=): what is happening now, for the install screen;
+    phases: 'checking', 'backup', 'restoring' (files that left the patch), 'copying', 'save', 'undoing' (failed).
     """
+    progress = progress or _no_progress
+    progress('checking')
     game_data = _check_target(game_dir, save_dir, check_running)
     files = patch_files(patch_dir)
     if not os.path.exists(os.path.join(patch_dir, PATCH_INFO)) or not files:
@@ -208,19 +218,27 @@ def install(patch_dir, game_dir, backups_dir, original_dir, save_dir, check_runn
         os.makedirs(backup, exist_ok=True)
         for name in ('data8.big', 'data8.bh'):
             if os.path.exists(os.path.join(game_data, name)):
+                progress('backup', name=name)
                 shutil.copy2(os.path.join(game_data, name), backup)
 
     restored, removed, written = [], [], {}
     try:
-        for rel in previous or {}:
-            if rel not in new:
-                done = _put_back(game_data, original_dir, rel)
-                if done:
-                    (restored if done == 'restored' else removed).append(rel)
-        for rel in new:
+        leaving = [rel for rel in previous or {} if rel not in new]
+        for i, rel in enumerate(leaving):
+            progress('restoring', i, len(leaving), rel)
+            done = _put_back(game_data, original_dir, rel)
+            if done:
+                (restored if done == 'restored' else removed).append(rel)
+        copied = 0
+        for i, rel in enumerate(new):
+            progress('copying', i, len(new), rel, bytes_done=copied, bytes_total=need)
+            source = os.path.join(patch_dir, GAME_DATA, rel)
             target = os.path.join(game_data, rel)
-            written[rel] = _fingerprint(target, _copy_atomic(os.path.join(patch_dir, GAME_DATA, rel), target))
+            written[rel] = _fingerprint(target, _copy_atomic(source, target))
+            copied += os.path.getsize(source)
+        progress('copying', len(new), len(new), None, bytes_done=copied, bytes_total=need)
     except BaseException:
+        progress('undoing')
         for rel in written:  # back to the originals (an earlier patch of the app is not brought back)
             _put_back(game_data, original_dir, rel)
         _remove_empty_dirs(game_data)
@@ -228,24 +246,30 @@ def install(patch_dir, game_dir, backups_dir, original_dir, save_dir, check_runn
             os.remove(os.path.join(game_data, GAME_MANIFEST))
         raise
     _write_manifest(game_data, written)
+    progress('save')
     return {'backup': backup, 'installed': files, 'restored': restored, 'removed': removed,
             'save_removed': game_setup.delete_save(save_dir)}
 
 
-def uninstall(game_dir, original_dir, save_dir, check_running=True):
+def uninstall(game_dir, original_dir, save_dir, check_running=True, progress=None):
     """Puts the game back as the originals: every file the app installed is copied back from original_dir or, when
-    the game has no such file (data8, loose crests/kits/photos/flags), removed. Deletes the save too."""
+    the game has no such file (data8, loose crests/kits/photos/flags), removed. Deletes the save too.
+    progress: as in install ('checking', 'restoring', 'save')."""
+    progress = progress or _no_progress
+    progress('checking')
     game_data = _check_target(game_dir, save_dir, check_running)
     previous = _read_manifest(game_data)
     if previous is None:
         raise InstallError('not_installed')
     restored, removed = [], []
-    for rel in previous:
+    for i, rel in enumerate(previous):
+        progress('restoring', i, len(previous), rel)
         done = _put_back(game_data, original_dir, rel)
         if done:
             (restored if done == 'restored' else removed).append(rel)
     os.remove(os.path.join(game_data, GAME_MANIFEST))
     _remove_empty_dirs(game_data)
+    progress('save')
     return {'restored': restored, 'removed': removed, 'save_removed': game_setup.delete_save(save_dir)}
 
 

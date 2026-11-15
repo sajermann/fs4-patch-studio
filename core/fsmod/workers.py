@@ -110,6 +110,27 @@ class Task:
         self.pool, self.fn, self.args, self.future = pool, fn, args, future
         self.done, self.value = False, None
 
+    def finished(self):
+        """True when result() would not wait (its worker ended; a call that runs here counts as not finished)."""
+        return self.done or (self.future is not None and self.future.done())
+
+    def wait(self, timeout):
+        """Waits up to timeout seconds for the worker (nothing to wait for when the call runs here)."""
+        if not self.done and self.future is not None:
+            concurrent.futures.wait([self.future], timeout=timeout)
+
+    def on_success(self, fn):
+        """fn(value) as soon as the worker returns a value (in a thread of the pool, not in order); nothing when the
+        call runs in this process (the caller sees its value in result())."""
+        if self.future is None:
+            return False
+
+        def done(future):
+            if not future.cancelled() and future.exception() is None:
+                fn(future.result())
+        self.future.add_done_callback(done)
+        return True
+
     def result(self):
         if not self.done:
             value = None

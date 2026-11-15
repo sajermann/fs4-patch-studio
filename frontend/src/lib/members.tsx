@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useI18n } from '@/i18n'
-import { GOALKEEPER } from '@/lib/teams'
+import { GOALKEEPER, useLeagueTeams, withLeagueShown } from '@/lib/teams'
 import { firstFreeNumber, keyOfPath, linkedLeague, linkedTeam, linkOf, playerName, playerOf, playerRef, rosterOf, takePlace, teamKey, teamsWith } from '@/lib/players'
 import { newUid, useProject } from '@/state/project'
 import { useCatalog, useLookups, useOriginalPlayers } from '@/state/queries'
@@ -196,19 +196,29 @@ export function useEntryOfPath<T extends League | Team | Player>(kind: EntryKind
   return { entry, loading: !entry && (!loaded || (absent && failed !== gameId)) }
 }
 
-/** A team (new team uid or the game's teamid) joining a league or leaving one; its other leagues stay (a team plays
- * in several leagues, validated in game). One of the game's teams gets its entry first (applied by teamid). */
+/** A team (new team uid or the game's teamid) joining a league, leaving one or shown/hidden in the patch in one
+ * (Team.hidden_in_leagues); its other leagues stay (a team plays in several leagues, validated in game). A league may
+ * have any number of teams, at most max_league_teams of them in the patch: joining a league that already has that many
+ * joins hidden in it. One of the game's teams gets its entry first (applied by teamid). */
 export function useTeamLeagues() {
   const { setDraft } = useProject()
   const ensure = useGameTeamEntry()
-  const change = async (team: TeamKey, update: (leagues: LeagueKey[]) => LeagueKey[]) => {
+  const leagueTeams = useLeagueTeams()
+  const change = async (team: TeamKey, update: (t: Team) => Team) => {
     if (typeof team === 'number' && !(await ensure(team))) return false
-    setDraft((p) => ({ ...p, teams: p.teams.map((t) => (teamKey(t) === team ? { ...t, leagues: update(t.leagues) } : t)) }))
+    setDraft((p) => ({ ...p, teams: p.teams.map((t) => (teamKey(t) === team ? update(t) : t)) }))
     return true
   }
   return {
-    join: (team: TeamKey, league: LeagueKey) => change(team, (ls) => (ls.includes(league) ? ls : [...ls, league])),
-    leave: (team: TeamKey, league: LeagueKey) => change(team, (ls) => ls.filter((l) => l !== league)),
+    join: (team: TeamKey, league: LeagueKey) => {
+      const full = leagueTeams.isFull(league)
+      return change(team, (t) =>
+        t.leagues.includes(league) ? t : withLeagueShown({ ...t, leagues: [...t.leagues, league] }, league, !full),
+      )
+    },
+    leave: (team: TeamKey, league: LeagueKey) =>
+      change(team, (t) => withLeagueShown({ ...t, leagues: t.leagues.filter((l) => l !== league) }, league, true)),
+    setShown: (team: TeamKey, league: LeagueKey, shown: boolean) => change(team, (t) => withLeagueShown(t, league, shown)),
   }
 }
 

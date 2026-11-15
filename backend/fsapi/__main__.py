@@ -18,8 +18,11 @@ log = logging.getLogger('fsapi')
 def warm_up(app):
     """Loads the catalog (original database, slots...) in the background so the first page is fast."""
     from fastapi import HTTPException
+    state = app.state.fsmod
     try:
-        app.state.fsmod.catalog()
+        with state.activity.task('game_data') as phase:  # the opening screen shows it (GET /api/startup)
+            phase('database')
+            state.catalog().db  # the original database: what every first request needs
     except HTTPException:  # missing original files: the UI shows the setup screen
         pass
     except Exception:  # the UI shows it too (GET /api/catalog), but the cause goes to the log right away

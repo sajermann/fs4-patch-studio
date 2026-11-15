@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import type { NotificationQuery } from '@/api/types'
 import { useI18n } from '@/i18n'
 
@@ -9,7 +9,19 @@ const forever = { staleTime: Infinity, gcTime: Infinity, retry: false } as const
 // the app shell shows their error on the page instead of the pages (AppShell), no toast (App.tsx)
 const shownByShell = { meta: { errorShown: true } } as const
 
-export const useStatus = () => useQuery({ queryKey: ['status'], queryFn: api.status, retry: 1, ...shownByShell })
+/** The backend is still starting (not listening yet, or the dev proxy cannot reach it): wait instead of failing. */
+export const backendStarting = (error: unknown) =>
+  error instanceof ApiError && !error.code && (error.status === 0 || (error.status >= 500 && error.status <= 504))
+const STARTING_RETRIES = 180 // one per second: a slow machine gets three minutes before the error page
+
+export const useStatus = () =>
+  useQuery({
+    queryKey: ['status'],
+    queryFn: api.status,
+    retry: (count, error) => count < (backendStarting(error) ? STARTING_RETRIES : 1),
+    retryDelay: (count, error) => (backendStarting(error) ? 1000 : Math.min(1000 * 2 ** count, 30000)),
+    ...shownByShell,
+  })
 export const useCatalog = () => useQuery({ queryKey: ['catalog'], queryFn: api.catalog, ...forever, ...shownByShell })
 export const useOriginalLeagues = () =>
   useQuery({ queryKey: ['originals', 'leagues'], queryFn: api.originalLeagues, ...forever, ...shownByShell })

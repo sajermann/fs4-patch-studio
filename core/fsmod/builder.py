@@ -29,6 +29,7 @@ import io
 import os
 import re
 import struct
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
@@ -121,6 +122,10 @@ class BuildError(Exception):
     def __init__(self, message, entity=None):
         super().__init__(message)
         self.entity = entity  # uid of the league/team/player the error refers to
+
+
+class BuildCancelled(Exception):
+    """The user stopped the build (build(cancel=...)). What was converted so far stays in the cache."""
 
 
 @dataclass
@@ -408,7 +413,8 @@ def _real_kit_files(game, tid, kind_n, real, assets_dir, crest_img, uid, cache=N
     k = None
     if cache is not None:
         crest_part = [] if 'thumbnail' in sources or crest_img is None else [crest_img.size, crest_img.tobytes()]
-        k = buildcache.key('real_kit', cache.game_key, tid, kind_n, *(
+        k = buildcache.key('real_kit', buildcache.code_version('kit'), cache.game_key,
+                           buildcache.function_source(_real_kit_files), tid, kind_n, *(
             x for part in sorted(sources) for x in (part, sources[part])), *crest_part,
             repr((real.positions, real.show_name)))
         files = cache.get(k)
@@ -835,11 +841,26 @@ def _edited_kit_files(game, tid, kind_n, shorts_path, crest_img):
 
 
 class _FaceTask:
-    """One real face being converted: result() = ({loose file name: bytes}, log lines)."""
+    """One real face being converted: result() = ({loose file name: bytes}, log lines). A face converted in a worker
+    goes to the cache as soon as the worker ends (workers.Task.on_success), not when the build gets to it: a build
+    that fails or is stopped later keeps it."""
 
     def __init__(self, pl, task=None, files=None, cache=None, key=None):
         self.pl, self.task, self.files, self.cache, self.key = pl, task, files, cache, key
         self.lines = [f'face of {pl.shown_name}: reused (cache)'] if files is not None else []
+        if task is not None and cache is not None:
+            task.on_success(lambda converted: cache.put(key, converted))
+
+    def finished(self):
+        return self.files is not None or self.task.finished()
+
+    def waitable(self):
+        """False when result() runs the conversion here (no worker to wait for)."""
+        return self.files is None and self.task.future is not None
+
+    def wait(self, timeout):
+        if self.files is None:
+            self.task.wait(timeout)
 
     def result(self):
         if self.files is None:
@@ -870,7 +891,7 @@ class _Faces:
                    pl.face.hair_thickness)
         k = None
         if self.cache is not None:
-            k = buildcache.key('face', self.cache.game_key, *options, *(
+            k = buildcache.key('face', buildcache.code_version('facework'), self.cache.game_key, *options, *(
                 x for name in sorted(files) for x in (name, files[name])))
             cached = self.cache.get(k)
             if cached is not None:
@@ -883,6 +904,21 @@ class _Faces:
     def close(self):
         if self.pool is not None:
             self.pool.shutdown()
+
+
+def _job_finished(job):
+    return job.finished() if isinstance(job, _FaceTask) else job.done()
+
+
+def _job_waitable(job):
+    return job.waitable() if isinstance(job, _FaceTask) else True
+
+
+def _job_wait(job, timeout):
+    if isinstance(job, _FaceTask):
+        job.wait(timeout)
+    else:
+        concurrent.futures.wait([job], timeout=timeout)
 
 
 def _rgb(value, what, entity):
@@ -1082,14 +1118,17 @@ def _set_preferred_positions(db, game, project, player_ids, result, say):
 
 
 def build(project, game, assets_dir, log=None, progress=None, boot_converter=None, glove_converter=None,
-          ball_converter=None, worker_count=None, cache=None):
+          ball_converter=None, worker_count=None, cache=None, cancel=None):
     """Builds the mod. assets_dir = folder that image paths (crests) are relative to. Hidden leagues/teams are
     left out (Project.visible); their ids stay reserved. progress(step, done, total) is called as the build goes
     (steps: BUILD_STEPS, then write_patch's). boot_converter / glove_converter / ball_converter: a boots.Converter /
     gloves.Converter / balls.Converter to reuse (keeps its conversions). worker_count: threads for the image files and
     processes for the real faces (None = fsmod.workers.plan(), the machine's defaults). cache: a
     buildcache.BuildCache whose folder keeps the real faces and kits between builds (None = no cache); entries this
-    build did not use are deleted at the end."""
+    build did not use are deleted at the end. cancel: a threading.Event; once set the build stops (BuildCancelled)
+    at the next check, after the conversions already running end (they go to the cache).
+    The 'images' step also says what it is waiting for: progress('images', done, total, kind=..., name=...)
+    (kind: face, kit, crest, photo, player, team)."""
     result = BuildResult(database=b'', entries={})
     every = project
     project = project.visible()
@@ -1099,7 +1138,11 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
         if log:
             log(msg)
 
-    step = progress or (lambda *_: None)
+    step = progress or (lambda *_, **__: None)
+
+    def check():
+        if cancel is not None and cancel.is_set():
+            raise BuildCancelled()
     step('database', 0, 1)
     game.ensure_complete()
     db = Db(game.original_db(), game.meta)
@@ -1174,6 +1217,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
     # jobs keeps their order for result.loose
     pool = ThreadPoolExecutor(max_workers=worker_count)
     jobs = []  # futures of (files, log lines)
+    labels = {}  # id(job) -> (kind, name): what the progress says while the build waits for it
     names = db.table('playernames')
     used_nameids = {db.get(names, r, 'nameid') for r in names.records}
     nameid_by_text = {r[1]: db.get(names, r, 'nameid') for r in names.records if r[1]}
@@ -1229,6 +1273,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
                 raise BuildError(f'{pl.shown_name}: cannot read photo {pl.photo}: {e}', pl.uid) from e
             jobs.append(pool.submit(lambda pid=pid, img=img:
                                     ({photo.photo_name(pid): photo.photo_file(game, img)}, [])))
+            labels[id(jobs[-1])] = ('photo', pl.shown_name)
         try:
             db.put(players, row, 'playerid', pid)
             db.put(players, row, 'firstnameid', nameid(pl.first_name))
@@ -1257,12 +1302,14 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
             raise BuildError(f'{pl.shown_name}: {e}', pl.uid) from e
         if not pl.generic and pl.face is not None:
             jobs.append(faces.submit(pl, pid, db.get(players, row, 'haircolorcode')))
+            labels[id(jobs[-1])] = ('face', pl.shown_name)
         db.append('players', row, raw)
         say(f'   player {pid} {pl.shown_name}')
         return pid
 
     step('leagues', len(project.leagues), len(project.leagues))
     for k, tm in enumerate(project.new_teams):
+        check()
         step('teams', k, len(project.teams))
         lids = _team_league_ids(tm, league_ids, existing)
         if not tm.crest:
@@ -1383,13 +1430,16 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
         # visual files
         jobs.append(pool.submit(lambda tid=tid, img=crest_img: (
             {**crest.ui_crest_files(game, tid, img), **crest.scene_crest_files(game, tid, img)}, [])))
+        labels[id(jobs[-1])] = ('crest', tm.name)
         for kind_n, kind in ((0, 'home'), (1, 'away'), (2, 'goalkeeper')):
             real = tm.real_kit(kind)
             if real:
                 jobs.append(pool.submit(_real_kit_files, game, tid, kind_n, real, assets_dir, crest_img, tm.uid,
                                         cache))
+                labels[id(jobs[-1])] = ('kit', tm.name)
             elif kind != 'goalkeeper':
                 jobs.append(pool.submit(_kit_files, game, tid, kind_n, kits[kind], crest_img))
+                labels[id(jobs[-1])] = ('kit', tm.name)
 
     # ---- players only in the game's teams or in the World Tour: records cloned from the default template team
     default_links = [links.records[k] for k in db.rows('teamplayerlinks', 'teamid', model.DEFAULT_TEMPLATE_TEAM)]
@@ -1400,9 +1450,11 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
     # ---- the game's players edited in place (same playerid): their row, photo and head, only what changed
     original_jobs = set()
     for pl in project.original_players:
+        check()
         for job in _build_original_player(db, game, pl, assets_dir, nameid, faces, say):
             future = pool.submit(job)
             jobs.append(future)
+            labels[id(future)] = ('player', pl.shown_name)
             original_jobs.add(future)
 
     # ---- squads of the game's teams: edited game players leave the teams they dropped and change number/position
@@ -1440,16 +1492,27 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
 
     # ---- original teams edited in place (same teamid): only what changed since they were loaded
     for k, tm in enumerate(project.original_teams):
+        check()
         step('teams', len(project.new_teams) + k, len(project.teams))
         lids = _team_league_ids(tm, league_ids, existing)
         for job in _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids, cache, fonts):
             future = pool.submit(job)
             jobs.append(future)
+            labels[id(future)] = ('team', tm.name)
             original_jobs.add(future)
     step('teams', len(project.teams), len(project.teams))
     try:
+        finished = 0  # jobs done so far, in any order (the faces end in the order the workers take them)
         for k, job in enumerate(jobs):
-            step('images', k, len(jobs))
+            kind, name = labels.get(id(job), ('', ''))
+            step('images', finished, len(jobs), kind=kind, name=name)
+            while _job_waitable(job) and not _job_finished(job):
+                check()
+                _job_wait(job, 0.5)
+                finished = max(finished, k + sum(1 for j in jobs[k:] if _job_finished(j)))
+                step('images', finished, len(jobs), kind=kind, name=name)
+            check()
+            finished = max(finished, k + 1)
             files, lines = job.result()
             for name, data in files.items():
                 archive = _archive_of(game, name) if job in original_jobs else None
@@ -1461,7 +1524,7 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
                 say('  ' + line)
     finally:
         pool.shutdown(cancel_futures=True)
-        faces.close()
+        faces.close()  # waits for the faces being converted: they still go to the cache
     step('images', len(jobs), len(jobs))
     if cache is not None and cache.folder:
         removed = cache.prune()
