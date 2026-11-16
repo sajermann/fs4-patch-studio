@@ -125,7 +125,7 @@ def assign_font_ids(kits, read):
     order met. A name font takes a number of its own. A numbers file only takes its color under a number (the game
     reads kitnumbers_<number>_<color>), so different fonts share a number in different colors: the first number whose
     color is still free. A file left without a free number maps to None: its kit keeps a game font (the name and
-    numbers still show, in a generic font; the validation warns, real_kit_font_no_slot)."""
+    numbers still show, in a generic font; the validation warns once, real_kit_fonts_no_slot)."""
     out = {}
     names = iter(NAME_IDS)
     taken = {}  # number font -> colors in use

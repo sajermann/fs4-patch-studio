@@ -888,8 +888,9 @@ def test_real_kit_fonts_without_a_free_number_keep_a_game_font(game, tmp_path, m
     assert kit.number_font_ok(game, get(rows[1], 'numberfonttype'), 4)
 
     issues = validation.validate(project, Catalog(game), PALMEIRAS)
-    left = sorted(i.field for i in issues if i.code == 'real_kit_font_no_slot')
-    assert left == ['real_kits.away.name_font', 'real_kits.away.number_font', 'real_kits.home.name_font']
+    # one warning for the whole project: the away name and number fonts and the home name font found no number
+    left = [i for i in issues if i.code == 'real_kit_fonts_no_slot']
+    assert [(i.entity, i.field, i.params) for i in left] == [(None, None, {'count': 3, 'teams': 1})]
 
 
 def test_lineup_order_fills_empty_slots_and_skips_players_out_of_the_team():

@@ -206,13 +206,14 @@ def validate(project, catalog, assets_dir):
                 for r in [t.records[k]]}
         return rows.get(kind, rows.get(0))
 
-    # a kit's own fonts beyond the free font numbers: the kit keeps a game font (kitfonts.assign_font_ids)
+    # a kit's own fonts beyond the free font numbers: the kit keeps a game font (kitfonts.assign_font_ids). One
+    # warning for the whole project (with hundreds of real kits there are hundreds of them, all the same)
     owners = {}
     for tm in project.teams:
         for slot in ('home', 'away', 'goalkeeper'):
             real = tm.real_kit(slot) if tm.use_real_kits else None
             if real is not None:
-                owners[id(real)] = (tm.uid, slot)
+                owners[id(real)] = tm.uid
     font_bytes = {}
 
     def read_font(path):
@@ -225,9 +226,9 @@ def validate(project, catalog, assets_dir):
         return font_bytes[path]
 
     kits = [tm.real_kit(slot) for tm in project.teams if tm.use_real_kits for slot in ('home', 'away', 'goalkeeper')]
-    for real, font_field in kitfonts.without_slot([r for r in kits if r is not None], read_font):
-        uid, slot = owners[id(real)]
-        warning('real_kit_font_no_slot', uid, f'real_kits.{slot}.{font_field}')
+    left = kitfonts.without_slot([r for r in kits if r is not None], read_font)
+    if left:
+        warning('real_kit_fonts_no_slot', None, None, count=len(left), teams=len({owners[id(r)] for r, _ in left}))
 
     seen = set()
     for entity in [*project.leagues, *project.teams, *project.players, *project.boots, *project.gloves,

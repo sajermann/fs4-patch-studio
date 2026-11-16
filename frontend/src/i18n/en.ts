@@ -306,7 +306,7 @@ export const en: Record<MessageKey, string> = {
   'issue.real_kit_name_font': 'Name font {value} does not exist in the game ({min} to {max}).',
   'issue.real_kit_number_font': 'The game has no numbers of font {font} in color {color}: a checkered texture would show instead.',
   'issue.real_kit_font_missing': 'The kit font file was not found.',
-  'issue.real_kit_font_no_slot': "The game's font slots ran out: this one uses a common font (the name and the number still show).",
+  'issue.real_kit_fonts_no_slot': "Game font limit reached: {count} real kits' own fonts ({teams} teams) will use a common game font. The name and number still show, just not in the kit's original font.",
   'issue.real_kit_font_not_ttf': 'The name font file is not a TrueType font (.ttf).',
   'issue.real_kit_font_not_numbers': 'The numbers font file does not have the 10 digits.',
   'issue.photo_missing': 'Photo image not found ({path}).',

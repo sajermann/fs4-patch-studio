@@ -70,7 +70,7 @@ ISSUE_TEXT = {
     'real_kit_name_font': 'Fonte do nome {value} não existe no jogo ({min} a {max}).',
     'real_kit_number_font': 'O jogo não tem os números da fonte {font} na cor {color}: apareceria um xadrez no lugar.',
     'real_kit_font_missing': 'Arquivo da fonte do uniforme não encontrado.',
-    'real_kit_font_no_slot': 'Acabaram as vagas de fontes do jogo: esta sai numa fonte comum (o nome e o número continuam aparecendo).',
+    'real_kit_fonts_no_slot': 'Limite de fontes do jogo atingido: {count} fontes próprias de uniformes reais ({teams} times) vão usar uma fonte comum do jogo. O nome e o número continuam aparecendo, só não na fonte original do uniforme.',
     'real_kit_font_not_ttf': 'O arquivo da fonte do nome não é uma fonte TrueType (.ttf).',
     'real_kit_font_not_numbers': 'O arquivo da fonte dos números não tem os 10 algarismos.',
     'photo_missing': 'Imagem da foto não encontrada ({path}).',
