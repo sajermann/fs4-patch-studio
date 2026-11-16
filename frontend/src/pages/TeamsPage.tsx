@@ -7,6 +7,7 @@ import type { OriginalTeam, Player, Team } from '@/api/types'
 import { EntityIssues, OriginalBadge, OriginalCrest, TeamCrest } from '@/components/common/form'
 import { GameHiddenBadge, HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { BulkActions, RowCheckbox, SelectAllCheckbox, SelectAllDialog, ShareImportButton, useListSelection, type ListSelection } from '@/components/common/share'
+import { PackageImportButton } from '@/components/common/PackageImport'
 import {
   ALL,
   FilterBar,
@@ -154,6 +155,7 @@ export function TeamsPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ShareImportButton kind="teams" />
+          <PackageImportButton />
           <Button
             onClick={create}
             disabled={firstFreeLeague === null}

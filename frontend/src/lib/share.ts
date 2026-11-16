@@ -130,6 +130,18 @@ export function planSingle(kind: ImportKind, project: Project, saved: Set<string
   return creating ? { ok: true, mode: 'create', uid: incoming.uid } : { ok: true, mode: 'edit', uid: entry.uid }
 }
 
+/** Players of a package that the project already has keep the teams they are in here: the package brings only the
+ * teams it exports, so importing a second team of the same player must not take him out of the first one. */
+export function keepKnownTeams(project: Project, items: Player[]): Player[] {
+  const byUid = new Map(project.players.map((p) => [p.uid, p]))
+  return items.map((item) => {
+    const before = byUid.get(item.uid)
+    if (!before) return item
+    const incoming = new Set(item.teams.map((l) => l.team))
+    return { ...item, teams: [...item.teams, ...before.teams.filter((l) => !incoming.has(l.team))] }
+  })
+}
+
 /** The project with the page's entry (`uid`) replaced by the imported one, without the links the project lacks. */
 export function replaceEntry(kind: ImportKind, project: Project, uid: string, item: SharedEntry, analysis: ShareAnalysis, zipUid: string): Project {
   const clean = { ...withoutMissing(kind, { ...item, uid: zipUid }, analysis.missing.get(zipUid)), uid: item.uid }

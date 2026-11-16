@@ -22,6 +22,7 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/compon
 import { LeagueIcon } from '@/components/common/LeagueIcon'
 import { GameHiddenBadge, HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { BulkActions, RowCheckbox, SelectAllCheckbox, SelectAllDialog, ShareImportButton, useListSelection } from '@/components/common/share'
+import { PackageImportButton } from '@/components/common/PackageImport'
 import { useI18n } from '@/i18n'
 import { useFrom } from '@/lib/back'
 import { useOriginalChanges } from '@/lib/originals'
@@ -110,6 +111,7 @@ export function LeaguesPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ShareImportButton kind="leagues" />
+          <PackageImportButton />
           <Button
             onClick={create}
             disabled={full}

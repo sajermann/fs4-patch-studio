@@ -5,6 +5,7 @@ import type { OriginalPlayer, Player, TeamKey } from '@/api/types'
 import { EntityIssues, OriginalBadge } from '@/components/common/form'
 import { HideButton, OutOfPatchBadge } from '@/components/common/HideButton'
 import { BulkActions, RowCheckbox, SelectAllCheckbox, SelectAllDialog, ShareImportButton, useListSelection } from '@/components/common/share'
+import { PackageImportButton } from '@/components/common/PackageImport'
 import {
   ALL,
   FilterBar,
@@ -118,6 +119,7 @@ export function PlayersPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ShareImportButton kind="players" />
+          <PackageImportButton />
           <Button onClick={create}>
             <Plus /> {t('players.new')}
           </Button>

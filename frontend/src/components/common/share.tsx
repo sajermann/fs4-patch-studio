@@ -429,7 +429,7 @@ export function ShareSingleImport({ kind, entry, pathOf }: { kind: ShareKind; en
 }
 
 /** A problem of an imported file in the interface language (by its code when the app knows it). */
-function problemText(t: TFunction, p: ShareProblem) {
+export function problemText(t: TFunction, p: ShareProblem) {
   for (const key of [`share.problem.${p.code}`, `apiError.${p.code}`]) if (hasMessage(key)) return t(key)
   return p.message
 }

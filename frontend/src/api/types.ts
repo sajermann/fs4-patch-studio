@@ -304,6 +304,18 @@ export interface ShareInspect<T> {
   problems: ShareProblem[]
 }
 
+/** A FIFA patch package converted for this game (backend fsmod.fifapackage): one share inspection per kind. */
+export interface PackageInspect {
+  summary: {
+    game: string | null
+    patch_name: string | null
+    credits: string | null
+    created_at: string | null
+    counts: Record<ShareKind, number>
+  }
+  kinds: Partial<Record<ShareKind, ShareInspect<League | Team | Player>>>
+}
+
 export interface BootImport {
   kind: 'one' | 'many'
   boots: Boot[]

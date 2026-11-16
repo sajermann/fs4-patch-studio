@@ -41,7 +41,7 @@ import zipfile
 
 from PIL import Image
 
-from fsmod import kit, kitfonts, model, scanface
+from fsmod import fifapackage, kit, kitfonts, model, scanface
 
 from .project_store import IMAGE_EXTENSIONS, file_slug
 
@@ -129,10 +129,11 @@ def face_paths(source_id):
 
 
 class ShareService:
-    def __init__(self, cache_root, street_pool=None, game=None):
+    def __init__(self, cache_root, street_pool=None, game=None, rules=None):
         # street_pool() -> catalog.street_pieces_in_use: a team that comes without street kits draws its own
         self.street_pool = street_pool
         self.game = game  # game files: real kit fonts the game does not have are dropped on import
+        self.rules = rules  # rules() -> fifapackage.Rules of this game (FIFA patch packages)
         self.staging = os.path.join(cache_root, 'imports')
 
     # ---------------------------------------------------------------- export
@@ -220,6 +221,38 @@ class ShareService:
             raise
         return {'token': token, 'items': items, 'problems': problems}
 
+    def inspect_package(self, source, prefix=fifapackage.DEFAULT_PREFIX):
+        """A FIFA patch package (fsmod.fifapackage): converted for this game into one share zip per kind, each staged
+        with its own token. Returns {'summary', 'kinds': {kind: {'token', 'items', 'problems'}}}; each kind is then
+        imported with apply(kind, token, ...), leagues first, then teams, then players."""
+        self._clean_staging()
+        os.makedirs(self.staging, exist_ok=True)
+        package = os.path.join(self.staging, f'{uuid.uuid4().hex}.package')
+        with open(package, 'wb') as f:
+            shutil.copyfileobj(source, f)
+        tokens = {}
+        try:
+            try:
+                paths, summary = fifapackage.to_share_zips(
+                    package, self.rules(), prefix, self.staging,
+                    lambda kind: f'{tokens.setdefault(kind, uuid.uuid4().hex)}.zip')
+            except fifapackage.PackageError as e:
+                raise ShareZipError(e.code, str(e))
+        finally:
+            os.remove(package)
+        kinds = {}
+        try:
+            for kind in KINDS:
+                if kind in paths:
+                    items, problems = self._read(kind, paths[kind], store=None)
+                    kinds[kind] = {'token': tokens[kind], 'items': items, 'problems': problems}
+        except Exception:
+            for path in paths.values():
+                if os.path.isfile(path):
+                    os.remove(path)
+            raise
+        return {'summary': summary, 'kinds': kinds}
+
     def apply(self, kind, token, uids, folder, save_image, as_uids=None, save_font=None):
         """The entries `uids` of an inspected zip, their files put into the project: images as provisional uploads
         (save_image(file name, bytes) -> project path), real kit fonts (save_font, the same) and a real face's files
@@ -259,6 +292,8 @@ class ShareService:
         except (zipfile.BadZipFile, OSError) as e:
             raise ShareZipError('not_a_zip', str(e))
         with z:
+            if fifapackage.is_package(z):  # a FIFA patch package: folders and its own manifest (inspect_package)
+                raise ShareZipError('use_package_import')
             entries = {}
             for info in z.infolist():
                 name = info.filename

@@ -8,7 +8,7 @@ import struct
 import threading
 import time
 
-from fastapi import FastAPI, File, HTTPException, Path, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Path, Query, UploadFile
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
@@ -31,9 +31,9 @@ from .original_images import OriginalImages
 from .share_service import ShareService, ShareZipError
 from .patch_service import InstallError, build_patch, export_patch, install, installed_state, patch_status, uninstall
 from .project_store import BackupError, ProjectFileError, ProjectStore, file_slug, migrate_folder
-from fsmod import (appearance_thumbs, balls, boots, buildcache, builder, gloves, kit, kitfonts, kitprint, model,
-                   original_league, original_player, original_team, photo, player_generator, preview, scanface,
-                   uifonts, validation, workers)
+from fsmod import (appearance_thumbs, balls, boots, buildcache, builder, fifapackage, gloves, kit, kitfonts,
+                   kitprint, model, original_league, original_player, original_team, photo, player_generator, preview,
+                   scanface, uifonts, validation, workers)
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
 
@@ -98,7 +98,8 @@ class AppState:
         self.gloves = GloveService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.balls = BallService(self.game, os.path.join(os.path.dirname(prints), 'cache'))
         self.shares = ShareService(os.path.join(os.path.dirname(prints), 'cache'),
-                                   street_pool=lambda: self.catalog().street_pieces_in_use, game=self.game)
+                                   street_pool=lambda: self.catalog().street_pieces_in_use, game=self.game,
+                                   rules=lambda: fifapackage.Rules.from_catalog(self.catalog()))
         self.build_cache_dir = os.path.join(os.path.dirname(prints), 'cache', 'build')  # fsmod.buildcache
         self._catalog = None
 
@@ -878,12 +879,29 @@ def create_app(state=None):
         'zip_too_new': 'Esse zip foi feito por uma versão mais nova do app: atualize o app para importar.',
         'import_expired': 'A importação expirou: envie o zip de novo.',
         'invalid_target_uid': 'Identificador de destino inválido.',
+        'use_package_import': 'Esse arquivo é um pacote de patch (.fifapkg.zip): use "Importar pacote".',
+        'not_a_package': 'O arquivo não é um pacote de patch (.fifapkg.zip).',
+        'invalid_package': 'O pacote não está no formato esperado.',
+        'package_too_new': 'Esse pacote foi feito por uma versão mais nova do extrator: atualize o app para importar.',
+        'invalid_prefix': 'Prefixo inválido: use só letras, números, - e _.',
     }
     SHARE_KIND = Path(pattern='^(leagues|teams|players)$')
 
     def share_failure(e):
         return HTTPException(400, {'code': 'invalid_share_zip', 'reason': e.code,
                                    'message': SHARE_ZIP_ERROR_TEXT.get(e.code, e.code)})
+
+    @app.post('/api/share/package/inspect')
+    def share_package_inspect(file: UploadFile = File(...), prefix: str = Form(fifapackage.DEFAULT_PREFIX)):
+        """A FIFA patch package (fsmod.fifapackage) converted for this game: one share zip per kind, each with its
+        token for /api/share/{kind}/apply (leagues, then teams, then players). Nothing changes in the project."""
+        try:
+            result = state.shares.inspect_package(file.file, prefix)
+        except ShareZipError as e:
+            raise share_failure(e)
+        for part in result['kinds'].values():
+            part['problems'] = [{**p, 'message': SHARE_PROBLEM_TEXT.get(p['code'], p['code'])} for p in part['problems']]
+        return result
 
     @app.post('/api/share/{kind}/inspect')
     def share_inspect(kind: str = SHARE_KIND, file: UploadFile = File(...)):

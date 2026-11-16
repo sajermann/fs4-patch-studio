@@ -39,6 +39,7 @@ import type {
   RGB,
   ScannedFace,
   ShareInspect,
+  PackageInspect,
   ShareKind,
   Status,
   AppNotification,
@@ -253,6 +254,14 @@ export const api = {
     const form = new FormData()
     form.append('file', file)
     return request<ShareInspect<T>>(`/api/share/${kind}/inspect`, { method: 'POST', body: form })
+  },
+  /** A FIFA patch package (.fifapkg.zip) converted for this game: one staged share zip per kind (apply each with
+   * applyShare, leagues first, then teams, then players). */
+  inspectPackage: (file: File, prefix: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('prefix', prefix)
+    return request<PackageInspect>('/api/share/package/inspect', { method: 'POST', body: form })
   },
   /** The chosen entries of an inspected zip, their files put into the project; the caller merges them and saves. */
   applyShare: <T>(kind: ShareKind, token: string, uids: string[], asUids: Record<string, string> = {}) =>
