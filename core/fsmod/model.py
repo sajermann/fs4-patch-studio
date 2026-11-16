@@ -24,8 +24,9 @@ from . import weblink
 # (RealKit); 13 = TeamLink.hidden (a player left out of the patch in one team only: a team may have any number of
 # players, at most 13 of them in the patch); 14 = Team.hidden_in_leagues (a team left out of the patch in one league
 # only: a league may have any number of teams, at most builder.MAX_LEAGUE_TEAMS of them in the patch); 15 =
-# Team.kit_print (name and numbers of the generic kits: colors, placements, fonts, layout, name on the back or not)
-CONTRACT_VERSION = 15
+# Team.kit_print (name and numbers of the generic kits: colors, placements, fonts, layout, name on the back or not); 16 =
+# GamePatches.ui_fonts (fonts of the game's menus: a TrueType file of the user's in place of one of the game's)
+CONTRACT_VERSION = 16
 NO_NATIONALITY = 0  # Player.fields['nationality'] of a player with no nationality
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
@@ -493,9 +494,20 @@ class OriginalChanges(BaseModel):
     stadium_balls: dict[int, BallRef] = {}
 
 
+# fonts of the game's menus the user can replace (fsmod.uifonts.SLOTS: the files the menus load)
+UiFontSlot = Literal['body', 'cn_bold', 'cn_regular', 'header', 'handwritten', 'courier', 'ea05_body']
+
+
+class UiFont(BaseModel):
+    """A TrueType file of the user's in place of one of the game's menu fonts (fsmod.uifonts)."""
+    file: Optional[str] = None  # project folder path (fonts/), as the user sent it; empty = the game's font
+    name: Optional[str] = None  # the file's own font name ('Family Style'), shown in the app
+
+
 class GamePatches(BaseModel):
-    """Optional changes to the game's own scripts (fsmod.gamepatches); all off by default."""
+    """Optional changes to the game itself (fsmod.gamepatches, fsmod.uifonts); all off by default."""
     close_up_heads: bool = False  # players keep the close-up head, hair and eyes at any camera distance
+    ui_fonts: dict[UiFontSlot, UiFont] = {}  # menu fonts replaced by the user's files; a slot left out = the game's
 
 
 class FriendlyPlayer(BaseModel):
@@ -522,7 +534,7 @@ class WorldTour(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []

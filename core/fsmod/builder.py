@@ -37,7 +37,7 @@ from PIL import Image
 
 from . import (balls, big, body, boots, buildcache, chunk, crest, dbcrc, facework, gamepatches, gloves, kit,
                kitfonts, leaguelogo, locale, model, original_league, original_player, original_team, photo, preview,
-               rx3tex, scanface, t3db, workers, world_tour)
+               rx3tex, scanface, t3db, uifonts, workers, world_tour)
 from .game import DB_ENTRY, GAME_DATA, LOCALE_ENTRIES, LOCALE_ENTRY, LOCALE_FILES, PATCH_TARGETS
 
 HIDDEN_LEAGUES = {382, 76, 2092, 2095, 2097}  # ids the league selector never shows
@@ -1589,6 +1589,11 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
         entries.update(gamepatches.entries(game, project.game_patches, project.world_tour))
     except gamepatches.GamePatchError as e:
         raise BuildError(str(e)) from e
+    try:
+        entries.update(uifonts.entries(game, project.game_patches.ui_fonts,
+                                       lambda path: buildcache.file_bytes(os.path.join(assets_dir, path))))
+    except (uifonts.UiFontError, OSError) as e:
+        raise BuildError(f'menu fonts: {e}') from e
     say(f'database {len(out)} bytes; {len(texts)} texts; {len(entries)} replaced entries')
     result.database = out
     result.entries = entries
@@ -1820,7 +1825,7 @@ def write_patch_archives(result, game, out_dir, progress=None):
       Game/<path of every PATCH_TARGETS file>   whole archive: the original with the new entries, or the plain
                                                 original when the project changes nothing in it
                                                 (data0.big, data1.big, data3.big, data7.big, data/loc/locale*.big,
-                                                .../2dheads.big; data0 only changes with fsmod.gamepatches)
+                                                .../2dheads.big; data0 only changes with fsmod.gamepatches / fsmod.uifonts)
       Game/<its .bh>                            always, for the archives that have one (dataN.bh, 2dheads.bh)
       Game/<internal name>                      loose files (result.loose): the game opens d:/<name> from disk
                                                 when no archive has it (validated with a country flag, 20/10)

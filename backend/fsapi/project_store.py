@@ -33,7 +33,8 @@ BOOTS_DIR = 'boots'  # the pack files of the project's boots (boot-<uid>.rx3, bo
 BOOT_EXTENSION = '.rx3'
 GLOVES_DIR = 'gloves'  # the pack files of the project's gloves (glove-<uid>_textures.rx3)
 BALLS_DIR = 'balls'  # the pack files of the project's balls (ball-<uid>.rx3, ball-<uid>_textures.rx3)
-# the real kits' own fonts (fsmod.kitfonts): font-<team uid>-<slot>-name.ttf, -numbers.rx3, -shorts-numbers.rx3
+# the real kits' own fonts (fsmod.kitfonts): font-<team uid>-<slot>-name.ttf, -numbers.rx3, -shorts-numbers.rx3; the
+# fonts of the game's menus (fsmod.uifonts): ui-font-<slot>.ttf
 FONTS_DIR = 'fonts'
 FONT_EXTENSIONS = {'.ttf', '.otf'}
 UPLOAD_PREFIX = 'upload-'  # provisional name of an upload until the project is saved
@@ -168,7 +169,10 @@ def ball_file_fields(project):
 
 
 def font_file_fields(project):
-    """(real kit, field, fixed file name under fonts/) of every real kit font file slot of the project."""
+    """(real kit or menu font, field, fixed file name under fonts/) of every font file slot of the project: the real
+    kits' own fonts and the fonts of the game's menus (ui-font-<slot>.ttf)."""
+    for slot, choice in project.game_patches.ui_fonts.items():
+        yield choice, 'file', f'ui-font-{slot}.ttf'
     for tm in project.teams:
         for slot, real in tm.real_kits.items():
             stem = f'font-{file_slug(tm.uid)}-{slot}'

@@ -113,7 +113,10 @@ export function AppShell() {
     '/balls': (draft.balls ?? []).filter((e) => !opened.has(e.uid)).length,
     '/stadiums': stadiums?.length ?? 0,
     '/world-tour': (draft.world_tour?.dark?.length ?? 0) + (draft.world_tour?.white?.length ?? 0),
-    '/patches': Object.values(draft.game_patches ?? {}).filter(Boolean).length,
+    // switches on + menu fonts with a file of the user's
+    '/patches':
+      Object.entries(draft.game_patches ?? {}).filter(([k, v]) => k !== 'ui_fonts' && v).length +
+      Object.values(draft.game_patches?.ui_fonts ?? {}).filter((f) => f?.file).length,
   }
   return (
     // screen height: the menu stays put and only the page area scrolls (list pages scroll inside their table)

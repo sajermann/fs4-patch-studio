@@ -33,7 +33,7 @@ from .patch_service import InstallError, build_patch, export_patch, install, ins
 from .project_store import BackupError, ProjectFileError, ProjectStore, file_slug, migrate_folder
 from fsmod import (appearance_thumbs, balls, boots, buildcache, builder, gloves, kit, kitfonts, kitprint, model,
                    original_league, original_player, original_team, photo, player_generator, preview, scanface,
-                   validation, workers)
+                   uifonts, validation, workers)
 from fsmod.catalog import SKILLS, Catalog
 from fsmod.game import GameSources, default_original_files, default_patch_dir
 
@@ -1251,6 +1251,42 @@ def create_app(state=None):
 
     def png_response(data, cache=True):
         return Response(data, media_type='image/png', headers=PREVIEW_CACHE if cache else None)
+
+    UI_FONT_ERROR_TEXT = {
+        'ui_font_not_truetype': 'A fonte precisa ser TrueType (.ttf com contornos TrueType); fontes OpenType/CFF '
+                                'não servem.',
+        'ui_font_unreadable': 'O arquivo não é uma fonte TrueType válida.',
+    }
+
+    def ui_font_failure(e):
+        return HTTPException(400, {'code': e.code, 'message': UI_FONT_ERROR_TEXT.get(e.code, e.code)})
+
+    @app.post('/api/ui-fonts/files')
+    async def upload_ui_font(file: UploadFile = File(...)):
+        """Stores a menu font (checked) under fonts/ with a provisional name; saving the project gives it its slot's
+        name. {'path', 'name': the file's own font name, 'missing_chars': characters of the game's texts it lacks}."""
+        data = await file.read()
+        try:
+            uifonts.check(data)
+        except uifonts.UiFontError as e:
+            raise ui_font_failure(e)
+        return {'path': state.store.save_font_file('font.ttf', data), 'name': uifonts.font_name(data),
+                'missing_chars': uifonts.missing_chars(data)}
+
+    @app.get('/api/ui-fonts/{slot}/preview.png')
+    def ui_font_preview(slot: model.UiFontSlot, file: str | None = None):
+        """Sample text in a menu font: the project file `file` converted as the patch does, else the game's font."""
+        data = None
+        if file:
+            try:
+                with open(state.store.font_file_path(file), 'rb') as f:
+                    data = f.read()
+            except (OSError, ValueError):
+                raise HTTPException(404, 'font file not found')
+        try:
+            return png_response(uifonts.preview(state.game, slot, data), cache=False)
+        except uifonts.UiFontError as e:
+            raise ui_font_failure(e)
 
     @app.post('/api/facepack/browse')
     def facepack_browse():

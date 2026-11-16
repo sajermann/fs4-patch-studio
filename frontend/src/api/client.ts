@@ -46,6 +46,8 @@ import type {
   NotificationPage,
   NotificationQuery,
   NotificationSelection,
+  UiFontSlot,
+  UiFontUpload,
 } from './types'
 import { hasMessage, translate } from '@/i18n'
 
@@ -291,6 +293,13 @@ export const api = {
     return { name, blob: await res.blob() }
   },
 
+  /** A menu font (.ttf, checked), under a provisional name until the project is saved. */
+  uploadUiFont: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<UiFontUpload>('/api/ui-fonts/files', { method: 'POST', body: form })
+  },
+
   /** The game's own goalkeeper gloves. */
   originalGloves: () => request<OriginalGlove[]>('/api/originals/gloves'),
   /** Starts editing one of the game's gloves: the entry without a file of its own (the game's stays). */
@@ -397,6 +406,10 @@ export const bumpProjectImagesRevision = () => {
   imagesRevision += 1
 }
 const withRevision = (url: string) => `${url}${url.includes('?') ? '&' : '?'}r=${imagesRevision}`
+
+/** Sample text in a menu font: the project file converted as the patch does, else the game's font. */
+export const uiFontPreviewUrl = (slot: UiFontSlot, file?: string | null) =>
+  withRevision(`/api/ui-fonts/${slot}/preview.png${file ? `?${new URLSearchParams({ file })}` : ''}`)
 
 /** URL of a project image (path as stored in the project, e.g. "images/x.png"). */
 export const imageUrl = (path: string) => withRevision(`/api/${path}`)

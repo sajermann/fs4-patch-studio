@@ -387,8 +387,24 @@ export interface OriginalChanges {
 }
 
 /** Optional changes to the game's own scripts (fsmod.gamepatches); all off by default. */
+/** Fonts of the game's menus the user can replace (fsmod.uifonts.SLOTS: the files the menus load). */
+export type UiFontSlot = 'body' | 'cn_bold' | 'cn_regular' | 'header' | 'handwritten' | 'courier' | 'ea05_body'
+
+/** A TrueType file of the user's in place of one of the game's menu fonts. */
+export interface UiFont {
+  file?: string | null // project path (fonts/), as the user sent it; empty = the game's font
+  name?: string | null // the file's own font name ('Family Style')
+}
+
 export interface GamePatches {
   close_up_heads?: boolean // players keep the close-up head, hair and eyes at any camera distance
+  ui_fonts?: Partial<Record<UiFontSlot, UiFont>> // menu fonts replaced by the user's files
+}
+
+export interface UiFontUpload {
+  path: string
+  name: string | null
+  missing_chars: string // characters of the game's texts the font lacks
 }
 
 export type FriendlyMode = 'original' | 'clone'

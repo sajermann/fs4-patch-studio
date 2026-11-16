@@ -7,7 +7,7 @@ def test_game_patches_are_off_by_default(game):
     project = model.load({'version': 2})
     assert project.game_patches == model.GamePatches()
     assert gamepatches.entries(game, project.game_patches) == {}
-    assert set(gamepatches.PATCHES) == set(model.GamePatches.model_fields)
+    assert set(gamepatches.PATCHES) | {'ui_fonts'} == set(model.GamePatches.model_fields)
 
 
 def test_close_up_heads_binds_far_lods_to_the_close_up_assets(game):

@@ -12,7 +12,7 @@ from typing import Optional
 
 from PIL import Image
 
-from . import balls, boots, builder, gloves, kit, kitfonts, model, original_league, original_team, scanface
+from . import balls, boots, builder, gloves, kit, kitfonts, model, original_league, original_team, scanface, uifonts
 from .catalog import POSITIONS, SKILLS
 from .model import FRIENDLY_TEAM_SIZES, REAL_KIT_FILES
 
@@ -591,6 +591,26 @@ def validate(project, catalog, assets_dir):
             if slot.player in picked:
                 error('world_tour_player_repeated', None, where, id=slot.player)
             picked.add(slot.player)
+
+    # ---- fonts of the game's menus
+    for slot, choice in project.game_patches.ui_fonts.items():
+        if not choice.file:
+            continue
+        where = f'game_patches.ui_fonts.{slot}'
+        path = os.path.join(assets_dir, choice.file)
+        if not os.path.isfile(path):
+            error('ui_font_file_not_found', None, where, slot=slot, path=choice.file)
+            continue
+        with open(path, 'rb') as f:
+            data = f.read()
+        try:
+            uifonts.check(data)
+        except uifonts.UiFontError as e:
+            error(e.code, None, where, slot=slot)
+            continue
+        missing = uifonts.missing_chars(data)
+        if missing:
+            warning('ui_font_missing_chars', None, where, slot=slot, chars=missing)
 
     # ---- boots (hidden ones are left out of the patch: not validated)
     game_codes = set(boots.game_codes(catalog.game))
