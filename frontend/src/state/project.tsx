@@ -482,9 +482,12 @@ export function usePlayerDefaults(uid: string | undefined): PlayerDefaults | und
   return uid ? defaults[uid] : undefined
 }
 
-/** Issues of one entity (optionally of one field). */
+const NO_ISSUES: Issue[] = []
+
+/** Issues of one entity (optionally of one field). Outside the ProjectProvider (the setup screen, which opens before
+ * the project) there are none, so form fields can be used there too. */
 export function useIssues(entity: string | undefined, field?: string) {
-  const { issues } = useProject()
+  const issues = useContext(ProjectContext)?.issues ?? NO_ISSUES
   return useMemo(
     () => issues.filter((i) => i.entity === entity && (field === undefined || i.field === field)),
     [issues, entity, field],
