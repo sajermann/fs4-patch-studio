@@ -27,7 +27,9 @@ function kitFonts(real: RealKit) {
   }
 }
 
-/** The team's kit for the 3D preview; `wearer` (number and name on the back) is printed on a real kit. */
+/** The team's kit for the 3D preview; `wearer` (number and name on the back) is printed on a real kit, and on the
+ * generic home/away kit (fonts and colors of the teamkits row the build copies; the goalkeeper's generic kit is the
+ * game's default one, not printed). */
 export function teamPreviewKit(team: Team | undefined, slot: RealKitSlot, wearer?: { number?: number | null; name?: string }): PreviewKit {
   if (!team) return { jersey: [200, 200, 200], shorts: [60, 60, 60] }
   const kit = fullKit(team, slot === 'away' ? 'away' : 'home')
@@ -52,10 +54,21 @@ export function teamPreviewKit(team: Team | undefined, slot: RealKitSlot, wearer
           positions: team.original_id != null ? undefined : real.positions,
         }
       : undefined
+  const genericPrint =
+    !real && wearer && slot !== 'goalkeeper' && (wearer.number != null || wearer.name)
+      ? {
+          number: wearer.number ?? undefined,
+          name: wearer.name,
+          team: team.original_id ?? team.template,
+          kind: KIT_KINDS[slot],
+          own: team.kit_print?.[slot],
+        }
+      : undefined
   return {
     jersey: kit.jersey,
     shorts: kit.shorts,
     crest: team.crest,
+    print: genericPrint,
     real: real?.jersey && real.shorts ? { jersey: real.jersey, shorts: real.shorts, collar: real.collar, print } : undefined,
   }
 }

@@ -2,7 +2,7 @@ import { Eye, Loader2, LoaderCircle, Trash2, Upload, X } from 'lucide-react'
 import { lazy, Suspense, useRef, useState } from 'react'
 import { toast } from '@/lib/notify'
 import { ApiError, api, imageUrl } from '@/api/client'
-import { KIT_FONT, type RealKit, type RealKitFile, type RealKitSlot, type Team } from '@/api/types'
+import { KIT_FONT, type GenericKitPrint, type KitKind, type RealKit, type RealKitFile, type RealKitSlot, type RGB, type Team } from '@/api/types'
 import { CreditsUrlInput } from '@/components/common/CreditsUrlInput'
 import { ColorInput, Field, FieldIssues } from '@/components/common/form'
 import { Button } from '@/components/ui/button'
@@ -380,9 +380,107 @@ function RealKitCard({ team, slot, previewing, onPreview }: { team: Team; slot: 
   )
 }
 
-/** 3D player wearing one slot's kit as the build writes it (a slot without jersey and shorts shows the generic kit).
- * The model is the captain (or the first player); the goalkeeper kit goes on the team's goalkeeper when there is one. */
-function RealKitPreview({ team, slot }: { team: Team; slot: RealKitSlot }) {
+/** Name and numbers of a generic kit (Team.kit_print): the same choices as a real kit's, without the kit's own font
+ * files and position table. A field left unset keeps the teamkits row's (new team: its template's; original team: the
+ * game's), shown as the current value. */
+export function GenericKitPrintEditor({ team, kind }: { team: Team; kind: KitKind }) {
+  const { t } = useI18n()
+  const { updateTeam } = useProject()
+  const catalog = useCatalog().data
+  const own: GenericKitPrint = team.kit_print?.[kind] ?? {}
+  const set = (patch: GenericKitPrint) => updateTeam(team.uid, { kit_print: { ...team.kit_print, [kind]: { ...own, ...patch } } })
+  const row = catalog?.kit_print[String(team.original_id ?? team.template)]
+  const rowValues = row?.[String(SLOT_KINDS[kind])] ?? row?.['0']
+  const shown = {
+    name_color: own.name_color ?? rowValues?.name_color ?? ([255, 255, 255] as RGB),
+    number_color: own.number_color ?? rowValues?.number_color ?? 1,
+    shorts_number_color: own.shorts_number_color ?? rowValues?.shorts_number_color ?? 1,
+    front_number: own.front_number ?? rowValues?.front_number ?? false,
+    shorts_number: own.shorts_number ?? rowValues?.shorts_number ?? false,
+    name_layout: own.name_layout ?? rowValues?.name_layout ?? 0,
+    name_font: own.name_font ?? rowValues?.name_font ?? 0,
+    number_font: own.number_font ?? rowValues?.number_font ?? 1,
+    shorts_number_font: own.shorts_number_font ?? rowValues?.shorts_number_font ?? 1,
+  }
+  const field = (name: string) => `kit_print.${kind}.${name}`
+  return (
+    <div className="space-y-4 border-t pt-4">
+      <p className="text-sm font-medium">{t('genericKit.printTitle')}</p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label={t('realKit.nameColor')} entity={team.uid} field={field('name_color')}>
+          <ColorInput value={shown.name_color} onChange={(v) => set({ name_color: v })} />
+        </Field>
+        <Field label={t('realKit.nameLayout')} entity={team.uid} field={field('name_layout')}>
+          <Select value={String(shown.name_layout)} onValueChange={(v) => set({ name_layout: Number(v) })}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="0">{t('realKit.nameStraight')}</SelectItem>
+              <SelectItem value="1">{t('realKit.nameArc')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label={t('realKit.jerseyNumber')} entity={team.uid} field={field('number_color')}>
+          <NumberColorSelect value={shown.number_color} onChange={(v) => set({ number_color: v })} />
+        </Field>
+        <Field label={t('realKit.shortsNumber')} entity={team.uid} field={field('shorts_number_color')}>
+          <NumberColorSelect value={shown.shorts_number_color} onChange={(v) => set({ shorts_number_color: v })} />
+        </Field>
+        <Field label={t('realKit.nameFont')} entity={team.uid} field={field('name_font')}>
+          <Select value={String(shown.name_font)} onValueChange={(v) => set({ name_font: Number(v) })}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(catalog?.kit_fonts.name ?? []).map((f) => (
+                <SelectItem key={f.id} value={String(f.id)}>
+                  {f.name ? `${f.id} · ${f.name}` : String(f.id)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label={t('realKit.numberFont')} entity={team.uid} field={field('number_font')} hint={t('realKit.numberFontHint')}>
+          <NumberFontSelect
+            value={shown.number_font}
+            color={shown.number_color}
+            own={false}
+            onChange={(v) => typeof v === 'number' && set({ number_font: v })}
+          />
+        </Field>
+        <Field label={t('realKit.shortsNumberFont')} entity={team.uid} field={field('shorts_number_font')}>
+          <NumberFontSelect
+            value={shown.shorts_number_font}
+            color={shown.shorts_number_color}
+            own={false}
+            onChange={(v) => typeof v === 'number' && set({ shorts_number_font: v })}
+          />
+        </Field>
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <Checkbox checked={shown.front_number} onCheckedChange={(c) => set({ front_number: c === true })} />
+        {t('realKit.frontNumber')}
+      </label>
+      <label className="flex items-start gap-2 text-sm">
+        <Checkbox className="mt-0.5" checked={shown.shorts_number} onCheckedChange={(c) => set({ shorts_number: c === true })} />
+        <span>
+          {t('realKit.shortsNumberOn')}
+          <span className="block text-xs text-muted-foreground">{t('realKit.shortsNumberOnHint')}</span>
+        </span>
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <Checkbox checked={own.show_name !== false} onCheckedChange={(c) => set({ show_name: c === true })} />
+        {t('realKit.showName')}
+      </label>
+    </div>
+  )
+}
+
+/** 3D player wearing one slot's kit as the build writes it (a slot without jersey and shorts, or a team with generic
+ * kits, shows the generic kit). The model is the captain (or the first player); the goalkeeper kit goes on the team's
+ * goalkeeper when there is one. */
+export function RealKitPreview({ team, slot }: { team: Team; slot: RealKitSlot }) {
   const { t } = useI18n()
   const { draft } = useProject()
   const catalog = useCatalog().data

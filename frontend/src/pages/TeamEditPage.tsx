@@ -1,6 +1,6 @@
 import { teamKey, teamPath } from '@/lib/players'
 import { EntryDates } from '@/components/common/dates'
-import { Copy, Loader2, RotateCcw, Trash2, Upload } from 'lucide-react'
+import { Copy, Eye, Loader2, RotateCcw, Trash2, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from '@/lib/notify'
@@ -13,7 +13,7 @@ import { LineupEditor, type LineupPlayer } from '@/components/common/LineupEdito
 import { RosterCard } from '@/components/common/Roster'
 import { TeamLeagues } from '@/components/common/TeamLeagues'
 import { useEntryOfPath, useTeamMembers } from '@/lib/members'
-import { RealKitEditor } from '@/components/common/RealKitEditor'
+import { GenericKitPrintEditor, RealKitEditor, RealKitPreview } from '@/components/common/RealKitEditor'
 import { StreetKitEditor } from '@/components/common/StreetKitEditor'
 import {
   AlertDialog,
@@ -163,12 +163,16 @@ function KitsTab({ team }: { team: Team }) {
   const { updateTeam } = useProject()
   const setPart = (kind: KitKind, part: KitPart, value: RGB) =>
     updateTeam(team.uid, { kits: { ...team.kits, [kind]: { ...team.kits[kind], [part]: value } } })
+  // back to the template's colors, name and numbers
   const reset = (kind: KitKind) => {
     const kits = { ...team.kits }
     delete kits[kind]
-    updateTeam(team.uid, { kits })
+    const kit_print = { ...team.kit_print }
+    delete kit_print[kind]
+    updateTeam(team.uid, { kits, kit_print })
   }
   const real = team.use_real_kits ?? false
+  const [previewKind, setPreviewKind] = useState<KitKind>('home')
   return (
     <div className="space-y-4">
       <Card>
@@ -202,8 +206,16 @@ function KitsTab({ team }: { team: Team }) {
                 <CardHeader>
                   <CardTitle>{t('teamEdit.teamKit', { kind: t(KIT_LABELS[kind]) })}</CardTitle>
                   <CardDescription>{t('teamEdit.teamKitDescription')}</CardDescription>
-                  <CardAction>
-                    {team.kits[kind] && (
+                  <CardAction className="flex gap-1">
+                    <Button
+                      variant={previewKind === kind ? 'secondary' : 'ghost'}
+                      size="sm"
+                      onClick={() => setPreviewKind(kind)}
+                      title={t('realKit.previewHint')}
+                    >
+                      <Eye /> {t('realKit.preview')}
+                    </Button>
+                    {(team.kits[kind] || team.kit_print?.[kind]) && (
                       <Button variant="ghost" size="sm" onClick={() => reset(kind)}>
                         <RotateCcw /> {t('street.reset')}
                       </Button>
@@ -223,9 +235,13 @@ function KitsTab({ team }: { team: Team }) {
                     <span className="text-xs text-muted-foreground">{t('teamEdit.kitThumbnailHint')}</span>
                   </div>
                 </CardContent>
+                <CardContent>
+                  <GenericKitPrintEditor team={team} kind={kind} />
+                </CardContent>
               </Card>
             )
           })}
+          <RealKitPreview team={team} slot={previewKind} />
         </div>
       )}
       <StreetKitEditor team={team} />

@@ -39,12 +39,31 @@ export interface RealKit {
 /** RealKit font value: the kit's own font file (fsmod.kitfonts.KIT). */
 export const KIT_FONT = 'kit'
 
-/** Fonts and name layout of a teamkits row (Catalog.kit_print). */
+/** Name and numbers settings of a teamkits row (Catalog.kit_print): what a kit keeps when it does not set its own. */
 export interface KitPrintFields {
   name_font: number
   number_font: number
   shorts_number_font: number
   name_layout: number
+  name_color: RGB
+  number_color: number
+  shorts_number_color: number
+  front_number: boolean
+  shorts_number: boolean
+}
+
+/** Name and numbers of a generic kit (Team.kit_print, fsmod.model.KitPrint): unset = the teamkits row's. */
+export interface GenericKitPrint {
+  name_color?: RGB
+  number_color?: number
+  shorts_number_color?: number
+  front_number?: boolean
+  shorts_number?: boolean
+  name_font?: number
+  number_font?: number
+  shorts_number_font?: number
+  name_layout?: number
+  show_name?: boolean
 }
 
 /** When an entry of the project was created and last changed (ISO 8601, UTC), set by the backend on save; entries
@@ -90,6 +109,7 @@ export interface Team extends Dated {
   abbreviation?: string
   crest?: string
   kits: Partial<Record<KitKind, Partial<Record<KitPart, RGB>>>>
+  kit_print?: Partial<Record<KitKind, GenericKitPrint>> // name and numbers of the generic kits
   street_kits?: Partial<Record<KitKind, StreetKit>>
   use_real_kits?: boolean // team kits from real_kits instead of solid color + crest
   real_kits?: Partial<Record<RealKitSlot, RealKit>>

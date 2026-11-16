@@ -23,8 +23,9 @@ from . import weblink
 # number fonts (a game font or the kit's own file), name layout, name shown or not and position table of a real kit
 # (RealKit); 13 = TeamLink.hidden (a player left out of the patch in one team only: a team may have any number of
 # players, at most 13 of them in the patch); 14 = Team.hidden_in_leagues (a team left out of the patch in one league
-# only: a league may have any number of teams, at most builder.MAX_LEAGUE_TEAMS of them in the patch)
-CONTRACT_VERSION = 14
+# only: a league may have any number of teams, at most builder.MAX_LEAGUE_TEAMS of them in the patch); 15 =
+# Team.kit_print (name and numbers of the generic kits: colors, placements, fonts, layout, name on the back or not)
+CONTRACT_VERSION = 15
 NO_NATIONALITY = 0  # Player.fields['nationality'] of a player with no nationality
 DEFAULT_TEMPLATE_TEAM = 112298  # generic FS4 team whose rows a new team clones (Team.template)
 
@@ -135,6 +136,21 @@ class KitColors(BaseModel):
     jersey: RGB
     shorts: RGB
     socks: RGB
+
+
+class KitPrint(BaseModel):
+    """Name and numbers of a generic kit (solid color + crest): the teamkits fields a RealKit also sets. None = keep
+    the row's (new team: its template's; original team: the game's)."""
+    name_color: Optional[RGB] = None  # jerseynamecolorr/g/b
+    number_color: Optional[int] = None  # numbercolor: palette index (fsmod.kit.NUMBER_COLORS)
+    shorts_number_color: Optional[int] = None  # shortsnumbercolor
+    front_number: Optional[bool] = None  # jerseyfrontnumberplacementcode
+    shorts_number: Optional[bool] = None  # shortsnumberplacementcode
+    name_font: Optional[int] = None  # jerseynamefonttype: jerseyfonts/font_<n>.ttf
+    number_font: Optional[int] = None  # numberfonttype: kitnumbers_<font>_<number_color>.rx3
+    shorts_number_font: Optional[int] = None  # shortsnumberfonttype (shorts_number_color)
+    name_layout: Optional[int] = None  # jerseynamelayouttype: 0 straight, 1 arc (kit.NAME_LAYOUTS)
+    show_name: bool = True  # False = no name on the back (the kit's name rectangles zeroed, kit.NO_NAME)
 
 
 class RealKit(BaseModel):
@@ -409,6 +425,7 @@ class Team(Dated):
     abbreviation: Optional[str] = None
     crest: Optional[str] = None  # image path relative to the project folder
     kits: dict[KitKind, dict[KitPart, RGB]] = {}  # partial overrides of the default kit colors
+    kit_print: dict[KitKind, KitPrint] = {}  # name and numbers of the generic kits (a kind left out = the row's)
     street_kits: dict[KitKind, StreetKit] = {}  # street (FS4) clothes chosen piece by piece
     use_real_kits: bool = False  # team kits from real_kits (FIFA 14-16 packs) instead of solid color + crest
     real_kits: dict[RealKitSlot, RealKit] = {}  # kept when use_real_kits is off (switching back keeps them)
@@ -505,7 +522,7 @@ class WorldTour(BaseModel):
 
 
 class Project(Entity):
-    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] = CONTRACT_VERSION
+    version: Literal[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] = CONTRACT_VERSION
     leagues: list[League] = []
     teams: list[Team] = []
     players: list[Player] = []

@@ -528,6 +528,7 @@ export const en: Record<MessageKey, string> = {
   'realKit.previewHint': 'Show this kit in the preview',
   'realKit.preview': 'Preview',
   'realKit.clear': 'Clear',
+  'genericKit.printTitle': 'Name and number',
   'realKit.nameColor': 'Name color',
   'realKit.collar': 'Collar',
   'realKit.collarHint': 'Collar model (0 to 14). Kit makers usually tell it, e.g. "collar 8".',

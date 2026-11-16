@@ -526,6 +526,7 @@ export const ptBR = {
   'realKit.previewHint':'Mostrar este uniforme na prévia',
   'realKit.preview': 'Prévia',
   'realKit.clear': 'Limpar',
+  'genericKit.printTitle': 'Nome e número',
   'realKit.nameColor': 'Cor do nome',
   'realKit.collar': 'Gola',
   'realKit.collarHint': 'Modelo da gola (0 a 14). Quem faz o kit costuma informar, ex.: "collar 8".',

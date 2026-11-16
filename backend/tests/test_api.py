@@ -968,6 +968,27 @@ def test_real_kit_preview_prints_name_and_numbers(env):
     assert own.status_code == 200 and own.content not in (named, other_font)
 
 
+def test_generic_kit_preview_prints_name_and_numbers(env):
+    """The generic kit (solid color): name and numbers where the kit template has them, with the fonts and colors of
+    the teamkits row the build copies (a new team's template)."""
+    c = env['client']
+    base = {'color': '10,20,200'}
+    plain = c.get('/api/preview/kit/jersey.png', params=base).content
+    printed = c.get('/api/preview/kit/jersey.png', params={**base, 'number': 9, 'name': 'Silva', 'team': 112298})
+    assert printed.status_code == 200 and printed.content != plain
+    number_only = c.get('/api/preview/kit/jersey.png', params={**base, 'number': 9, 'team': 112298}).content
+    assert len({plain, printed.content, number_only}) == 3
+    # the kit's own choices (Team.kit_print) win over the row's; without the name only the numbers are drawn
+    named = {**base, 'number': 9, 'name': 'Silva', 'team': 112298}
+    assert c.get('/api/preview/kit/jersey.png', params={**named, 'show_name': False}).content == number_only
+    other = c.get('/api/preview/kit/jersey.png', params={**named, 'name_color': '255,0,0', 'number_color': 2,
+                                                           'front': False, 'name_layout': 1, 'name_font': 3})
+    assert other.status_code == 200 and other.content != printed.content
+    # no team row: nothing printed; a kind the generic kit does not have is refused
+    assert c.get('/api/preview/kit/jersey.png', params={**base, 'number': 9}).content == plain
+    assert c.get('/api/preview/kit/jersey.png', params={**base, 'number': 9, 'team': 112298, 'kind': 2}).status_code == 422
+
+
 def test_editing_an_original_player_and_converting_old_game_links(env):
     """Editing one of the game's players starts from the game; a project saved with Team.game_players and
     TeamLink.replaces (29/10) gets entries for those game players when it is opened."""

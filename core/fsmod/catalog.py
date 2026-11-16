@@ -455,17 +455,22 @@ class Catalog:
 
     @cached_property
     def kit_print(self):
-        """{teamid: {kit kind 0/1/2: {name_font, number_font, shorts_number_font, name_layout}}} of every team's
-        teamkits rows: what a real kit keeps when it does not set its own (RealKit fields left empty)."""
+        """{teamid: {kit kind 0/1/2: {name_font, number_font, shorts_number_font, name_layout, name_color,
+        number_color, shorts_number_color, front_number, shorts_number}}} of every team's teamkits rows: what a real
+        or generic kit keeps when it does not set its own (RealKit / KitPrint fields left empty)."""
         t = self.db.table('teamkits')
         fields = {'name_font': 'jerseynamefonttype', 'number_font': 'numberfonttype',
-                  'shorts_number_font': 'shortsnumberfonttype', 'name_layout': 'jerseynamelayouttype'}
+                  'shorts_number_font': 'shortsnumberfonttype', 'name_layout': 'jerseynamelayouttype',
+                  'number_color': 'numbercolor', 'shorts_number_color': 'shortsnumbercolor'}
         out = {}
         for r in t.records:
             kind = self.db.get(t, r, 'teamkittypetechid')
             if kind in (0, 1, 2):
                 out.setdefault(self.db.get(t, r, 'teamtechid'), {})[kind] = {
-                    k: self.db.get(t, r, f) for k, f in fields.items()}
+                    **{k: self.db.get(t, r, f) for k, f in fields.items()},
+                    'name_color': [self.db.get(t, r, f'jerseynamecolor{ch}') for ch in 'rgb'],
+                    'front_number': self.db.get(t, r, 'jerseyfrontnumberplacementcode') == 1,
+                    'shorts_number': self.db.get(t, r, 'shortsnumberplacementcode') == 1}
         return out
 
     @cached_property

@@ -6,7 +6,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { kitTextureUrl, streetCrestUrl } from '@/api/client'
-import type { RGB, StreetPiece } from '@/api/types'
+import type { GenericKitPrint, RGB, StreetPiece } from '@/api/types'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
 
@@ -50,6 +50,9 @@ export interface PreviewKit {
   jersey: RGB
   shorts: RGB // the socks are mapped on the shorts texture, so they show this color too
   crest?: string | null // project image path
+  /** name and numbers on the generic kit (GET /api/preview/kit params): fonts, colors and placements of the teamkits
+   * row of `team` and `kind` */
+  print?: { number?: number; name?: string; team: number; kind: number; own?: GenericKitPrint }
   // real kit (lib/preview teamPreviewKit): project PNGs drawn instead of the solid colors, and its collar mesh
   real?: { jersey: string; shorts: string; collar: number; print?: KitPrint }
 }

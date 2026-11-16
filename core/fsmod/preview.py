@@ -269,15 +269,18 @@ def _kit_base(sources, part):
     return (t['w'], t['h']), rect, occlusion
 
 
-def kit_png(sources, part, rgb, crest=None):
+def kit_png(sources, part, rgb, crest=None, paint=None):
     """Team kit texture as the game draws it: solid color (what the builder writes) + crest decal in the 'team'
-    hotspot, shaded by the occlusion map. part: 'jersey' or 'shorts' (also used by the socks)."""
+    hotspot, shaded by the occlusion map. part: 'jersey' or 'shorts' (also used by the socks). paint(img RGBA): draws
+    over it before the shading (name and numbers, fsmod.kitprint)."""
     size, rect, occlusion = _kit_base(sources, part)
     im = Image.new('RGBA', size, tuple(rgb) + (255,))
     if crest is not None and rect:
         box = _uv_box(rect, size)
         decal = square(crest.convert('RGBA')).resize((box[2] - box[0], box[3] - box[1]), Image.LANCZOS)
         im.alpha_composite(decal, box[:2])
+    if paint is not None:
+        paint(im)
     shade = occlusion.resize(size, Image.BILINEAR).convert('RGB')
     return _png(ImageChops.multiply(im.convert('RGB'), shade))
 

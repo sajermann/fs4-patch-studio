@@ -97,12 +97,14 @@ def erase_badge(d):
 
 
 def build(game, teamid, kind, jersey, shorts=None, crest=None, background=(255, 255, 255),
-          erase_original_badge=False, log=print):
+          erase_original_badge=False, log=print, show_name=True):
     """Returns {loose file name: bytes}: kit rx3 + thumbnail of teamid, made from TEMPLATE_TEAM's kit.
-    crest = PIL image or None."""
+    crest = PIL image or None; show_name False = no name on the back (hide_name)."""
     k, off, orig = game.read_entry(kit_name(TEMPLATE_TEAM, kind))
     name = kit_name(teamid, kind)
     d = bytearray(chunk.decode(orig))
+    if not show_name:
+        hide_name(d)
     rx3tex.fill_solid(d, rx3tex.by_name(d, 'jersey_cm'), tuple(jersey))
     if shorts:
         rx3tex.fill_solid(d, rx3tex.by_name(d, 'shorts_cm'), tuple(shorts))
@@ -178,6 +180,14 @@ def position_table(positions=None, show_name=True):
     rects = [tuple(r) for r in positions] if positions else [r for _, r in REAL_POSITIONS]
     return tuple((n, (0.0, 0.0, 0.0, 0.0) if not show_name and n in NO_NAME else r)
                  for (n, _), r in zip(REAL_POSITIONS, rects))
+
+
+def hide_name(d):
+    """Zeroes the NO_NAME rectangles of a kit rx3's own position table (d = bytearray): no name on the back, as a
+    real kit without a name (position_table)."""
+    for name, p in _positions(d):
+        if name in NO_NAME:
+            d[p:p + 16] = struct.pack('>4f', 0.0, 0.0, 0.0, 0.0)
 
 
 def set_positions(d, table=REAL_POSITIONS):

@@ -390,11 +390,11 @@ def assign_glove_codes(project, game):
     return out
 
 
-def _kit_files(game, tid, kind_n, colors, crest_img):
-    """(files, log lines) of one kit of a new team (runs in the image pool)."""
+def _kit_files(game, tid, kind_n, colors, crest_img, show_name=True):
+    """(files, log lines) of one generic kit (runs in the image pool); show_name: KitPrint.show_name."""
     lines = []
     files = kit.build(game, tid, kind_n, colors['jersey'], colors['shorts'], crest_img, erase_original_badge=True,
-                      log=lines.append)
+                      log=lines.append, show_name=show_name)
     return files, lines
 
 
@@ -522,6 +522,30 @@ class _KitFonts:
         if path not in self._digests:
             self._digests[path] = kitfonts.digest(self.read(path))
         return self.ids.get(kitfonts.font_key(real, field, self._digests[path]))
+
+
+def _generic_print_fields(db, table, row, printed, game):
+    """teamkits fields of a generic kit's name and numbers (KitPrint; a field left None keeps the row's)."""
+    if printed is None:
+        return
+    if printed.name_color is not None:
+        for ch, v in zip('rgb', printed.name_color):
+            db.put(table, row, f'jerseynamecolor{ch}', v)
+    for name, field in (('number_color', 'numbercolor'), ('shorts_number_color', 'shortsnumbercolor'),
+                        ('name_font', 'jerseynamefonttype'), ('number_font', 'numberfonttype'),
+                        ('shorts_number_font', 'shortsnumberfonttype'), ('name_layout', 'jerseynamelayouttype')):
+        value = getattr(printed, name)
+        if value is not None:
+            db.put(table, row, field, value)
+    for name, field in (('front_number', 'jerseyfrontnumberplacementcode'),
+                        ('shorts_number', 'shortsnumberplacementcode')):
+        value = getattr(printed, name)
+        if value is not None:
+            db.put(table, row, field, 1 if value else 0)
+    # the numbers must always show: a font without the color (no file) would be a broken texture
+    for field, color in (('numberfonttype', 'numbercolor'), ('shortsnumberfonttype', 'shortsnumbercolor')):
+        if not kit.number_font_ok(game, db.get(table, row, field), db.get(table, row, color)):
+            db.put(table, row, field, kitfonts.FALLBACK_NUMBER_FONT)
 
 
 def _real_kit_fields(db, table, row, real, fonts=None):
@@ -742,14 +766,17 @@ def _build_original_team(db, game, tm, assets_dir, lids, texts, say, player_ids,
             if 'thumbnail' in parts and real.thumbnail:
                 jobs.append(lambda n=n, real=real: ({kit.thumbnail_name(tid, n): kit.thumbnail_dds(
                     Image.open(os.path.join(assets_dir, real.thumbnail)))}, []))
-    elif ch.kits_mode or ch.kit_colors or ch.colors or ch.crest:
+    elif ch.kits_mode or ch.kit_colors or ch.colors or ch.crest or ch.kit_print:
         for kind, n in original_team.STREET_KINDS:  # generic kits (solid colors + crest), like a new team's
             colors = tm.kit(kind)
             colors = {part: _rgb(getattr(colors, part), f'{kind}.{part}', tm.uid)
                       for part in ('jersey', 'shorts', 'socks')}
+            printed = tm.kit_print.get(kind, model.KitPrint())
             if n in kit_rows:
                 _kit_color_fields(db, team_kits, kit_rows[n], colors)
-            jobs.append(lambda n=n, colors=colors: _kit_files(game, tid, n, colors, crest_image()))
+                _generic_print_fields(db, team_kits, kit_rows[n], printed, game)
+            jobs.append(lambda n=n, colors=colors, show=printed.show_name: _kit_files(
+                game, tid, n, colors, crest_image(), show))
     return jobs
 
 
@@ -1406,6 +1433,8 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
             real = tm.real_kit(kind)
             if real:
                 _real_kit_fields(db, team_kits, r, real, fonts)
+            else:
+                _generic_print_fields(db, team_kits, r, tm.kit_print.get(kind), game)
             db.append('teamkits', r, team_kits.raw_records[k])
             if kind == 'home':
                 home_row = (r, team_kits.raw_records[k])
@@ -1438,7 +1467,8 @@ def build(project, game, assets_dir, log=None, progress=None, boot_converter=Non
                                         cache))
                 labels[id(jobs[-1])] = ('kit', tm.name)
             elif kind != 'goalkeeper':
-                jobs.append(pool.submit(_kit_files, game, tid, kind_n, kits[kind], crest_img))
+                jobs.append(pool.submit(_kit_files, game, tid, kind_n, kits[kind], crest_img,
+                                        tm.kit_print.get(kind, model.KitPrint()).show_name))
                 labels[id(jobs[-1])] = ('kit', tm.name)
 
     # ---- players only in the game's teams or in the World Tour: records cloned from the default template team

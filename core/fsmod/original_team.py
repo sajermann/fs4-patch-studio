@@ -25,7 +25,7 @@ STREET_KINDS = (('home', 0), ('away', 1))
 STREET_PARTS = (('top', 'top', 5), ('bottom', 'bottom', 2), ('socks', 'sock', 2))  # part, teamkits column, slots
 TEXT_FIELDS = ('name', 'short_name', 'name_10', 'name_7', 'abbreviation')
 EDITABLE_FIELDS = (*TEXT_FIELDS, 'leagues', 'primary_color', 'secondary_color', 'use_real_kits', 'kits',
-                   'street_kits', 'real_kits')
+                   'street_kits', 'real_kits', 'kit_print')
 REAL_KIT_SETTINGS = ('name_color', 'number_color', 'shorts_number_color', 'collar', 'front_number', 'shorts_number',
                      'name_font', 'number_font', 'shorts_number_font', 'name_layout')
 TAKER_ROLES = {'penalty': 'penaltytakerid', 'free_kick': 'freekicktakerid', 'long_free_kick': 'longkicktakerid',
@@ -147,13 +147,14 @@ class Changes:
     crest: bool = False
     kits_mode: bool = False  # use_real_kits switched (off: generic kits from the colors)
     kit_colors: bool = False  # Team.kits overrides (generic kits)
+    kit_print: bool = False  # Team.kit_print (name and numbers of the generic kits)
     real_kits: dict = field(default_factory=dict)  # slot -> set of 'jersey' / 'shorts' / 'thumbnail' / 'settings'
     street_kits: set = field(default_factory=set)  # 'home' / 'away'
 
     @property
     def any(self):
         return bool(self.texts or self.colors or self.league or self.crest or self.kits_mode or self.kit_colors
-                    or any(self.real_kits.values()) or self.street_kits)
+                    or self.kit_print or any(self.real_kits.values()) or self.street_kits)
 
 
 def image_sha1(assets_dir, path):
@@ -184,6 +185,8 @@ def changes(tm, assets_dir):
     out.crest = image_sha1(assets_dir, tm.crest) != loaded.images.get('crest')
     out.kits_mode = now.get('use_real_kits') != before.get('use_real_kits')
     out.kit_colors = now.get('kits') != before.get('kits')
+    # a snapshot taken before the generic kits had these options has no kit_print (= none set)
+    out.kit_print = (now.get('kit_print') or {}) != (before.get('kit_print') or {})
     for slot, _ in KIT_SLOTS:
         real = tm.real_kits.get(slot)
         if real is None:

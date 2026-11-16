@@ -803,6 +803,58 @@ def test_real_kit_fonts_layout_positions_and_no_name(game, tmp_path):
     assert [get(rows[1], f) for f in fields[:4]] == [get(template[1], f) for f in fields[:4]]
 
 
+def test_generic_kit_name_and_numbers_go_to_teamkits(game):
+    """A generic kit's name and numbers (Team.kit_print) go to its teamkits row, the name rectangles zeroed in the
+    kit rx3 without a name on the back; unset fields keep the template's."""
+    import struct
+    from fsmod import kit, t3db
+    project = load_palmeiras()
+    team = project.teams[0]
+    team.use_real_kits = False
+    team.kit_print = {'home': model.KitPrint(name_color=(10, 20, 30), number_color=2, shorts_number_color=3,
+                                             front_number=True, shorts_number=True, name_font=7, number_font=12,
+                                             shorts_number_font=21, name_layout=1),
+                      'away': model.KitPrint(show_name=False)}
+    result = builder.build(project, game, PALMEIRAS)
+    tid = result.assigned_team_ids[team.uid]
+
+    def rects(kind):
+        d = chunk.decode(result.loose[kit.kit_name(tid, kind)])
+        return {n: struct.unpack('>4f', d[p:p + 16]) for n, p in kit._positions(d)}
+
+    assert all(any(rects(0)[n]) for n in kit.NO_NAME)
+    assert [rects(1)[n] for n in kit.NO_NAME] == [(0.0, 0.0, 0.0, 0.0)] * 3
+
+    db = t3db.Database(result.database, game.meta)
+    kits = db.by_name('teamkits')
+    get = lambda r, f: kits.value(r, kits.field(f))  # noqa: E731
+    rows = {get(r, 'teamkittypetechid'): r for r in kits.records if get(r, 'teamtechid') == tid}
+    fields = ('jerseynamecolorr', 'jerseynamecolorg', 'jerseynamecolorb', 'numbercolor', 'shortsnumbercolor',
+              'jerseyfrontnumberplacementcode', 'shortsnumberplacementcode', 'jerseynamefonttype', 'numberfonttype',
+              'shortsnumberfonttype', 'jerseynamelayouttype')
+    assert [get(rows[0], f) for f in fields] == [10, 20, 30, 2, 3, 1, 1, 7, 12, 21, 1]
+    template = {get(r, 'teamkittypetechid'): r for r in kits.records if get(r, 'teamtechid') == team.template}
+    assert [get(rows[1], f) for f in fields] == [get(template[1], f) for f in fields]
+
+
+def test_generic_kit_name_and_numbers_are_validated(game):
+    """Values of Team.kit_print the game does not have are errors: a color out of the palette, a name font without
+    its file, a number font without the digits in its color (the row's color when the kit keeps it)."""
+    from fsmod import validation
+    from fsmod.catalog import Catalog
+    catalog = Catalog(game)
+    project = load_palmeiras()
+    team = project.teams[0]
+    team.use_real_kits = False
+    team.kit_print = {'home': model.KitPrint(number_color=40, name_font=250, name_layout=3),
+                      'away': model.KitPrint(number_font=29)}
+    found = sorted((i.code, i.field) for i in validation.validate(project, catalog, PALMEIRAS)
+                   if (i.field or '').startswith('kit_print'))
+    assert found == [('out_of_range', 'kit_print.home.name_layout'), ('out_of_range', 'kit_print.home.number_color'),
+                     ('real_kit_name_font', 'kit_print.home.name_font'),
+                     ('real_kit_number_font', 'kit_print.away.number_font')]
+
+
 def test_real_kit_own_fonts_get_free_numbers(game, tmp_path):
     """A kit's own fonts (fsmod.kitfonts): each different file gets a free font number, written as loose files (the
     numbers in the kit's colors, texture names renamed); the same file in two kits shares its number."""

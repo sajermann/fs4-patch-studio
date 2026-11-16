@@ -1476,13 +1476,56 @@ def create_app(state=None):
 
     @app.get('/api/preview/kit/{part}.png')
     def kit_texture_preview(part: str = Path(..., pattern='^(jersey|shorts)$'),
-                            color: str = Query(..., pattern=r'^\d{1,3},\d{1,3},\d{1,3}$'), crest: str | None = None):
-        """Team kit texture (solid color + crest decal, shaded) as the game draws it; shorts also cover the socks."""
+                            color: str = Query(..., pattern=r'^\d{1,3},\d{1,3},\d{1,3}$'), crest: str | None = None,
+                            number: int | None = Query(None, ge=0, le=99), name: str | None = None,
+                            team: int | None = None, kind: int = Query(0, ge=0, le=1),
+                            name_color: str | None = Query(None, pattern=r'^\d{1,3},\d{1,3},\d{1,3}$'),
+                            number_color: int | None = None, shorts_number_color: int | None = None,
+                            front: bool | None = None, shorts_number: bool | None = None,
+                            name_font: int | None = None, number_font: int | None = None,
+                            shorts_number_font: int | None = None, name_layout: int | None = None,
+                            show_name: bool = True):
+        """Team kit texture (solid color + crest decal, shaded) as the game draws it; shorts also cover the socks.
+        With number/name, the player's name and numbers are printed like the game does (fsmod.kitprint) where the
+        generic kit's template (kit.TEMPLATE_TEAM) has them, with the fonts, colors and placements of the teamkits
+        row of `team` and `kind` (an edited original team, or a new team's template: the row the build copies);
+        the other parameters are the kit's own choices (Team.kit_print), which win; show_name false = no name."""
         rgb = tuple(int(v) for v in color.split(','))
         if any(v > 255 for v in rgb):
             raise HTTPException(400, 'invalid color')
         crest_img = Image.open(project_image(crest)) if crest else None
-        return Response(preview_asset(preview.kit_png, part, rgb, crest_img), media_type='image/png')
+        paint = None
+        row = team_kit_row(team, kind) if (number is not None or name) and team is not None else None
+        if row is not None:
+            def pick(own, field):
+                return row(field) if own is None else own
+
+            def paint(img):
+                kitprint.print_kit(
+                    img, part, state.game, number=number, name=name if show_name else None,
+                    rects=kitprint.positions(state.game, kit.TEMPLATE_TEAM, kind),
+                    number_font=pick(number_font, 'numberfonttype'),
+                    shorts_number_font=pick(shorts_number_font, 'shortsnumberfonttype'),
+                    name_font=pick(name_font, 'jerseynamefonttype'), name_case=row('jerseybacknamefontcase'),
+                    name_layout=pick(name_layout, 'jerseynamelayouttype'),
+                    number_color=pick(number_color, 'numbercolor'),
+                    shorts_number_color=pick(shorts_number_color, 'shortsnumbercolor'),
+                    name_color=(tuple(int(v) for v in name_color.split(',')) if name_color
+                                else tuple(row(f'jerseynamecolor{ch}') for ch in 'rgb')),
+                    front_number=front if front is not None else row('jerseyfrontnumberplacementcode') == 1,
+                    shorts_number=(shorts_number if shorts_number is not None
+                                   else row('shortsnumberplacementcode') == 1))
+        return Response(preview_asset(preview.kit_png, part, rgb, crest_img, paint), media_type='image/png')
+
+    def team_kit_row(team, kind):
+        """Getter of the fields of the teamkits row of a team and kit kind (0 home, 1 away; the home one when the
+        team has no such kind), or None when the team has no kit rows."""
+        c = state.catalog()
+        kits = c.db.table('teamkits')
+        rows = {c.db.get(kits, r, 'teamkittypetechid'): r for r in kits.records
+                if c.db.get(kits, r, 'teamtechid') == team}
+        row = rows.get(kind, rows.get(0))
+        return None if row is None else (lambda f: c.db.get(kits, row, f))
 
     @app.get('/api/preview/real-kit/{part}.png')
     def real_kit_texture_preview(image: str, part: str = Path(..., pattern='^(jersey|shorts)$'),

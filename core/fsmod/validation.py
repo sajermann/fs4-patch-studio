@@ -199,6 +199,38 @@ def validate(project, catalog, assets_dir):
                 if isinstance(font, int) and color in kit.NUMBER_COLORS and not kit.number_font_ok(catalog.game, font, color):
                     error('real_kit_number_font', tm.uid, f'real_kits.{slot}.{font_name}', font=font, color=color)
 
+    def check_kit_print(tm):
+        """Name and numbers of the generic kits (Team.kit_print): the values the game has."""
+        t = catalog.db.table('teamkits')
+        for kind, printed in tm.kit_print.items():
+            field = f'kit_print.{kind}'
+            for name in ('number_color', 'shorts_number_color'):
+                value = getattr(printed, name)
+                if value is not None and value not in kit.NUMBER_COLORS:
+                    error('out_of_range', tm.uid, f'{field}.{name}', min=kit.NUMBER_COLORS[0],
+                          max=kit.NUMBER_COLORS[-1], value=value)
+            if printed.name_layout is not None:
+                check_range(tm.uid, f'{field}.name_layout', printed.name_layout, kit.NAME_LAYOUTS[0],
+                            kit.NAME_LAYOUTS[-1])
+            fonts = kit.name_fonts(catalog.game)
+            if printed.name_font is not None and printed.name_font not in fonts:
+                error('real_kit_name_font', tm.uid, f'{field}.name_font', value=printed.name_font, min=fonts[0],
+                      max=fonts[-1])
+            # a number font must have the digits in its color; unset = the row's (the team's own or its template's)
+            row = kit_row(tm.original_id if tm.is_original else tm.template, REAL_KIT_KINDS[kind])
+            for font_name, color_name, font_field, color_field in (
+                    ('number_font', 'number_color', 'numberfonttype', 'numbercolor'),
+                    ('shorts_number_font', 'shorts_number_color', 'shortsnumberfonttype', 'shortsnumbercolor')):
+                font, color = getattr(printed, font_name), getattr(printed, color_name)
+                if font is None and color is None:
+                    continue
+                if row is not None:
+                    font = catalog.db.get(t, row, font_field) if font is None else font
+                    color = catalog.db.get(t, row, color_field) if color is None else color
+                if (isinstance(font, int) and color in kit.NUMBER_COLORS
+                        and not kit.number_font_ok(catalog.game, font, color)):
+                    error('real_kit_number_font', tm.uid, f'{field}.{font_name}', font=font, color=color)
+
     def kit_row(teamid, kind):
         """teamkits row of a team's kit kind (the home one when the team has none of that kind), or None."""
         t = catalog.db.table('teamkits')
@@ -356,6 +388,8 @@ def validate(project, catalog, assets_dir):
             if tm.use_real_kits:
                 check_real_kits(tm, [slot for slot, parts in changes.real_kits.items() if parts] +
                                 ([] if not changes.kits_mode else ['home', 'away']))
+            elif changes.kit_print or changes.kits_mode:
+                check_kit_print(tm)
             continue  # roster and ids stay the game's
         if tm.template not in catalog.team_ids:
             error('template_not_found', tm.uid, 'template', id=tm.template)
@@ -372,6 +406,8 @@ def validate(project, catalog, assets_dir):
             error('crest_required', tm.uid, 'crest')
         if tm.use_real_kits:
             check_real_kits(tm)
+        else:
+            check_kit_print(tm)
         if tm.team_id is not None:  # given by the build when missing
             if not builder.FIRST_NEW_TEAMID <= tm.team_id <= builder.LAST_NEW_TEAMID:
                 error('team_id_out_of_range', tm.uid, 'team_id', value=tm.team_id,

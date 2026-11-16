@@ -516,6 +516,19 @@ export const kitTextureUrl = (part: 'jersey' | 'shorts', kit: PreviewKit) => {
     return withRevision(`/api/preview/real-kit/${part}.png?${qs}`)
   }
   const qs = new URLSearchParams({ color: kit[part].join(',') })
+  if (kit.print) {
+    if (kit.print.number != null) qs.set('number', String(kit.print.number))
+    if (kit.print.name) qs.set('name', kit.print.name)
+    qs.set('team', String(kit.print.team))
+    qs.set('kind', String(kit.print.kind))
+    const own = kit.print.own ?? {}
+    if (own.name_color) qs.set('name_color', own.name_color.join(','))
+    for (const key of ['number_color', 'shorts_number_color', 'name_font', 'number_font', 'shorts_number_font', 'name_layout'] as const)
+      if (own[key] != null) qs.set(key, String(own[key]))
+    if (own.front_number != null) qs.set('front', String(own.front_number))
+    if (own.shorts_number != null) qs.set('shorts_number', String(own.shorts_number))
+    if (own.show_name === false) qs.set('show_name', 'false')
+  }
   if (!kit.crest) return `/api/preview/kit/${part}.png?${qs}`
   qs.set('crest', kit.crest)
   return withRevision(`/api/preview/kit/${part}.png?${qs}`)
