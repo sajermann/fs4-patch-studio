@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from . import settings  # noqa: F401  (puts core on sys.path)
 from .messages import issue_json
-from . import diagnostics, ea_players, game_setup
+from . import diagnostics, game_setup
 from .activity import Activity
 from .ball_service import BallService, BallZipError
 from .boot_service import BootService, BootZipError
@@ -247,7 +247,8 @@ def create_app(state=None):
 
     def status_body():
         store = state.store
-        return {'original_files': {'folder': state.game.folder, 'missing': state.game.missing_files()},
+        return {'desktop': settings.FROZEN,  # the packaged app: the interface leaves out the development hints
+                'original_files': {'folder': state.game.folder, 'missing': state.game.missing_files()},
                 'config': state.config.model_dump(),
                 'setup': setup_state(),
                 'project': {'path': store.path, 'exists': store.exists()},
@@ -1279,51 +1280,6 @@ def create_app(state=None):
             raise HTTPException(404, {'code': 'facepack_not_set',
                                       'message': 'Indique a pasta do pack de faces nas Configurações.'})
         return state.faces.page(state.config.face_pack_dirs, offset, limit, q, pack)
-
-    # ---------------------------------------------------------------- players base (who each EA player id is)
-    class PlayersBaseFile(BaseModel):
-        file: str
-
-    @app.post('/api/players-base/check')
-    def players_base_check(req: PlayersBaseFile):
-        """Checks a players JSON against the contract (fsapi.ea_players) before it is kept in the settings: usable
-        players, skipped records and the first problems; 400 when the file cannot be used at all."""
-        try:
-            return ea_players.check(req.file)
-        except ea_players.PlayersBaseError as e:
-            raise HTTPException(400, {'code': e.code, 'message': e.message})
-
-    def players_base_file():
-        file = state.config.players_base_file
-        if not file:
-            raise HTTPException(404, {'code': 'players_base_not_set',
-                                      'message': 'Indique a base de jogadores nas Configurações.'})
-        return file
-
-    @app.get('/api/players-base/players')
-    def players_base_search(q: str = '', limit: int = Query(50, le=500)):
-        """Players of the base of the settings matching q (id, name or club; accents ignored)."""
-        try:
-            return ea_players.search(players_base_file(), q, limit)
-        except ea_players.PlayersBaseError as e:
-            raise HTTPException(400, {'code': e.code, 'message': e.message})
-
-    @app.get('/api/players-base/players/{player_id}')
-    def players_base_player(player_id: int):
-        """The contract fields the base has for one player (names, birth date, height, weight, foot, skill bars
-        converted from the FIFA attributes...) + `nation_id`, the game nation of its nationality when one matches."""
-        try:
-            rec = ea_players.record(players_base_file(), player_id)
-        except ea_players.PlayersBaseError as e:
-            raise HTTPException(400, {'code': e.code, 'message': e.message})
-        if not rec:
-            raise HTTPException(404, {'code': 'players_base_unknown_id', 'message': 'Jogador fora da base.'})
-        nation = ea_players.nation_id(rec.get('nationality'), state.catalog().nation_names)
-        return {**rec, 'nation_id': nation} if nation is not None else rec
-
-    @app.post('/api/players-base/browse')
-    def players_base_browse():
-        return {'file': open_file(state.config.players_base_file, 'Base de jogadores (JSON)')}
 
     @app.get('/api/facepack/thumb.png')
     def facepack_thumb(face: int, folder: str | None = None, player: str | None = None):

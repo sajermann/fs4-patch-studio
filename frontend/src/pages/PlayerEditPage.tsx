@@ -48,7 +48,7 @@ import { preferredPosition } from '@/lib/gloves'
 import { PlayerTeamsCard } from '@/components/common/PlayerTeams'
 import { cn } from '@/lib/utils'
 import { usePlayerDefaults, useProject, useSameAsGame, useWasEdited } from '@/state/project'
-import { NO_NATIONALITY, useCatalog, useLookups, useStatus } from '@/state/queries'
+import { NO_NATIONALITY, useCatalog, useLookups } from '@/state/queries'
 
 const PlayerPreview = lazy(() => import('@/components/common/PlayerPreview'))
 
@@ -738,7 +738,6 @@ export function PlayerEditPage() {
   const navigate = useNavigate()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [baseOpen, setBaseOpen] = useState(false)
-  const hasBase = !!useStatus().data?.config.players_base_file
   const { copyPlayer } = useCopy()
   const { entry: player, loading } = useEntryOfPath<Player>('player', param)
   const uid = player?.uid
@@ -799,8 +798,7 @@ export function PlayerEditPage() {
             <Button
               variant="outline"
               size="sm"
-              disabled={!hasBase}
-              title={hasBase ? t('playerEdit.baseHint') : t('apiError.players_base_not_set')}
+              title={t('playerEdit.baseHint')}
               onClick={() => setBaseOpen(true)}
             >
               <DatabaseZap /> {t('base.title')}

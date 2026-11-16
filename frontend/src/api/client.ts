@@ -1,6 +1,5 @@
 import type { PreviewKit } from '@/components/common/PlayerPreview'
 import type {
-  BasePlayer,
   Boot,
   BootImport,
   Ball,
@@ -20,7 +19,6 @@ import type {
   MachineInfo,
   FacePackPage,
   FacePackSummary,
-  FacePlayer,
   ImageUpload,
   InstallResponse,
   InstallProgress,
@@ -51,9 +49,15 @@ import type {
 } from './types'
 import { hasMessage, translate } from '@/i18n'
 
+/** The backend answered once that it is not the packaged app's (start.bat, npm run dev): only then does the
+ * "server did not answer" error mention start.bat. Unknown until GET /api/status answers. */
+let developmentBackend = false
+
 /** Text of a backend error in the interface language: by its code (and `reason`) when the app knows it, else the
  * backend's own (pt-BR) message. */
 function errorText(status: number, detail: unknown, d: Record<string, unknown>) {
+  if (d.code === 'backend_unreachable')
+    return translate('apiError.backend_unreachable') + (developmentBackend ? ' ' + translate('apiError.backend_unreachable_dev') : '')
   const key = `apiError.${d.code}${typeof d.reason === 'string' ? '.' + d.reason : ''}`
   if (typeof d.code === 'string' && hasMessage(key)) return translate(key, d)
   if (typeof d.message === 'string') return d.message
@@ -142,7 +146,11 @@ const json = (method: string, body: unknown): RequestInit => ({
 })
 
 export const api = {
-  status: () => request<Status>('/api/status'),
+  status: () =>
+    request<Status>('/api/status').then((s) => {
+      developmentBackend = !s.desktop
+      return s
+    }),
   config: () => request<Config>('/api/config'),
   saveConfig: (config: Config) => request<Config>('/api/config', json('PUT', config)),
   /** The interface language (new notifications are written in it); PUT /api/config keeps it as it is. */
@@ -373,13 +381,6 @@ export const api = {
     build_memory_percent?: number | null
   }) =>
     request<{ imported: string[]; setup: SetupState }>('/api/setup/apply', json('POST', setup)),
-  /** Checks a players JSON against the contract (usable players, skipped records, first problems). */
-  checkPlayersBase: (file: string) =>
-    request<{ players: number; skipped: number; problems: string[] }>('/api/players-base/check', json('POST', { file })),
-  searchPlayersBase: (q: string) =>
-    request<{ total: number; items: (FacePlayer & { id: number })[] }>(`/api/players-base/players?${new URLSearchParams({ q })}`),
-  playersBaseRecord: (id: number) => request<BasePlayer>(`/api/players-base/players/${id}`),
-  browsePlayersBase: () => request<{ file: string | null }>('/api/players-base/browse', { method: 'POST' }),
   /** Opens the Windows folder picker on this machine; null when cancelled. */
   browseFolder: (initial?: string | null) =>
     request<{ folder: string | null }>(`/api/dialog/folder${initial ? `?${new URLSearchParams({ initial })}` : ''}`, {

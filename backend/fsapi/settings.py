@@ -46,7 +46,8 @@ class Config(BaseModel):
     # FIFA 14-16 face pack folders, set in the settings (read in place, never written); one pack per folder. Until
     # 12/11/2026 there was a single `face_pack_dir`: it becomes the only item of the list (_one_face_pack_dir)
     face_pack_dirs: list[str] = []
-    players_base_file: Optional[str] = None  # players JSON (fsapi.ea_players contract), read in place, never written
+    # the old players base (a JSON the "Usar dados da base" button searched; up to 0.5.0): accepted, no longer used
+    players_base_file: Optional[str] = None
     terms_version: Optional[int] = None  # version of the first-run notice the user accepted (game_setup.TERMS_VERSION)
     # how much of the machine a build may use (fsmod.workers.plan): None = the defaults (all cores but one, 50% of the
     # memory); added 11/11/2026, optional so older config files load unchanged. Out-of-range values (more cores than

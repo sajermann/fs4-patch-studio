@@ -356,26 +356,6 @@ export interface FacePackPage {
   packs: FacePackSummary[]
 }
 
-export interface FacePlayer {
-  name: string
-  club?: string
-  nationality?: string
-}
-
-/** A player of the players base (settings): what "Usar dados da base" can copy into a player of the project. */
-export interface BasePlayer extends FacePlayer {
-  id: number
-  first_name?: string
-  last_name?: string
-  jersey_name?: string
-  birth_date?: string // YYYY-MM-DD
-  height_cm?: number
-  weight_kg?: number
-  preferred_foot?: 'Right' | 'Left'
-  nation_id?: number // game nation matching `nationality`
-  skills?: Record<string, number> // ATH..SPE (1-99) and TRI (0-4), converted from the FIFA attributes
-}
-
 /** Changes to the game's own leagues, teams and stadiums (only what differs from the game). */
 export interface OriginalChanges {
   hidden_leagues?: number[]
@@ -457,7 +437,6 @@ export interface Config {
   project_dir: string
   backups_dir: string
   face_pack_dirs?: string[] // face pack folders (FIFA 14-16), one pack each, read in place
-  players_base_file?: string | null // players JSON (who each EA player id is), read in place
   terms_version?: number | null // version of the first-run notice the user accepted
   build_cores?: number | null // cores the build may use (null = all but one)
   build_memory_percent?: number | null // percent of the machine's memory the build may use (null = 50)
@@ -537,6 +516,8 @@ export interface SetupState {
 }
 
 export interface Status {
+  /** the backend of the packaged (desktop) app */
+  desktop: boolean
   original_files: { folder: string; missing: string[] }
   config: Config
   setup: SetupState

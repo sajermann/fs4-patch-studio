@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, ChevronDown, CircleAlert, Download, FileArchive, Hammer, Loader2, RotateCcw, Save, Trash2, Undo2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from '@/lib/notify'
 import { ApiError, api } from '@/api/client'
@@ -31,14 +31,46 @@ import { BuildProgressDialog } from '@/components/layout/BuildProgress'
 import { InstallProgress } from '@/components/layout/InstallProgress'
 import { useI18n } from '@/i18n'
 import { issueText } from '@/lib/issues'
-import { entityLink } from '@/lib/entityLink'
+import { entityLinks } from '@/lib/entityLink'
 import { useProject } from '@/state/project'
 import { useStatus } from '@/state/queries'
 
-function IssuesDialog({ open, onOpenChange, issues }: { open: boolean; onOpenChange: (v: boolean) => void; issues: Issue[] }) {
+/** The issues, errors first, each with a link to its league/team/player. Rendered only while the dialog is open: with
+ * thousands of entries and issues, the links are not worth computing on every render of the header. */
+function IssueList({ issues, onNavigate }: { issues: Issue[]; onNavigate: () => void }) {
   const { t } = useI18n()
   const { draft } = useProject()
-  const sorted = [...issues].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1))
+  const sorted = useMemo(() => [...issues].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1)), [issues])
+  const links = useMemo(() => entityLinks(t, draft), [t, draft])
+  if (sorted.length === 0) return <p className="text-sm text-muted-foreground">{t('issues.none')}</p>
+  return (
+    <ul className="space-y-2">
+      {sorted.map((i, k) => {
+        const link = i.entity ? links.get(i.entity) : undefined
+        return (
+          <li key={k} className="flex items-start gap-2 text-sm">
+            {i.severity === 'error' ? (
+              <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
+            ) : (
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+            )}
+            <div>
+              {link && (
+                <Link to={link.to} className="font-medium underline-offset-4 hover:underline" onClick={onNavigate}>
+                  {link.label}
+                </Link>
+              )}
+              <p className="text-muted-foreground">{issueText(t, i)}</p>
+            </div>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function IssuesDialog({ open, onOpenChange, issues }: { open: boolean; onOpenChange: (v: boolean) => void; issues: Issue[] }) {
+  const { t } = useI18n()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent width="lg">
@@ -47,29 +79,7 @@ function IssuesDialog({ open, onOpenChange, issues }: { open: boolean; onOpenCha
           <DialogDescription>{t('issues.description')}</DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[60vh] pr-3">
-          {sorted.length === 0 && <p className="text-sm text-muted-foreground">{t('issues.none')}</p>}
-          <ul className="space-y-2">
-            {sorted.map((i, k) => {
-              const link = entityLink(t, draft, i.entity)
-              return (
-                <li key={k} className="flex items-start gap-2 text-sm">
-                  {i.severity === 'error' ? (
-                    <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
-                  ) : (
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
-                  )}
-                  <div>
-                    {link && (
-                      <Link to={link.to} className="font-medium underline-offset-4 hover:underline" onClick={() => onOpenChange(false)}>
-                        {link.label}
-                      </Link>
-                    )}
-                    <p className="text-muted-foreground">{issueText(t, i)}</p>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
+          <IssueList issues={issues} onNavigate={() => onOpenChange(false)} />
         </ScrollArea>
       </DialogContent>
     </Dialog>

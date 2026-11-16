@@ -1,22 +1,47 @@
-import { useQuery } from '@tanstack/react-query'
-import { Check, LoaderCircle } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from '@/lib/notify'
-import { ApiError, api } from '@/api/client'
-import type { BasePlayer, Player } from '@/api/types'
+import type { OriginalPlayer, Player } from '@/api/types'
+import { OriginalBadge } from '@/components/common/form'
+import { matches } from '@/components/common/list'
+import { OriginalPlayerAvatar, PlayerAvatar } from '@/components/common/PlayerPhoto'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { useI18n, type TFunction } from '@/i18n'
 import { FOOT_LABELS } from '@/lib/labels'
+import { useGamePlayers, useTeamName } from '@/lib/members'
 import { OVERALL_SKILLS, computeOverall } from '@/lib/skills'
 import { cn } from '@/lib/utils'
-import { useProject } from '@/state/project'
+import { useProject, useSameAsGame } from '@/state/project'
 import { useLookups } from '@/state/queries'
 
 type Group = 'name' | 'nationality' | 'birthdate' | 'height' | 'weight' | 'foot' | 'skills'
 
+/** A player the data can come from: one of the project (new or an edited original) or one of the game's as the game
+ * has him. Values left undefined are the template's defaults (project players) and are not offered. */
+interface Source {
+  key: string
+  name: string
+  searched: string[] // what the search looks at (names, jersey name, id)
+  detail: string // team · id, under the name
+  photo: { project: Player } | { game: OriginalPlayer } // for the avatar
+  original: boolean // one of the game's players as the game has him
+  entry?: string // uid of a project entry (its badge says whether it edits an original)
+  first_name: string
+  last_name: string
+  display_name?: string
+  jersey_name?: string
+  nationality?: number
+  birthdate?: string
+  height?: number
+  weight?: number
+  foot?: 'right' | 'left'
+  skills: Record<string, number>
+}
+
+const RESULTS = 100 // rows listed at once; the search narrows the rest
 const formatDate = (iso?: string) => (iso ? iso.split('-').reverse().join('/') : '—')
 const SKILL_ORDER = [...OVERALL_SKILLS, 'TRI']
 const formatSkills = (skills: Record<string, number>) =>
@@ -24,57 +49,51 @@ const formatSkills = (skills: Record<string, number>) =>
     .map((k) => `${k} ${skills[k]}`)
     .join(' · ')
 
-/** The base's first and last names; without them, the full name split at its last space. */
-function splitName(rec: BasePlayer): [string, string] {
-  if (rec.first_name || rec.last_name) return [rec.first_name ?? '', rec.last_name ?? '']
-  const cut = rec.name.lastIndexOf(' ')
-  return cut < 0 ? ['', rec.name] : [rec.name.slice(0, cut), rec.name.slice(cut + 1)]
-}
-
-/** What each checkbox copies from the base into the player (only groups the base record has). */
+/** What each checkbox copies from the chosen player into this one (only the groups the chosen player has). */
 function changes(
   t: TFunction,
-  rec: BasePlayer,
+  src: Source,
   player: Player,
   nation: Map<number, string>,
 ): { key: Group; label: string; patch: Partial<Player>; shown: string }[] {
   const out: { key: Group; label: string; patch: Partial<Player>; shown: string }[] = []
-  const [first, last] = splitName(rec)
-  // the base's name is how the player is known; kept as the display name only when it is not just first + last
-  const display = rec.name !== `${first} ${last}`.trim() ? rec.name : undefined
   out.push({
     key: 'name',
     label: t('base.name'),
-    patch: { first_name: first, last_name: last, display_name: display, ...(rec.jersey_name ? { jersey_name: rec.jersey_name } : {}) },
+    patch: {
+      first_name: src.first_name,
+      last_name: src.last_name,
+      display_name: src.display_name,
+      ...(src.jersey_name ? { jersey_name: src.jersey_name } : {}),
+    },
     shown:
-      [first, last].filter(Boolean).join(' · ') +
-      (display ? ` ${t('base.shownAs', { name: display })}` : '') +
-      (rec.jersey_name ? ` · ${t('base.jerseyName', { name: rec.jersey_name })}` : ''),
+      [src.first_name, src.last_name].filter(Boolean).join(' · ') +
+      (src.display_name ? ` ${t('base.shownAs', { name: src.display_name })}` : '') +
+      (src.jersey_name ? ` · ${t('base.jerseyName', { name: src.jersey_name })}` : ''),
   })
-  if (rec.nation_id !== undefined) {
+  if (src.nationality !== undefined) {
     out.push({
       key: 'nationality',
       label: t('base.nationality'),
-      patch: { fields: { ...player.fields, nationality: rec.nation_id } },
-      shown: nation.get(rec.nation_id) ?? rec.nationality ?? String(rec.nation_id),
+      patch: { fields: { ...player.fields, nationality: src.nationality } },
+      shown: nation.get(src.nationality) ?? String(src.nationality),
     })
   }
-  if (rec.birth_date) out.push({ key: 'birthdate', label: t('base.birthdate'), patch: { birthdate: rec.birth_date }, shown: formatDate(rec.birth_date) })
-  if (rec.height_cm) out.push({ key: 'height', label: t('base.height'), patch: { height: rec.height_cm }, shown: `${rec.height_cm} cm` })
-  if (rec.weight_kg) out.push({ key: 'weight', label: t('base.weight'), patch: { weight: rec.weight_kg }, shown: `${rec.weight_kg} kg` })
-  if (rec.preferred_foot) {
-    const foot = rec.preferred_foot === 'Left' ? 'left' : 'right'
-    out.push({ key: 'foot', label: t('base.foot'), patch: { foot }, shown: t(FOOT_LABELS[foot]) })
-  }
-  if (rec.skills) {
-    // converted from the FIFA attributes by the backend (fsapi/ea_players.py): a starting point, editable afterwards
-    const bars = rec.skills
-    const overall = computeOverall((k) => bars[k])
+  if (src.birthdate) out.push({ key: 'birthdate', label: t('base.birthdate'), patch: { birthdate: src.birthdate }, shown: formatDate(src.birthdate) })
+  if (src.height) out.push({ key: 'height', label: t('base.height'), patch: { height: src.height }, shown: `${src.height} cm` })
+  if (src.weight) out.push({ key: 'weight', label: t('base.weight'), patch: { weight: src.weight }, shown: `${src.weight} kg` })
+  if (src.foot) out.push({ key: 'foot', label: t('base.foot'), patch: { foot: src.foot }, shown: t(FOOT_LABELS[src.foot]) })
+  if (Object.keys(src.skills).length) {
+    const skills = { ...src.skills }
+    if (skills.overall === undefined) {
+      const overall = computeOverall((k) => skills[k])
+      if (overall !== undefined) skills.overall = overall
+    }
     out.push({
       key: 'skills',
       label: t('base.skills'),
-      patch: { skills: overall === undefined ? { ...bars } : { ...bars, overall } },
-      shown: formatSkills(bars) + (overall !== undefined ? ` · ${t('base.overall', { value: overall })}` : ''),
+      patch: { skills },
+      shown: formatSkills(skills) + (skills.overall !== undefined ? ` · ${t('base.overall', { value: skills.overall })}` : ''),
     })
   }
   return out
@@ -101,50 +120,109 @@ function current(t: TFunction, player: Player, key: Group, nation: Map<number, s
   }
 }
 
-/** "Usar dados da base": picks a player of the players base (settings) and copies the checked data into this player
- * (user's request, 26/10: name, nationality, birth date, height, weight, foot and the skill bars converted from the
- * FIFA attributes; all of it stays editable). */
+/** Every player the data can be copied from: the project's (an edited original once, as the project has him) and the
+ * game's own, but never the player being edited. */
+function useSources(player: Player, open: boolean): Source[] {
+  const { t } = useI18n()
+  const { draft } = useProject()
+  const sameAsGame = useSameAsGame()
+  const games = useGamePlayers()
+  const teamName = useTeamName()
+  const { originalTeam } = useLookups()
+  return useMemo(() => {
+    if (!open) return []
+    const mine = draft.players.filter((p) => !sameAsGame(p.uid) && p.uid !== player.uid)
+    const edited = new Set(draft.players.filter((p) => !sameAsGame(p.uid)).flatMap((p) => (p.original_id != null ? [p.original_id] : [])))
+    const fromProject = mine.map((p): Source => {
+      const full = `${p.first_name} ${p.last_name}`.trim()
+      const id = p.original_id ?? p.player_id
+      return {
+        key: `p:${p.uid}`,
+        name: p.display_name || full || t('common.unnamed'),
+        searched: [p.display_name ?? '', full, p.jersey_name ?? '', id != null ? String(id) : ''],
+        detail: [p.teams.length ? teamName(p.teams[0].team) : t('players.freeAgent'), id].filter((v) => v != null).join(' · '),
+        photo: { project: p },
+        original: false,
+        entry: p.original_id != null ? p.uid : undefined,
+        first_name: p.first_name,
+        last_name: p.last_name,
+        display_name: p.display_name || undefined,
+        jersey_name: p.jersey_name || undefined,
+        nationality: p.fields.nationality,
+        birthdate: p.birthdate,
+        height: p.height,
+        weight: p.weight,
+        foot: p.foot,
+        skills: p.skills,
+      }
+    })
+    const fromGame = [...games.values()]
+      .filter((p) => !edited.has(p.id) && p.id !== player.original_id)
+      .map((p): Source => {
+        const full = `${p.first_name} ${p.last_name}`.trim()
+        return {
+          key: `g:${p.id}`,
+          name: p.display_name || full,
+          searched: [p.display_name, full, p.jersey_name ?? '', String(p.id)],
+          detail: [p.teams.length ? (originalTeam.get(p.teams[0])?.name ?? p.teams[0]) : t('players.freeAgent'), p.id].join(' · '),
+          photo: { game: p },
+          original: true,
+          first_name: p.first_name,
+          last_name: p.last_name,
+          display_name: p.display_name && p.display_name !== full ? p.display_name : undefined,
+          jersey_name: p.jersey_name ?? undefined,
+          nationality: p.nationality,
+          birthdate: p.birthdate ?? undefined,
+          height: p.height,
+          weight: p.weight,
+          foot: p.foot,
+          skills: p.skills,
+        }
+      })
+    return [...fromProject, ...fromGame]
+  }, [open, draft.players, sameAsGame, player.uid, player.original_id, games, teamName, originalTeam, t])
+}
+
+/** "Usar dados da base": picks one of the players already registered (the project's or the game's) and copies the
+ * checked data into this player (user's request, 16/11/2026: name, nationality, birth date, height, weight, foot and
+ * the skill bars; all of it stays editable). */
 export function BaseDataDialog({ player, open, onOpenChange }: { player: Player; open: boolean; onOpenChange: (open: boolean) => void }) {
   const { t } = useI18n()
   const { updatePlayer } = useProject()
   const { nation } = useLookups()
   const [q, setQ] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [picked, setPicked] = useState<number | null>(null)
+  const [picked, setPicked] = useState<string | null>(null)
   const [checked, setChecked] = useState<Set<Group>>(new Set())
+  const sources = useSources(player, open)
 
   useEffect(() => {
     if (!open) return
-    // a real face's id is the EA player id: start from it; otherwise from the player's name
-    const start = player.face ? String(player.face.source_id) : `${player.first_name} ${player.last_name}`.trim()
+    // start from the player's own name: the same player elsewhere (the game's, another team's) comes first
+    const start = player.display_name || `${player.first_name} ${player.last_name}`.trim()
     setQ(start)
     setDebounced(start)
-    setPicked(player.face?.source_id ?? null)
-  }, [open, player.face, player.first_name, player.last_name])
+    setPicked(null)
+  }, [open, player.display_name, player.first_name, player.last_name])
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(q), 250)
     return () => clearTimeout(timer)
   }, [q])
 
-  const results = useQuery({ queryKey: ['players-base', debounced], queryFn: () => api.searchPlayersBase(debounced), enabled: open, retry: false })
-  const record = useQuery({
-    queryKey: ['players-base-record', picked],
-    queryFn: () => api.playersBaseRecord(picked as number),
-    enabled: open && picked !== null,
-    retry: false,
-  })
-  const rows = useMemo(() => (record.data ? changes(t, record.data, player, nation) : []), [t, record.data, player, nation])
+  const found = useMemo(() => sources.filter((s) => matches(debounced, ...s.searched)), [sources, debounced])
+  const source = sources.find((s) => s.key === picked)
+  const rows = useMemo(() => (source ? changes(t, source, player, nation) : []), [t, source, player, nation])
   useEffect(() => setChecked(new Set(rows.map((r) => r.key))), [rows])
 
   const apply = () => {
+    if (!source) return
     const patch = Object.assign({}, ...rows.filter((r) => checked.has(r.key)).map((r) => r.patch)) as Partial<Player>
     updatePlayer(player.uid, patch)
-    toast.success(t('base.applied', { name: record.data?.name }))
+    toast.success(t('base.applied', { name: source.name }))
     onOpenChange(false)
   }
 
-  const error = results.error ?? record.error
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent width="lg">
@@ -153,76 +231,68 @@ export function BaseDataDialog({ player, open, onOpenChange }: { player: Player;
           <DialogDescription>{t('base.description')}</DialogDescription>
         </DialogHeader>
         <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('base.search')} autoFocus />
-        {error && <p className="text-sm text-destructive">{error instanceof ApiError ? error.message : t('base.readFailed')}</p>}
         <div className="grid gap-3 sm:grid-cols-[1fr_1.3fr]">
           {/* both boxes have a fixed height: the dialog does not grow and shrink while searching */}
           <div className="h-[420px] overflow-y-auto rounded-md border">
-            {results.isLoading && <LoaderCircle className="m-3 size-4 animate-spin" />}
-            {results.data?.items.map((p) => (
+            {found.slice(0, RESULTS).map((s) => (
               <button
-                key={p.id}
+                key={s.key}
                 type="button"
-                onClick={() => setPicked(p.id)}
-                className={cn('flex w-full flex-col items-start border-b px-3 py-1.5 text-left text-sm last:border-0 hover:bg-muted', picked === p.id && 'bg-muted')}
+                onClick={() => setPicked(s.key)}
+                className={cn('flex w-full items-center gap-2 border-b px-3 py-1.5 text-left text-sm last:border-0 hover:bg-muted', picked === s.key && 'bg-muted')}
               >
-                <span className="font-medium">{p.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {p.id}
-                  {p.club ? ` · ${p.club}` : ''}
-                  {p.nationality ? ` · ${p.nationality}` : ''}
+                {'project' in s.photo ? (
+                  <PlayerAvatar player={s.photo.project} className="size-7" />
+                ) : (
+                  <OriginalPlayerAvatar player={s.photo.game} className="size-7" />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="truncate">{s.name}</span>
+                    {(s.original || s.entry) && <OriginalBadge entry={s.entry} />}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">{s.detail}</span>
                 </span>
               </button>
             ))}
-            {results.data && !results.data.items.length && <p className="p-3 text-sm text-muted-foreground">{t('base.noResults')}</p>}
-            {results.data && results.data.total > results.data.items.length && (
-              <p className="p-2 text-xs text-muted-foreground">
-                {t('base.showing', { count: results.data.items.length, total: results.data.total })}
-              </p>
-            )}
+            {!found.length && <p className="p-3 text-sm text-muted-foreground">{t('base.noResults')}</p>}
+            {found.length > RESULTS && <p className="p-2 text-xs text-muted-foreground">{t('base.showing', { count: RESULTS, total: found.length })}</p>}
           </div>
           <div className="h-[420px] overflow-y-auto rounded-md border p-3 text-sm">
-            {picked === null ? (
+            {!source ? (
               <p className="text-muted-foreground">{t('base.pickPlayer')}</p>
-            ) : record.isLoading ? (
-              <LoaderCircle className="size-4 animate-spin" />
-            ) : record.data ? (
+            ) : (
               <div className="space-y-2">
-                <p className="font-medium">
-                  {record.data.name} <span className="text-xs text-muted-foreground">({record.data.id})</span>
-                </p>
-                {rows.length ? (
-                  rows.map((r) => (
-                    <label key={r.key} className="flex cursor-pointer items-start gap-2">
-                      <Checkbox
-                        checked={checked.has(r.key)}
-                        onCheckedChange={(v) =>
-                          setChecked((s) => {
-                            const next = new Set(s)
-                            if (v) next.add(r.key)
-                            else next.delete(r.key)
-                            return next
-                          })
-                        }
-                        className="mt-0.5"
-                      />
-                      <span>
-                        <span className="font-medium">{r.label}:</span> {r.shown}
-                        <span className="block text-xs text-muted-foreground">{t('base.current', { value: current(t, player, r.key, nation) })}</span>
-                      </span>
-                    </label>
-                  ))
-                ) : (
-                  <p className="text-muted-foreground">{t('base.noData')}</p>
-                )}
+                <p className="font-medium">{source.name}</p>
+                {rows.map((r) => (
+                  <label key={r.key} className="flex cursor-pointer items-start gap-2">
+                    <Checkbox
+                      checked={checked.has(r.key)}
+                      onCheckedChange={(v) =>
+                        setChecked((s) => {
+                          const next = new Set(s)
+                          if (v) next.add(r.key)
+                          else next.delete(r.key)
+                          return next
+                        })
+                      }
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="font-medium">{r.label}:</span> {r.shown}
+                      <span className="block text-xs text-muted-foreground">{t('base.current', { value: current(t, player, r.key, nation) })}</span>
+                    </span>
+                  </label>
+                ))}
               </div>
-            ) : null}
+            )}
           </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {t('common.cancel')}
           </Button>
-          <Button onClick={apply} disabled={!record.data || !rows.some((r) => checked.has(r.key))}>
+          <Button onClick={apply} disabled={!source || !rows.some((r) => checked.has(r.key))}>
             <Check /> {t('common.apply')}
           </Button>
         </DialogFooter>

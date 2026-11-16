@@ -19,3 +19,17 @@ export function entityLink(t: TFunction, project: Project, uid: string | null | 
     }
   return null
 }
+
+/** The same label and page for every league/team/player of the project, by uid (built once for a whole list). */
+export function entityLinks(t: TFunction, project: Project) {
+  const unnamed = t('common.unnamed')
+  const links = new Map<string, { label: string; to: string }>()
+  for (const p of project.players)
+    links.set(p.uid, {
+      label: t('issues.linkPlayer', { name: `${p.first_name} ${p.last_name}`.trim() || unnamed }),
+      to: playerPath(playerRef(p)),
+    })
+  for (const tm of project.teams) links.set(tm.uid, { label: t('issues.linkTeam', { name: tm.name || unnamed }), to: teamPath(teamKey(tm)) })
+  for (const l of project.leagues) links.set(l.uid, { label: t('issues.linkLeague', { name: l.name || unnamed }), to: leaguePath(leagueKey(l)) })
+  return links
+}

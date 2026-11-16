@@ -9,7 +9,6 @@ import { BuildResourcesFields } from '@/components/common/BuildResources'
 import { FacePackFolders } from '@/components/common/FacePackFolders'
 import { cleanFolders } from '@/lib/folders'
 import { Field } from '@/components/common/form'
-import { PlayersBaseCard } from '@/components/common/PlayersBaseCard'
 import { ProjectJsonCard } from '@/components/common/ProjectJsonCard'
 import { SupportActions } from '@/components/common/SupportActions'
 import {
@@ -212,7 +211,6 @@ export function SettingsPage() {
         game_dir: status.config.game_dir,
         save_dir: status.config.save_dir,
         face_pack_dirs: facePackDirs,
-        players_base_file: status.config.players_base_file, // saved by its own card
       })
       await queryClient.invalidateQueries({ queryKey: ['status'] })
       await queryClient.invalidateQueries({ queryKey: ['project'] })
@@ -253,7 +251,6 @@ export function SettingsPage() {
         </CardContent>
       </Card>
       <BuildCard status={status} />
-      <PlayersBaseCard status={status} />
       <SaveCard status={status} />
       <ProjectJsonCard />
       <Card>

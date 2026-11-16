@@ -719,59 +719,6 @@ def test_real_face_from_a_pack(env):
 
 
 
-def test_players_base_check_explains_what_breaks_the_contract(env, tmp_path):
-    c = env['client']
-
-    def check(data):
-        path = tmp_path / f'base{len(list(tmp_path.iterdir()))}.json'
-        path.write_text(data if isinstance(data, str) else json.dumps(data), 'utf-8')
-        return c.post('/api/players-base/check', json={'file': str(path)})
-
-    assert check({'players': {'1': {'name': 'A'}, '2': {'name': 'B', 'club': 'C'}, '3': {}}}).json() ==         {'players': 2, 'skipped': 0, 'problems': []}  # {} = id nobody has data for yet: not a problem
-    r = check({'players': {'1': {'name': 'A'}, '2': {'player_name': 'B'}, 'x': {'name': 'C'}}})
-    assert r.json()['players'] == 1 and r.json()['skipped'] == 2
-    assert any('"name"' in p and 'player_name' in p for p in r.json()['problems'])  # says which field it expected
-    for data, code in (('{bad', 'players_base_invalid_json'), ({'jogadores': {}}, 'players_base_no_players'),
-                       ({'players': [{'name': 'A'}]}, 'players_base_players_not_object')):
-        r = check(data)
-        assert r.status_code == 400 and r.json()['detail']['code'] == code
-    assert c.post('/api/players-base/check', json={'file': str(tmp_path / 'none.json')}).json()['detail']['code'] ==         'players_base_not_found'
-
-
-def test_players_base_search_and_record_for_a_player(env, tmp_path):
-    c = env['client']
-    assert c.get('/api/players-base/players').json()['detail']['code'] == 'players_base_not_set'
-    base = tmp_path / 'players.json'
-    base.write_text(json.dumps({'players': {
-        '55607': {'name': 'Edwuin Pernía', 'club': 'Puerto Cabello', 'first_name': 'Edwuin', 'last_name': 'Pernía',
-                  'birth_date': '1995-01-02', 'height_cm': 180, 'weight_kg': 75, 'preferred_foot': 'Left'},
-        '1': {'name': 'Other', 'height_cm': 'tall', 'preferred_foot': 'Both', 'birth_date': '02/01/1995'}}}), 'utf-8')
-    env['state'].config.players_base_file = str(base)
-    assert [p['id'] for p in c.get('/api/players-base/players', params={'q': 'pernia'}).json()['items']] == [55607]
-    assert c.get('/api/players-base/players', params={'q': 'cabello'}).json()['total'] == 1  # club too
-    assert c.get('/api/players-base/players/55607').json()['preferred_foot'] == 'Left'
-    assert c.get('/api/players-base/players/1').json() == {'id': 1, 'name': 'Other'}  # invalid values are not offered
-    assert c.get('/api/players-base/players/2').status_code == 404
-
-
-def test_players_base_record_converts_skills_and_nationality(env, tmp_path):
-    from fsapi.ea_players import ATTRIBUTES
-    c = env['client']
-    attrs = {a: 50 for a in ATTRIBUTES} | {'acceleration': 20, 'sprint_speed': 20, 'gk_diving': 80}
-    attrs.pop('defensive_awareness')  # older editions: falls back to standing_tackle and interceptions
-    base = tmp_path / 'players.json'
-    base.write_text(json.dumps({'players': {
-        '10': {'name': 'Keeper', 'nationality': "Côte d'Ivoire", 'positions': ['GK'], 'skill_moves': 5,
-               'attributes': attrs},
-        '11': {'name': 'Partial', 'nationality': 'Atlantis', 'attributes': {'finishing': 90}}}}), 'utf-8')
-    env['state'].config.players_base_file = str(base)
-    rec = c.get('/api/players-base/players/10').json()
-    assert rec['nation_id'] == 108  # Ivory Coast in the game
-    # SPE 20 lifted to the keepers' floor; GK = mean of 80, 50, 50, 50; TRI = skill moves 5 + 1, capped at 4
-    assert rec['skills'] == {'ATH': 50, 'DEF': 50, 'DRI': 50, 'GK': 58, 'PAS': 50, 'SHO': 50, 'SPE': 45, 'TRI': 4}
-    partial = c.get('/api/players-base/players/11').json()
-    assert 'skills' not in partial and 'nation_id' not in partial
-
 def test_original_stadiums_and_changes_round_trip(env):
     c = env['client']
     every = c.get('/api/originals/stadiums').json()
