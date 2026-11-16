@@ -15,6 +15,12 @@ React + Vite + TypeScript + Tailwind + shadcn/ui. Code is English; the UI is tra
   dialog in `components/common/notifications.tsx`). Pass `{ entity: uid }` when a message is about a league, team or
   player: the notification links to it. While the backend does not answer, notifications wait in the browser
   (`fsmod.notifications.pending`) and are sent when it comes back.
+- **Dialogs** (`components/ui/dialog.tsx`, `alert-dialog.tsx`, `closing.tsx`): while a dialog closes, its content
+  stays as it was when open, so clearing the data it shows in the same click (cancel, X, confirm) is fine — no
+  timers in the screens. Always use these `Dialog` / `AlertDialog`, never the Radix ones directly. Width: only the
+  `width` prop of `DialogContent` / `AlertDialogContent` (`components/ui/dialog-width.ts`), never a `max-w-*` class:
+  `sm` 448 px (default; a plain confirmation), `md` 576 px (progress, a short list, three buttons, a picker), `lg`
+  672 px (long lists, search, side by side review).
 - **Theme** (`src/lib/theme.tsx`): light / dark / system, class `dark` on `<html>`, saved in `fsmod.theme`; the inline
   script in `index.html` applies it before the first paint. Both pickers are in `components/layout/PreferencesMenu.tsx`
   (sidebar footer and the setup screen).

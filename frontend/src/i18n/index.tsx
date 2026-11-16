@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { en } from './en'
 import { ptBR, type MessageKey } from './pt-BR'
+import { APP_VERSION } from '@/lib/about'
 
 export type { MessageKey }
 export type Lang = 'pt-BR' | 'en'
@@ -81,7 +82,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, [])
   useEffect(() => {
     document.documentElement.lang = current
-    document.title = translate('app.documentTitle')
+    document.title = translate('app.documentTitle', { version: APP_VERSION }) // browser tab; the desktop window sets its own
   }, [current])
   // a new `t` per language, so memoized code that depends on it recomputes
   const t = useCallback<TFunction>((key, params) => format(DICTIONARIES[current][key] ?? ptBR[key] ?? key, params), [current])

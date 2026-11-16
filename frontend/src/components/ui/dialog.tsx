@@ -7,11 +7,21 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 import { translate } from "@/i18n"
+import { useContentWhileClosing, useOpenState } from "@/components/ui/closing"
+import { DIALOG_WIDTH, type DialogWidth } from "@/components/ui/dialog-width"
 
 function Dialog({
+  open,
+  defaultOpen,
+  onOpenChange,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+  const state = useOpenState(open, defaultOpen, onOpenChange)
+  return (
+    <state.Provider value={state.isOpen}>
+      <DialogPrimitive.Root data-slot="dialog" open={open} defaultOpen={defaultOpen} onOpenChange={state.onOpenChange} {...props} />
+    </state.Provider>
+  )
 }
 
 function DialogTrigger({
@@ -52,22 +62,27 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  width = "sm",
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
+  /** the app's dialog widths (ui/dialog-width.ts) */
+  width?: DialogWidth
 }) {
+  const content = useContentWhileClosing(children) // unchanged while the closing animation runs
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          DIALOG_WIDTH[width],
           className
         )}
         {...props}
       >
-        {children}
+        {content}
         {showCloseButton && (
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button

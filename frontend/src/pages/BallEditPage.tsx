@@ -394,7 +394,7 @@ export function BallEditPage() {
       </div>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {original ? t('teamEdit.restoreOriginalTitle', { name }) : t('teamEdit.deleteTitle', { name })}
@@ -439,7 +439,7 @@ export function BallEditPage() {
       </AlertDialog>
 
       <AlertDialog open={takingOff !== null} onOpenChange={(open) => !open && setTakingOff(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {takeOffRows.length === 1

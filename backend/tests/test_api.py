@@ -552,12 +552,13 @@ def test_face_in_an_unknown_format_is_reported(env):
 
 
 def fake_face_pack(root, ids, manifest=None, screenassets=False):
-    """A pack folder with the files the gallery looks for (empty: enough to list, not to draw)."""
+    """A pack folder with the files the gallery looks for (just a PC RX3 header: enough to list and to copy, not to
+    draw)."""
     assets = root / 'screenassets' if screenassets else root
     for fid in ids:
         for sub, name in (('heads', f'head_{fid}_0.rx3'), ('faces', f'face_{fid}_0_0_0_0_0_0_0_0_textures.rx3')):
             (assets / sub).mkdir(parents=True, exist_ok=True)
-            (assets / sub / name).write_bytes(b'')
+            (assets / sub / name).write_bytes(b'RX3l')
     if manifest is not None:
         (root / 'manifest.json').write_text(manifest if isinstance(manifest, str) else json.dumps(manifest), 'utf-8')
     return str(root)
@@ -866,6 +867,62 @@ def test_bad_backups_leave_the_project_alone(env, entries, reason):
     r = c.post('/api/project/restore', files={'file': ('b.zip', data)})
     assert r.status_code == 400 and r.json()['detail']['reason'] == reason, r.text
     assert c.get('/api/project').json()['project'] == saved
+
+
+def test_backup_download_and_restore_report_their_progress(env):
+    """The screen starts the backup zip in the background, follows its progress and downloads it; a restore reports
+    its steps in the same progress."""
+    import io
+    import time
+    import zipfile
+    c = env['client']
+    project, _ = palmeiras_v2(c)
+    saved = c.put('/api/project', json=project).json()['project']
+    assert c.get('/api/project/backup/file').status_code == 404  # nothing started
+    assert c.post('/api/project/backup/start').json() == {'started': True}
+    for _ in range(200):
+        prog = c.get('/api/project/backup/progress').json()
+        if not prog['running']:
+            break
+        time.sleep(0.05)
+    assert prog['action'] == 'export' and prog['ready'] and prog['error'] is None, prog
+    assert prog['phase'] == 'zipping' and prog['done'] == prog['total'] == 2  # database.json + the crest
+    assert prog['bytes_done'] == prog['bytes_total'] > 0 and prog['elapsed'] >= 0
+    r = c.get('/api/project/backup/file')
+    assert r.status_code == 200 and 'attachment' in r.headers['content-disposition']
+    backup = r.content
+    assert sorted(zipfile.ZipFile(io.BytesIO(backup)).namelist()) == sorted(['database.json', saved['teams'][0]['crest']])
+    assert c.get('/api/project/backup/file').status_code == 404  # sent once, then removed
+    assert not os.path.exists(env['state'].store.folder + '.download.zip')
+
+    c.put('/api/project', json={'version': 2, 'leagues': [], 'teams': [], 'players': []})
+    assert c.post('/api/project/restore', files={'file': ('b.zip', backup)}).json()['project'] == saved
+    prog = c.get('/api/project/backup/progress').json()
+    assert prog['action'] == 'restore' and not prog['running'] and prog['phase'] == 'finishing'
+    assert prog['done'] == prog['total'] == 2 and prog['error'] is None
+
+
+def test_backup_of_any_size_is_restored_when_it_fits_on_the_disk(env, monkeypatch):
+    """No size limit (a big project's own backup must come back); only the free space of the project's disk counts."""
+    import collections
+    import io
+    import zipfile
+    from fsapi import project_store
+    c = env['client']
+    project, _ = palmeiras_v2(c)
+    saved = c.put('/api/project', json=project).json()['project']
+    backup = c.get('/api/project/backup').content
+    size = sum(i.file_size for i in zipfile.ZipFile(io.BytesIO(backup)).infolist())
+    usage = collections.namedtuple('usage', 'total used free')
+    free = {'bytes': size + project_store.BACKUP_DISK_MARGIN - 1}  # one byte short
+    monkeypatch.setattr(project_store.shutil, 'disk_usage', lambda p: usage(0, 0, free['bytes']))
+    c.put('/api/project', json={'version': 2, 'leagues': [], 'teams': [], 'players': []})
+    r = c.post('/api/project/restore', files={'file': ('b.zip', backup)})
+    assert r.status_code == 400 and r.json()['detail']['reason'] == 'no_space', r.text
+    assert c.get('/api/project').json()['project']['teams'] == []  # left as it was
+    free['bytes'] += 1  # it fits now
+    r = c.post('/api/project/restore', files={'file': ('b.zip', backup)})
+    assert r.status_code == 200 and r.json()['project'] == saved, r.text
 
 
 def test_editing_an_original_team_starts_from_the_game_and_survives_saving(env):

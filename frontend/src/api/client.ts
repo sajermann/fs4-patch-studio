@@ -24,6 +24,7 @@ import type {
   ImageUpload,
   InstallResponse,
   InstallProgress,
+  BackupProgress,
   SetupState,
   UninstallResponse,
   Issue,
@@ -115,6 +116,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await send(path, init)).json() as Promise<T>
 }
 
+/** POST of a form with the upload measured (XMLHttpRequest); errors as in `send`. */
+function upload<T>(path: string, body: FormData, onUpload?: (sent: number, total: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', path)
+    xhr.responseType = 'json'
+    if (onUpload) xhr.upload.onprogress = (e) => e.lengthComputable && onUpload(e.loaded, e.total)
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response as T)
+      else reject(new ApiError(xhr.status, (xhr.response as { detail?: unknown } | null)?.detail ?? null))
+    }
+    xhr.onerror = () => reject(new ApiError(0, { code: 'backend_unreachable', error: 'network error' }))
+    xhr.send(body)
+  })
+}
+
+/** Where the zip of a finished POST /api/project/backup/start is downloaded. */
+export const BACKUP_FILE_URL = '/api/project/backup/file'
+
 const json = (method: string, body: unknown): RequestInit => ({
   method,
   headers: { 'Content-Type': 'application/json' },
@@ -144,15 +164,20 @@ export const api = {
   machine: () => request<MachineInfo>('/api/machine'),
 
   project: () => request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; changed_leagues: number[] }>('/api/project'),
-  /** Replaces the project with a backup zip (database.json + images + faces). */
-  restoreBackup: (file: File) => {
+  /** Replaces the project with a backup zip (database.json + images + faces). `onUpload(sent, total)` follows the
+   * upload (fetch cannot measure it, so this one uses XMLHttpRequest); the steps after it come from backupProgress. */
+  restoreBackup: (file: File, onUpload?: (sent: number, total: number) => void) => {
     const form = new FormData()
     form.append('file', file)
-    return request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; changed_leagues: number[] }>('/api/project/restore', {
-      method: 'POST',
-      body: form,
-    })
+    return upload<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; changed_leagues: number[] }>(
+      '/api/project/restore',
+      form,
+      onUpload,
+    )
   },
+  /** Starts the backup zip in the background (follow backupProgress, then download backupFileUrl). */
+  startBackup: () => request<{ started: boolean }>('/api/project/backup/start', { method: 'POST' }),
+  backupProgress: () => request<BackupProgress>('/api/project/backup/progress'),
   saveProject: (project: Project) =>
     request<{ project: Project; issues: Issue[]; defaults: Record<string, PlayerDefaults>; untouched: string[]; changed_squads: number[]; changed_leagues: number[]; patch: PatchStatus }>(
       '/api/project',

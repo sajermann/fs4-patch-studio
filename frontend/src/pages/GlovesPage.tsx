@@ -287,7 +287,7 @@ export function GlovesPage() {
       <Pager page={page.page} pages={page.pages} total={page.total} pageSize={list.pageSize} onPage={list.setPage} />
 
       <AlertDialog open={askAll} onOpenChange={setAskAll}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('gloves.selectAllTitle')}</AlertDialogTitle>
             <AlertDialogDescription>{t('gloves.selectAllDescription', { page: pageKeys.length, all: allKeys.length })}</AlertDialogDescription>
@@ -303,7 +303,7 @@ export function GlovesPage() {
       </AlertDialog>
 
       <AlertDialog open={deleting} onOpenChange={setDeleting}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('gloves.deleteTitle', { count: picked.length })}</AlertDialogTitle>
             <AlertDialogDescription asChild>

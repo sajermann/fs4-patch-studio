@@ -274,7 +274,7 @@ def test_player_goes_with_his_face(env):
         path = os.path.join(face_dir, *scanface.FILES[kind].format(4242).split('/'))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb') as f:
-            f.write(b'RX3 ' + kind.encode())
+            f.write(b'RX3l' + kind.encode())
     save(client, {'players': [player(teams=(('t1', 10), (1, 7)), photo=image(client), generic=False,
                                      face={'source_id': 4242, 'pack': 'colgado', 'name': 'Luis Palma',
                                            'credits': 'Colgado', 'credits_url': 'https://colgado.com'},
@@ -297,7 +297,7 @@ def test_player_goes_with_his_face(env):
     assert [lk['team'] for lk in pl['teams']] == ['t1', 1]
     for kind in scanface.REQUIRED:
         with open(os.path.join(face_dir, *scanface.FILES[kind].format(4242).split('/')), 'rb') as f:
-            assert f.read() == b'RX3 ' + kind.encode()
+            assert f.read() == b'RX3l' + kind.encode()
     # the app's zip carries the face options it was saved with (here the ones of a face saved without them)
     assert (pl['face']['hair_mode'], pl['face']['paint_scalp']) == ('standard', True)
 
@@ -378,7 +378,7 @@ def test_a_zip_applied_on_an_entry_page_takes_that_entry_uid(env):
         path = os.path.join(face_dir, *scanface.FILES[kind].format(77).split('/'))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb') as f:
-            f.write(kind.encode())
+            f.write(b'RX3l' + kind.encode())  # a PC RX3 header: what the face reader checks
     save(client, {'players': [player(generic=False, face={'source_id': 77})]})
     data = export(client, 'players', ['p1'])
     found = inspect(client, 'players', data).json()

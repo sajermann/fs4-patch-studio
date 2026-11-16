@@ -316,7 +316,7 @@ export function useJoinTeam() {
 
   const dialog = (
     <Dialog open={!!pending} onOpenChange={(o) => !o && setPending(null)}>
-      <DialogContent>
+      <DialogContent width="md">
         <DialogHeader>
           <DialogTitle>{t('join.title', { team: pending ? teamName(pending.team) : '', max })}</DialogTitle>
           <DialogDescription>{t('join.description', { max, name: pending?.name ?? '' })}</DialogDescription>

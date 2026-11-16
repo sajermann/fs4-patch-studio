@@ -186,7 +186,7 @@ export function NotificationsPage() {
       <Pager page={Math.min(list.page, pages)} pages={pages} total={total} pageSize={list.pageSize} onPage={list.setPage} />
 
       <AlertDialog open={askAll} onOpenChange={setAskAll}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('notifications.selectAllTitle')}</AlertDialogTitle>
             <AlertDialogDescription>{t('notifications.selectAllDescription', { page: pageIds.length, all: total })}</AlertDialogDescription>

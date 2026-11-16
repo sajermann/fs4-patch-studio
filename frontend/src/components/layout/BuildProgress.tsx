@@ -63,7 +63,7 @@ export function BuildProgressDialog({ open }: { open: boolean }) {
 
   return (
     <Dialog open={open}>
-      <DialogContent className="sm:max-w-xl" showCloseButton={false} onEscapeKeyDown={(e) => e.preventDefault()} onInteractOutside={(e) => e.preventDefault()}>
+      <DialogContent width="md" showCloseButton={false} onEscapeKeyDown={(e) => e.preventDefault()} onInteractOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle>{t('build.title')}</DialogTitle>
           <DialogDescription>{t('build.description')}</DialogDescription>

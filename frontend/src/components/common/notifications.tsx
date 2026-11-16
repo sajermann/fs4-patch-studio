@@ -93,10 +93,8 @@ export function DeleteNotificationsDialog({
   )
 }
 
-/** One notification in full (the bell and the notifications page open it); opening it marks it read. */
-/** a bit longer than the dialog's closing animation (duration-100 in ui/dialog.tsx) */
-const CLOSE_ANIMATION_MS = 250
-
+/** One notification in full (the bell and the notifications page open it); opening it marks it read. While it
+ * closes it keeps showing the notification (ui/closing.tsx: every dialog does). */
 export function NotificationDialog({ notification, onClose }: { notification: AppNotification | null; onClose: () => void }) {
   const { t } = useI18n()
   const { draft } = useProject()
@@ -106,15 +104,7 @@ export function NotificationDialog({ notification, onClose }: { notification: Ap
   const [unreadAgain, setUnreadAgain] = useState(false)
   const { mark } = actions
 
-  // the dialog keeps showing the last notification while its closing animation runs (the parent sets null at once)
-  const [kept, setKept] = useState<AppNotification | null>(notification)
-  if (notification && notification !== kept) setKept(notification)
-  useEffect(() => {
-    if (notification) return
-    const timer = setTimeout(() => setKept(null), CLOSE_ANIMATION_MS)
-    return () => clearTimeout(timer)
-  }, [notification])
-  const shown = notification ?? kept
+  const shown = notification
 
   // opening a notification marks it read (once per opening: "mark unread" inside the dialog sticks)
   const openedId = notification?.id
@@ -130,7 +120,7 @@ export function NotificationDialog({ notification, onClose }: { notification: Ap
   return (
     <>
       <Dialog open={!!notification} onOpenChange={(v) => !v && close()}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent width="md">
           {shown && (
             <>
               <DialogHeader>

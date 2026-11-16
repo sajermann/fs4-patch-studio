@@ -41,7 +41,7 @@ function IssuesDialog({ open, onOpenChange, issues }: { open: boolean; onOpenCha
   const sorted = [...issues].sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1))
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent width="lg">
         <DialogHeader>
           <DialogTitle>{t('issues.title')}</DialogTitle>
           <DialogDescription>{t('issues.description')}</DialogDescription>
@@ -314,7 +314,7 @@ export function ProjectActions() {
       </AlertDialog>
 
       <AlertDialog open={installOpen} onOpenChange={(next) => !installing && setInstallOpen(next)}>
-        <AlertDialogContent className="data-[size=default]:sm:max-w-xl">
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('patch.installTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -353,7 +353,7 @@ export function ProjectActions() {
       </AlertDialog>
 
       <AlertDialog open={uninstallOpen} onOpenChange={(next) => !installing && setUninstallOpen(next)}>
-        <AlertDialogContent className="data-[size=default]:sm:max-w-xl">
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('patch.uninstallTitle')}</AlertDialogTitle>
             <AlertDialogDescription>{t('patch.uninstallDescription')}</AlertDialogDescription>

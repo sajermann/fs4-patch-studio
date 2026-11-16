@@ -368,7 +368,7 @@ export function GloveEditPage() {
       </div>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {original ? t('teamEdit.restoreOriginalTitle', { name }) : t('teamEdit.deleteTitle', { name })}
@@ -412,7 +412,7 @@ export function GloveEditPage() {
       </AlertDialog>
 
       <AlertDialog open={takingOff !== null} onOpenChange={(open) => !open && setTakingOff(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {takeOffNames.length === 1

@@ -364,7 +364,7 @@ export function TeamEditPage() {
         </TabsContent>
       </Tabs>
       <Dialog open={copyOpen} onOpenChange={setCopyOpen}>
-        <DialogContent>
+        <DialogContent width="md">
           <DialogHeader>
             <DialogTitle>{t('teamEdit.copyTitle', { name: team.name || t('teamEdit.theTeam') })}</DialogTitle>
             <DialogDescription>{t('teamEdit.copyDescription')}</DialogDescription>

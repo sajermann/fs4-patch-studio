@@ -147,7 +147,7 @@ export function BaseDataDialog({ player, open, onOpenChange }: { player: Player;
   const error = results.error ?? record.error
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent width="lg">
         <DialogHeader>
           <DialogTitle>{t('base.title')}</DialogTitle>
           <DialogDescription>{t('base.description')}</DialogDescription>

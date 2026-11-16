@@ -300,7 +300,7 @@ export function BootsPage() {
       <Pager page={page.page} pages={page.pages} total={page.total} pageSize={list.pageSize} onPage={list.setPage} />
 
       <AlertDialog open={askAll} onOpenChange={setAskAll}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('boots.selectAllTitle')}</AlertDialogTitle>
             <AlertDialogDescription>{t('boots.selectAllDescription', { page: pageKeys.length, all: allKeys.length })}</AlertDialogDescription>
@@ -316,7 +316,7 @@ export function BootsPage() {
       </AlertDialog>
 
       <AlertDialog open={deleting} onOpenChange={setDeleting}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('boots.deleteTitle', { count: picked.length })}</AlertDialogTitle>
             <AlertDialogDescription asChild>

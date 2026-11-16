@@ -12,6 +12,7 @@ from fastapi import FastAPI, File, HTTPException, Path, Query, UploadFile
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -56,6 +57,14 @@ def now_iso():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
 
 
+def remove_quietly(path):
+    """Deletes a temporary file; a file still in use (Windows) is left for the next run to replace."""
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 class AppState:
     """Process-wide state; the catalog is rebuilt only when the original files change."""
 
@@ -70,6 +79,9 @@ class AppState:
         self.build_lock = threading.Lock()
         self.build_progress = {'running': False}  # last/current build, read by GET /api/patch/progress
         self.install_progress = {'running': False}  # last/current install or uninstall (GET /api/patch/install/progress)
+        # last/current backup download or restore (GET /api/project/backup/progress); one at a time
+        self.backup_progress = {'running': False}
+        self.backup_lock = threading.Lock()
         self.build_cancel = threading.Event()  # set by POST /api/patch/build/cancel: the build stops at its next check
         self.notifications = NotificationStore(os.path.join(
             os.path.dirname(os.path.abspath(self.config_path or settings.CONFIG_PATH)), 'notifications.json'))
@@ -399,26 +411,107 @@ def create_app(state=None):
         'not_a_zip': 'O arquivo não é um zip.',
         'no_database': 'O zip não tem o database.json do projeto.',
         'unsafe_path': 'O zip tem caminhos inválidos.',
-        'too_big': 'O zip é grande demais para um backup do projeto.',
+        'no_space': 'Não há espaço livre no disco do projeto para restaurar este backup.',
         'invalid_database': 'O database.json do zip não tem o formato de um projeto.',
     }
 
+    def backup_name():
+        return f'fifa-street-mod-backup-{datetime.date.today().isoformat()}.zip'
+
+    def backup_zip_path():
+        """Where the backup being downloaded is written, beside the project folder (it can be big: never in memory)."""
+        return os.path.abspath(state.store.folder) + '.download.zip'
+
+    def take_backup_lock():
+        if not state.backup_lock.acquire(blocking=False):
+            raise HTTPException(409, {'code': 'backup_busy', 'message': 'Já há um backup em andamento.'})
+
+    def new_backup_progress(action):
+        """state.backup_progress for a new download ('export') or restore: phase, files done/total and the current
+        one, bytes, clock; `ready` = the zip of a download can be fetched; `error` = what failed (code + text)."""
+        prog = state.backup_progress = {'running': True, 'action': action, 'phase': None, 'done': 0, 'total': 0,
+                                        'name': None, 'bytes_done': 0, 'bytes_total': 0, 'started_at': time.time(),
+                                        'finished_at': None, 'ready': False, 'error': None}
+
+        def progress(phase, done=0, total=0, name=None, bytes_done=0, bytes_total=0):
+            prog.update(phase=phase, name=name)
+            if total:
+                prog.update(done=done, total=total, bytes_done=bytes_done, bytes_total=bytes_total)
+        return prog, progress
+
     @app.get('/api/project/backup')
     def project_backup():
-        """Zip of the project folder (database.json + images + faces): the backup the user downloads."""
-        buf = io.BytesIO()
-        state.store.write_backup(buf)
-        name = f'fifa-street-mod-backup-{datetime.date.today().isoformat()}.zip'
-        return Response(buf.getvalue(), media_type='application/zip',
-                        headers={'Content-Disposition': f'attachment; filename="{name}"'})
+        """Zip of the project folder (database.json + images + faces) in one request. The screen uses
+        POST /api/project/backup/start instead, which shows the progress."""
+        take_backup_lock()
+        path = backup_zip_path()
+        try:
+            state.store.write_backup(path)
+        finally:
+            state.backup_lock.release()
+        return FileResponse(path, media_type='application/zip', filename=backup_name(),
+                            background=BackgroundTask(remove_quietly, path))
+
+    @app.post('/api/project/backup/start')
+    def project_backup_start():
+        """Starts writing the backup zip in the background; the screen follows GET /api/project/backup/progress and
+        then downloads GET /api/project/backup/file."""
+        take_backup_lock()
+        prog, progress = new_backup_progress('export')
+        path = backup_zip_path()
+
+        def run():
+            try:
+                remove_quietly(path)
+                state.store.write_backup(path, progress=lambda done, total, name, b, bt:
+                                         progress('zipping', done, total, name, b, bt))
+                prog.update(ready=True)
+            except Exception as e:
+                log.exception('project backup failed')
+                remove_quietly(path)
+                code = 'no_disk_space' if isinstance(e, OSError) and e.errno == errno.ENOSPC else 'internal_error'
+                prog.update(error={'code': code, 'error': f'{type(e).__name__}: {e}'})
+            finally:
+                prog.update(running=False, finished_at=time.time())
+                state.backup_lock.release()
+        threading.Thread(target=run, name='project-backup', daemon=True).start()
+        return {'started': True}
+
+    @app.get('/api/project/backup/progress')
+    def project_backup_progress():
+        """Where the current (or last) backup download or restore is: phase, files done/total, bytes, clock."""
+        prog = dict(state.backup_progress)
+        if prog.get('started_at'):
+            prog['elapsed'] = round((prog['finished_at'] or time.time()) - prog['started_at'], 1)
+        return prog
+
+    @app.get('/api/project/backup/file')
+    def project_backup_file():
+        """The zip written by POST /api/project/backup/start, as a download; removed once sent."""
+        path = backup_zip_path()
+        if not state.backup_progress.get('ready') or not os.path.isfile(path):
+            raise HTTPException(404, {'code': 'backup_not_ready', 'message': 'O backup não está pronto.'})
+        state.backup_progress['ready'] = False
+        return FileResponse(path, media_type='application/zip', filename=backup_name(),
+                            background=BackgroundTask(remove_quietly, path))
 
     @app.post('/api/project/restore')
     def project_restore(file: UploadFile = File(...)):
-        """Replaces the project with a backup zip (GET /api/project/backup)."""
+        """Replaces the project with a backup zip (GET /api/project/backup); its steps go to
+        GET /api/project/backup/progress (the upload itself is measured by the screen)."""
+        take_backup_lock()
+        prog, progress = new_backup_progress('restore')
         try:
-            state.store.restore_backup(file.file)
+            state.store.restore_backup(file.file, progress=progress)
         except BackupError as e:
+            prog.update(error={'code': 'invalid_backup', 'reason': e.code})
             raise HTTPException(400, {'code': 'invalid_backup', 'reason': e.code, 'message': BACKUP_ERROR_TEXT[e.code]})
+        except Exception as e:
+            prog.update(error={'code': 'internal_error', 'error': f'{type(e).__name__}: {e}'})
+            raise
+        finally:
+            prog.update(running=False, finished_at=time.time())
+            state.backup_lock.release()
         return get_project()
 
     @app.post('/api/project/validate')

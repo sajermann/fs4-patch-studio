@@ -732,6 +732,25 @@ export interface InstallProgress {
   elapsed?: number
 }
 
+/** Steps of a backup download ('export') or restore (GET /api/project/backup/progress). 'uploading' is only the
+ * screen's (it measures the upload itself). */
+export type BackupPhase = 'zipping' | 'uploading' | 'checking' | 'extracting' | 'finishing'
+export interface BackupProgress {
+  running: boolean
+  action?: 'export' | 'restore'
+  phase?: BackupPhase | null
+  /** files done / total, the current one and the bytes */
+  done: number
+  total: number
+  name?: string | null
+  bytes_done: number
+  bytes_total: number
+  elapsed?: number
+  /** the zip of a download can be fetched (GET /api/project/backup/file) */
+  ready?: boolean
+  error?: { code: string; reason?: string; error?: string } | null
+}
+
 export type BuildItemKind = 'face' | 'kit' | 'crest' | 'photo' | 'player' | 'team'
 
 /** GET /api/startup: what the backend is doing now (the opening screen). Phases are codes the UI has texts for. */

@@ -410,7 +410,7 @@ export function BootEditPage() {
       </div>
 
       <AlertDialog open={streetBlocked} onOpenChange={setStreetBlocked}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('boots.streetInUseTitle')}</AlertDialogTitle>
             <AlertDialogDescription asChild>
@@ -433,7 +433,7 @@ export function BootEditPage() {
       </AlertDialog>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {original ? t('teamEdit.restoreOriginalTitle', { name }) : t('teamEdit.deleteTitle', { name })}
@@ -477,7 +477,7 @@ export function BootEditPage() {
       </AlertDialog>
 
       <AlertDialog open={takingOff !== null} onOpenChange={(open) => !open && setTakingOff(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {takeOffNames.length === 1

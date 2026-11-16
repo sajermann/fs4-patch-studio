@@ -65,7 +65,7 @@ export function PickerDialog<K extends string | number>({
   const shown = groups.filter((g) => g.items.length > 0)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent width="md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>

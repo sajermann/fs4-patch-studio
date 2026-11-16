@@ -179,7 +179,7 @@ fn main() {
             let popup = handle.clone();
             // hidden until the loading page has painted: no white flash while the webview starts
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("FS4 Patch Studio")
+                .title(format!("FS4 Patch Studio {}", app.package_info().version))
                 .inner_size(1400.0, 900.0)
                 .min_inner_size(1000.0, 650.0)
                 .maximized(true)

@@ -37,7 +37,7 @@ BALLS_DIR = 'balls'  # the pack files of the project's balls (ball-<uid>.rx3, ba
 FONTS_DIR = 'fonts'
 FONT_EXTENSIONS = {'.ttf', '.otf'}
 UPLOAD_PREFIX = 'upload-'  # provisional name of an upload until the project is saved
-BACKUP_MAX_BYTES = 2 * 1024 ** 3  # uncompressed size accepted when restoring a backup zip
+BACKUP_DISK_MARGIN = 200 * 1024 ** 2  # free space left on the project's disk after restoring a backup (no size limit)
 
 
 class ProjectFileError(ValueError):
@@ -495,23 +495,41 @@ class ProjectStore:
             f.write(data)
         return f'{IMAGES_DIR}/{name}'
 
-    def write_backup(self, out):
-        """Zip of the whole project folder (database.json, images/, faces/, boots/, gloves/, balls/, fonts/) into the
-        binary file `out`."""
-        with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
-            if self.exists():
-                z.write(self.path, PROJECT_FILE)
-            for sub in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR, BALLS_DIR, FONTS_DIR):
-                for root, _, files in os.walk(os.path.join(self.folder, sub)):
-                    for name in files:
-                        if not name.endswith('.tmp'):
-                            full = os.path.join(root, name)
-                            z.write(full, os.path.relpath(full, self.folder).replace(os.sep, '/'))
+    def backup_files(self):
+        """(absolute path, name in the zip) of every file the backup takes."""
+        files = [(self.path, PROJECT_FILE)] if self.exists() else []
+        for sub in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR, BALLS_DIR, FONTS_DIR):
+            for root, _, names in os.walk(os.path.join(self.folder, sub)):
+                for name in names:
+                    if not name.endswith('.tmp'):
+                        full = os.path.join(root, name)
+                        files.append((full, os.path.relpath(full, self.folder).replace(os.sep, '/')))
+        return files
 
-    def restore_backup(self, source):
+    def write_backup(self, out, progress=None):
+        """Zip of the whole project folder (database.json, images/, faces/, boots/, gloves/, balls/, fonts/) into the
+        binary file (or path) `out`. progress(done, total, name, bytes_done, bytes_total) before each file and at
+        the end."""
+        files = self.backup_files()
+        sizes = [os.path.getsize(full) for full, _ in files]
+        total, done_bytes = sum(sizes), 0
+        with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
+            for k, ((full, name), size) in enumerate(zip(files, sizes)):
+                if progress:
+                    progress(k, len(files), name, done_bytes, total)
+                z.write(full, name)
+                done_bytes += size
+        if progress:
+            progress(len(files), len(files), None, done_bytes, total)
+
+    def restore_backup(self, source, progress=None):
         """Replaces the project folder with a backup zip (a path or a binary file). The zip may hold the folder's
         content or the folder itself; only database.json (or the old projeto.json), images/ and faces/ are taken.
-        Everything is checked and extracted beside the folder first, so a bad zip leaves the project as it was."""
+        Everything is checked and extracted beside the folder first, so a bad zip leaves the project as it was.
+        progress(phase, done=0, total=0, name=None, bytes_done=0, bytes_total=0): 'checking', 'extracting' (before
+        each file and at the end), 'finishing' (the project opened and saved in the current format)."""
+        progress = progress or (lambda *a, **k: None)
+        progress('checking')
         try:
             z = zipfile.ZipFile(source)
         except (zipfile.BadZipFile, OSError) as e:
@@ -535,8 +553,6 @@ class ProjectStore:
                         (len(parts) > 1 and parts[0] in (IMAGES_DIR, scanface.PROJECT_DIR, BOOTS_DIR, GLOVES_DIR,
                                                          BALLS_DIR, FONTS_DIR)):
                     picked.append((info, rel))
-            if sum(i.file_size for i, _ in picked) > BACKUP_MAX_BYTES:
-                raise BackupError('too_big')
             database = PROJECT_FILE if any(rel == PROJECT_FILE for _, rel in picked) else LEGACY_PROJECT_FILE
             picked = [(i, rel) for i, rel in picked if rel not in (PROJECT_FILE, LEGACY_PROJECT_FILE) or rel == database]
             try:
@@ -544,17 +560,27 @@ class ProjectStore:
             except Exception as e:
                 raise BackupError('invalid_database', str(e))
             folder = os.path.abspath(self.folder)
+            # any size is accepted (a backup the app made always comes back); it only has to fit on the disk, beside
+            # the current project until the swap
+            disk = os.path.dirname(folder)
+            os.makedirs(disk, exist_ok=True)
+            if sum(i.file_size for i, _ in picked) + BACKUP_DISK_MARGIN > shutil.disk_usage(disk).free:
+                raise BackupError('no_space')
             staging, old = folder + '.restore', folder + '.old'
             for leftover in (staging, old):
                 if os.path.isdir(leftover):
                     shutil.rmtree(leftover)
             os.makedirs(staging)
+            total, done_bytes = sum(i.file_size for i, _ in picked), 0
             try:
-                for info, rel in picked:
+                for k, (info, rel) in enumerate(picked):
+                    progress('extracting', k, len(picked), rel, done_bytes, total)
                     target = os.path.join(staging, *rel.split('/'))
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     with z.open(info) as src, open(target, 'wb') as dst:
                         shutil.copyfileobj(src, dst)
+                    done_bytes += info.file_size
+                progress('extracting', len(picked), len(picked), None, done_bytes, total)
             except Exception:
                 shutil.rmtree(staging, ignore_errors=True)
                 raise
@@ -568,6 +594,7 @@ class ProjectStore:
             shutil.rmtree(staging, ignore_errors=True)
             raise
         shutil.rmtree(old, ignore_errors=True)
+        progress('finishing')
         if not self.upgrade():
             self.save(self.load())  # fixed image names, nothing unused left
 

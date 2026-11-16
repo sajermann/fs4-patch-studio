@@ -294,7 +294,7 @@ export function BallsPage() {
       <Pager page={page.page} pages={page.pages} total={page.total} pageSize={list.pageSize} onPage={list.setPage} />
 
       <AlertDialog open={askAll} onOpenChange={setAskAll}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('balls.selectAllTitle')}</AlertDialogTitle>
             <AlertDialogDescription>{t('balls.selectAllDescription', { page: pageKeys.length, all: allKeys.length })}</AlertDialogDescription>
@@ -310,7 +310,7 @@ export function BallsPage() {
       </AlertDialog>
 
       <AlertDialog open={deleting} onOpenChange={setDeleting}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{t('balls.deleteTitle', { count: picked.length })}</AlertDialogTitle>
             <AlertDialogDescription asChild>

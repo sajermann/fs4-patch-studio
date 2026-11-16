@@ -75,8 +75,8 @@ export function SelectAllDialog({ selection }: { selection: ListSelection }) {
   const { t } = useI18n()
   return (
     <AlertDialog open={selection.askAll} onOpenChange={selection.setAskAll}>
-      {/* wider than the default: three buttons with counts do not fit in max-w-sm */}
-      <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-2rem)] data-[size=default]:sm:max-w-lg">
+      {/* three buttons with counts: the medium width (ui/dialog-width.ts) */}
+      <AlertDialogContent width="md">
         <AlertDialogHeader>
           <AlertDialogTitle>{t('share.selectAllTitle')}</AlertDialogTitle>
           <AlertDialogDescription>
@@ -269,11 +269,8 @@ export function ZipImportButton({
         toast.error(t('share.nothing'), { description: problemLines(t, r.problems), classNames: { description: 'whitespace-pre-line' } })
         return
       }
-      const p = { ...r, analysis: analyzeShare(kind, draft, r.items) }
-      const quiet = !p.problems.length && !p.analysis.replaces.size && !p.analysis.missing.size && !p.analysis.waitingPlayers.size
-      setBusy(false)
-      if (quiet) await apply(p)
-      else setPending(p)
+      // always reviewed: the user sees what comes in and confirms (even one new entry)
+      setPending({ ...r, analysis: analyzeShare(kind, draft, r.items) })
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('share.importFailed'))
     } finally {
@@ -297,7 +294,7 @@ export function ZipImportButton({
       <Button variant="outline" disabled={busy} title={hint} onClick={() => input.current?.click()}>
         <FileUp /> {label ?? t('share.import')}
       </Button>
-      <ShareImportDialog kind={kind} pending={pending} selectable onCancel={() => setPending(null)} onConfirm={(p) => void apply(p)} />
+      <ShareImportDialog kind={kind} pending={pending} onCancel={() => setPending(null)} onConfirm={(p) => void apply(p)} />
     </>
   )
 }
@@ -316,7 +313,7 @@ export function ShareImportButton({ kind }: { kind: ShareKind }) {
 }
 
 /** "Upload zip" on an entry's page: the zip's one entry fills this one (lib/share planSingle says when it may):
- * while creating it, right away (it takes the zip's uid); when editing, after the same review as the lists. Saves
+ * after the same review as the lists (while creating it, it takes the zip's uid). Saves
  * after, and opens the entry's own address when it changed (a new uid, or the edit of a game entry).
  * - finish: the entry ready for the project, given the uid it takes (leagues/teams/players: the backend stores its
  *   files under that uid); admit: last touch (boots/gloves/balls: out of the patch when no code is left) */
@@ -386,11 +383,7 @@ export function SingleZipImport({
       }
       const found = analyzeShare(kind, draft, r.items)
       const analysis = { ...found, replaces: new Map(plan.mode === 'edit' ? [[incoming.uid, entry]] : []) }
-      const p = { ...r, analysis, uid: plan.uid, mode: plan.mode }
-      const quiet = plan.mode === 'create' && !p.problems.length && !analysis.missing.size && !analysis.waitingPlayers.size
-      setBusy(false)
-      if (quiet) await apply(p)
-      else setPending(p)
+      setPending({ ...r, analysis, uid: plan.uid, mode: plan.mode }) // always reviewed, as in the lists
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('share.importFailed'))
     } finally {
@@ -485,20 +478,19 @@ function onlyPicked<P extends Pending>(p: P, skipped: Set<string>): P {
   }
 }
 
-/** The review before an import. With `selectable` (the lists' import), every zip entry has a checkbox: the
- * unchecked ones stay out (they are not sent to the backend nor merged). */
+/** The review before an import (every zip import opens it, even for one new entry). Every zip entry has a
+ * checkbox: the unchecked ones stay out (they are not sent to the backend nor merged), and with none checked there is
+ * nothing to import. */
 function ShareImportDialog<P extends Pending>({
   kind,
   pending,
   onCancel,
   onConfirm,
-  selectable = false,
 }: {
   kind: ImportKind
   pending: P | null
   onCancel: () => void
   onConfirm: (p: P) => void
-  selectable?: boolean
 }) {
   const { t } = useI18n()
   const [skipped, setSkipped] = useState<Set<string>>(new Set())
@@ -513,10 +505,10 @@ function ShareImportDialog<P extends Pending>({
   const items = pending?.items ?? []
   const byUid = new Map(items.map((i) => [i.uid, i]))
   const replaces = pending ? [...pending.analysis.replaces] : []
-  const fresh = selectable ? items.filter((i) => !pending!.analysis.replaces.has(i.uid)) : []
+  const fresh = items.filter((i) => !pending!.analysis.replaces.has(i.uid))
   const missing = pending ? [...pending.analysis.missing] : []
   const picked = items.length - skipped.size
-  const isOut = (uid: string) => selectable && skipped.has(uid)
+  const isOut = (uid: string) => skipped.has(uid)
   const toggle = (uid: string) =>
     setSkipped((s) => {
       const next = new Set(s)
@@ -525,26 +517,27 @@ function ShareImportDialog<P extends Pending>({
       return next
     })
   // the whole row toggles too: the checkbox's own click must not reach the row and toggle twice
-  const pick = (uid: string) =>
-    selectable && (
-      <span onClick={(e) => e.stopPropagation()}>
-        <Checkbox className="mt-0.5" checked={!skipped.has(uid)} onCheckedChange={() => toggle(uid)} aria-label={t('share.pickItem')} />
-      </span>
-    )
-  const rowProps = (uid: string) =>
-    selectable ? { onClick: () => toggle(uid), className: `cursor-pointer select-none ${isOut(uid) ? 'opacity-50' : ''}` } : {}
+  const pick = (uid: string) => (
+    <span onClick={(e) => e.stopPropagation()}>
+      <Checkbox className="mt-0.5" checked={!skipped.has(uid)} onCheckedChange={() => toggle(uid)} aria-label={t('share.pickItem')} />
+    </span>
+  )
+  const rowProps = (uid: string) => ({
+    onClick: () => toggle(uid),
+    className: `cursor-pointer select-none ${isOut(uid) ? 'opacity-50' : ''}`,
+  })
   const missingPicked = missing.some(([uid]) => !isOut(uid))
   const linkText = (m: { kind: 'team' | 'league' | 'boot' | 'glove'; ref: string }) => t(`share.missing.${m.kind}` as MessageKey, { ref: m.ref })
   return (
     <Dialog open={!!pending} onOpenChange={(open) => !open && onCancel()}>
       {/* only the lists scroll: the header, the notes under them and the buttons stay in view */}
-      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl">
+      <DialogContent width="lg" className="flex max-h-[85vh] flex-col overflow-hidden">
         <DialogHeader className="shrink-0">
           <DialogTitle>{t('share.dialogTitle', { count: items.length })}</DialogTitle>
-          <DialogDescription>{t(selectable ? 'share.dialogDescriptionPick' : 'share.dialogDescription')}</DialogDescription>
+          <DialogDescription>{t('share.dialogDescriptionPick')}</DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-col gap-4 text-sm">
-          {selectable && items.length > 1 && (
+          {items.length > 1 && (
             <label className="flex w-fit shrink-0 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
               <Checkbox
                 checked={skipped.size === 0 ? true : picked === 0 ? false : 'indeterminate'}
@@ -558,7 +551,7 @@ function ShareImportDialog<P extends Pending>({
               <table className="w-full text-left">
                 <thead className="sticky top-0 z-10 bg-popover text-xs text-muted-foreground">
                   <tr>
-                    {selectable && <th className="w-6 py-1 pr-2" />}
+                    <th className="w-6 py-1 pr-2" />
                     <th className="py-1 pr-3 font-normal">{t('share.colCurrent')}</th>
                     <th className="py-1 font-normal">{t('share.colIncoming')}</th>
                   </tr>
@@ -567,8 +560,8 @@ function ShareImportDialog<P extends Pending>({
                   {replaces.map(([uid, current]) => {
                     const incoming = byUid.get(uid)!
                     return (
-                      <tr key={uid} onClick={rowProps(uid).onClick} className={`border-t align-top ${rowProps(uid).className ?? ''}`}>
-                        {selectable && <td className="py-1.5 pr-2">{pick(uid)}</td>}
+                      <tr key={uid} onClick={rowProps(uid).onClick} className={`border-t align-top ${rowProps(uid).className}`}>
+                        <td className="py-1.5 pr-2">{pick(uid)}</td>
                         <td className="py-1.5 pr-3">
                           <div className="font-medium">{name(current)}</div>
                           <Dates entry={current} />
@@ -588,7 +581,7 @@ function ShareImportDialog<P extends Pending>({
             <Section scroll title={t('share.newTitle', { count: fresh.length })}>
               <ul className="space-y-1">
                 {fresh.map((item) => (
-                  <li key={item.uid} onClick={rowProps(item.uid).onClick} className={`flex items-start gap-2 border-t pt-1.5 ${rowProps(item.uid).className ?? ''}`}>
+                  <li key={item.uid} onClick={rowProps(item.uid).onClick} className={`flex items-start gap-2 border-t pt-1.5 ${rowProps(item.uid).className}`}>
                     {pick(item.uid)}
                     <div>
                       <div className="font-medium">{name(item)}</div>
@@ -632,10 +625,10 @@ function ShareImportDialog<P extends Pending>({
           <Button variant="outline" onClick={onCancel}>
             {t('common.cancel')}
           </Button>
-          <Button disabled={selectable && picked === 0} onClick={() => pending && onConfirm(onlyPicked(pending, skipped))}>
+          <Button disabled={picked === 0} onClick={() => pending && onConfirm(onlyPicked(pending, skipped))}>
             {missingPicked
               ? t('share.confirmIgnoring')
-              : selectable && skipped.size > 0
+              : skipped.size > 0
                 ? t('share.confirmCount', { count: picked })
                 : t('share.confirm')}
           </Button>

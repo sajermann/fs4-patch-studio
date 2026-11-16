@@ -2,8 +2,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Loader2, Pencil, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { toast } from '@/lib/notify'
-import { ApiError, api } from '@/api/client'
-import type { Project } from '@/api/types'
+import { ApiError, BACKUP_FILE_URL, api } from '@/api/client'
+import type { BackupProgress as Progress, Project } from '@/api/types'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { BackupProgress } from '@/components/common/BackupProgress'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
@@ -27,6 +28,19 @@ const refusal = (e: unknown) =>
       : e.message
     : translate('projectJson.saveFailed')
 
+const POLL_MS = 400
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Saves the finished backup zip through the browser's (or the desktop app's) download. */
+function downloadBackup() {
+  const link = document.createElement('a')
+  link.href = BACKUP_FILE_URL
+  link.download = ''
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
 /** The saved project as JSON (the app's database): view and edit in place; backup = zip of the project folder
  * (database.json + images + faces), downloaded or restored. Editing or restoring replaces the saved project, so both
  * ask first; unsaved changes in the editor must be saved or discarded before. */
@@ -39,6 +53,8 @@ export function ProjectJsonCard() {
   const [confirm, setConfirm] = useState<null | 'edit' | { backup: File }>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // the backup download or restore running now, with its progress (shown under the buttons / in the dialog)
+  const [run, setRun] = useState<{ action: 'export' | 'restore'; prog?: Progress } | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const replace = async (project: Project, done: string) => {
@@ -73,10 +89,50 @@ export function ProjectJsonCard() {
     if (project && (await replace(project, t('projectJson.saved')))) setEditing(null)
   }
 
+  /** The zip is written in the background (it can take a while on a big project): follow it, then download it. */
+  const backup = async () => {
+    setRun({ action: 'export' })
+    try {
+      await api.startBackup()
+      let prog: Progress
+      do {
+        await sleep(POLL_MS)
+        prog = await api.backupProgress()
+        setRun({ action: 'export', prog })
+      } while (prog.running)
+      if (prog.error) throw new ApiError(500, prog.error)
+      downloadBackup()
+      toast.success(t('projectJson.backupReady'))
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('backup.failed'))
+    } finally {
+      setRun(null)
+    }
+  }
+
+  /** Upload measured here; once the file is sent, the backend's steps (checking, extracting, opening). The clock
+   * counts from the click. */
   const restore = async (file: File) => {
     setBusy(true)
+    const started = Date.now()
+    const elapsed = () => (Date.now() - started) / 1000
+    let sent = false
+    const uploading = (done: number, total: number): Progress => ({
+      running: true, phase: 'uploading', done: 0, total: 0, bytes_done: done, bytes_total: total, elapsed: elapsed(),
+    })
+    setRun({ action: 'restore', prog: uploading(0, file.size) })
+    const timer = setInterval(() => {
+      if (!sent) return
+      api
+        .backupProgress()
+        .then((prog) => prog.action === 'restore' && prog.running && setRun({ action: 'restore', prog: { ...prog, elapsed: elapsed() } }))
+        .catch(() => {})
+    }, POLL_MS)
     try {
-      await api.restoreBackup(file)
+      await api.restoreBackup(file, (done, total) => {
+        sent = done >= total
+        setRun({ action: 'restore', prog: sent ? { ...uploading(done, total), phase: 'checking', bytes_done: 0, bytes_total: 0 } : uploading(done, total) })
+      })
       await queryClient.invalidateQueries({ queryKey: ['project'] })
       await queryClient.invalidateQueries({ queryKey: ['status'] })
       toast.success(t('projectJson.restored'))
@@ -85,6 +141,8 @@ export function ProjectJsonCard() {
       toast.error(e instanceof ApiError ? e.message : t('projectJson.restoreFailed'))
       return false
     } finally {
+      clearInterval(timer)
+      setRun(null)
       setBusy(false)
     }
   }
@@ -119,12 +177,10 @@ export function ProjectJsonCard() {
               <Button variant="outline" onClick={() => setConfirm('edit')} disabled={!!blocked || !saved} title={blocked}>
                 <Pencil /> {t('projectJson.edit')}
               </Button>
-              <Button variant="outline" asChild>
-                <a href="/api/project/backup" download>
-                  <Download /> {t('projectJson.backup')}
-                </a>
+              <Button variant="outline" onClick={() => void backup()} disabled={!!run}>
+                {run?.action === 'export' ? <Loader2 className="animate-spin" /> : <Download />} {t('projectJson.backup')}
               </Button>
-              <Button variant="outline" onClick={() => fileInput.current?.click()} disabled={!!blocked} title={blocked}>
+              <Button variant="outline" onClick={() => fileInput.current?.click()} disabled={!!blocked || !!run} title={blocked}>
                 <Upload /> {t('projectJson.importBackup')}
               </Button>
               <input
@@ -146,10 +202,11 @@ export function ProjectJsonCard() {
             </>
           )}
         </div>
+        {run?.action === 'export' && <BackupProgress action="export" prog={run.prog} />}
       </CardContent>
 
       <AlertDialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent width="md">
           <AlertDialogHeader>
             <AlertDialogTitle>{confirm === 'edit' ? t('projectJson.editTitle') : t('projectJson.importTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -158,6 +215,7 @@ export function ProjectJsonCard() {
                 : t('projectJson.importWarning', { name: confirm?.backup.name ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {run?.action === 'restore' && <BackupProgress action="restore" prog={run.prog} />}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>{t('common.cancel')}</AlertDialogCancel>
             <Button
